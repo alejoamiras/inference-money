@@ -1,0 +1,77 @@
+name: Setup toolchains
+description: >
+  Bun (+ frozen install) always; Foundry, halmos and the Aztec CLI on request. Every version is read
+  from toolchain.json. Callers check out the repo first.
+
+inputs:
+  foundry:
+    description: Install Foundry at toolchain.json's pin.
+    required: false
+    default: "false"
+  halmos:
+    description: Install halmos at toolchain.json's pin (implies Python).
+    required: false
+    default: "false"
+  aztec:
+    description: Install the Aztec CLI at toolchain.json's `noir` version (compile, TXE).
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Read toolchain.json
+      id: pins
+      shell: bash
+      run: |
+        for key in bun foundry halmos noir; do
+          echo "$key=$(jq -er --arg k "$key" '.[$k]' toolchain.json)" >> "$GITHUB_OUTPUT"
+        done
+
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ steps.pins.outputs.bun }}
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-${{ hashFiles('bun.lock') }}
+        restore-keys: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-
+
+    - shell: bash
+      run: bun install --frozen-lockfile
+
+    # A newer Foundry routes test-contract creation through a cheatcode halmos 0.3.3 lacks: bump both together.
+    - if: inputs.foundry == 'true' || inputs.halmos == 'true'
+      uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+      with:
+        version: v${{ steps.pins.outputs.foundry }}
+
+    - if: inputs.halmos == 'true'
+      shell: bash
+      env:
+        HALMOS: ${{ steps.pins.outputs.halmos }}
+      run: |
+        python3 -m pip install --user "halmos==$HALMOS"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - if: inputs.aztec == 'true'
+      id: cache-aztec
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.aztec/versions/${{ steps.pins.outputs.noir }}
+        key: ${{ runner.os }}-aztec-${{ steps.pins.outputs.noir }}
+
+    - if: inputs.aztec == 'true' && steps.cache-aztec.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
+      run: |
+        export CI=1
+        curl -fsSL "https://install.aztec.network/${AZTEC_VERSION}/install" | VERSION="$AZTEC_VERSION" bash
+
+    - if: inputs.aztec == 'true'
+      shell: bash
+      env:
+        AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
+      run: echo "AZTEC_HOME=$HOME/.aztec/versions/$AZTEC_VERSION" >> "$GITHUB_ENV"

@@ -1,0 +1,75 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
+	"files": {
+		"ignoreUnknown": true,
+		"includes": [
+			"**",
+			"!**/node_modules",
+			"!**/dist",
+			"!**/target",
+			"!contracts/evm/lib",
+			"!contracts/evm/out",
+			"!implementations-plan"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 4,
+		"lineEnding": "lf",
+		"lineWidth": 140
+	},
+	"assist": { "actions": { "source": { "organizeImports": "on" } } },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"style": { "noNonNullAssertion": "off" },
+			"suspicious": { "noExplicitAny": "error" },
+			"complexity": {
+				"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 15 } },
+				"noExcessiveLinesPerFunction": {
+					"level": "error",
+					"options": { "maxLines": 80, "skipBlankLines": true, "skipIifes": false }
+				},
+				"noExcessiveNestedTestSuites": "error"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.test.*", "**/*.spec.*", "**/test/**", "**/e2e/**"],
+			"linter": { "rules": { "complexity": { "noExcessiveLinesPerFunction": "off" } } }
+		},
+		{
+			"includes": ["packages/bridge-core/**", "apps/web/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@aztec/ethereum": "One viem: read L1 through canonical viem (see bridge-core/src/outbox.ts)."
+								},
+								"patterns": [
+									{ "group": ["@aztec/ethereum/*"], "message": "One viem: read L1 through canonical viem." },
+									{ "group": ["@aztec/aztec.js/ethereum"], "message": "One viem: read L1 through canonical viem." }
+								]
+							}
+						}
+					}
+				}
+			}
+		}
+	],
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double",
+			"semicolons": "asNeeded",
+			"trailingCommas": "all",
+			"arrowParentheses": "always"
+		}
+	}
+}

@@ -1,0 +1,24 @@
+{
+	"name": "@inference-money/deployer",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"probe:testnet": "bun src/cli.ts probe testnet",
+		"spike:proof-compat": "bun src/cli.ts spike testnet",
+		"test": "bun test src",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@aztec/aztec.js": "5.2.0",
+		"@aztec/constants": "5.2.0",
+		"@aztec/noir-contracts.js": "5.2.0",
+		"@aztec/stdlib": "5.2.0",
+		"@aztec/wallets": "5.2.0",
+		"viem": "2.56.7"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.2",
+		"typescript": "6.0.3"
+	}
+}
