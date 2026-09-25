@@ -1,0 +1,24 @@
+node_modules
+dist
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# Secrets: only templates are committed.
+.env
+.env.*
+!.env.example
+
+# Per-run local network state and deployments.
+.run-state/
+deployments/local/
+
+# Foundry build output; the committed Noir artifacts live under contracts/aztec/**/target and are NOT ignored.
+contracts/evm/out/
+contracts/evm/cache/
+contracts/evm/broadcast/
+
+# Playwright
+playwright-report/
+test-results/
+.playwright-mcp/
