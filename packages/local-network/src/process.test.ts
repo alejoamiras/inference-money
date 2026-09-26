@@ -1,0 +1,50 @@
+import { afterEach, describe, expect, it } from "bun:test"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { groupState, type Spawned, spawnDetached, stopOwnedGroup } from "./process"
+
+const dir = mkdtempSync(join(homedir(), ".cache", "inference-money-process-test-"))
+const spawned: Spawned[] = []
+afterEach(async () => {
+	for (const p of spawned.splice(0)) await stopOwnedGroup(p, 1_000).catch(() => {})
+})
+
+const membersOf = (pgid: number) =>
+	execFileSync("ps", ["-eo", "pgid="], { encoding: "utf8" })
+		.split("\n")
+		.filter((l) => Number(l.trim()) === pgid).length
+
+describe("owned process groups", () => {
+	it("stops the whole group, grandchildren included, and then reports it gone", async () => {
+		const p = await spawnDetached("pair", "sh", ["-c", "sleep 60 & sleep 60"], { env: process.env, logFile: join(dir, "pair.log") })
+		spawned.push(p)
+		await new Promise((r) => setTimeout(r, 200))
+		expect(groupState(p)).toBe("ours")
+		expect(membersOf(p.pgid)).toBeGreaterThanOrEqual(2)
+
+		expect(await stopOwnedGroup(p, 2_000)).toBe("stopped")
+		expect(membersOf(p.pgid)).toBe(0)
+		expect(groupState(p)).toBe("gone")
+	})
+
+	it("never signals a group whose leader's start time differs from the record", async () => {
+		const p = await spawnDetached("victim", "sleep", ["60"], { env: process.env, logFile: join(dir, "victim.log") })
+		spawned.push(p)
+		const impostor = { ...p, started: "Thu Jan  1 00:00:00 1970" }
+		expect(groupState(impostor)).toBe("reused")
+		expect(await stopOwnedGroup(impostor)).toBe("reused")
+		expect(groupState(p)).toBe("ours")
+	})
+
+	it("rejects a missing binary with its log path, and exposes a quick death through exitCode", async () => {
+		const missing = spawnDetached("gone", join(dir, "no-such-bin"), [], { env: process.env, logFile: join(dir, "gone.log") })
+		await expect(missing).rejects.toThrow(/gone\.log/)
+
+		const quick = await spawnDetached("quick", "sh", ["-c", "exit 3"], { env: process.env, logFile: join(dir, "quick.log") })
+		await new Promise((r) => setTimeout(r, 200))
+		expect(quick.exitCode()).toBe(3)
+		rmSync(dir, { recursive: true, force: true })
+	})
+})

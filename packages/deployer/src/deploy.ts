@@ -1,0 +1,68 @@
+import type { Fr } from "@aztec/aztec.js/fields"
+import type { AztecNode } from "@aztec/aztec.js/node"
+import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { type BridgeManifest, parseManifest } from "@inference-money/bridge-core"
+import { type Address, getAddress, type Hex } from "viem"
+import { deployPortal, deployRouter, initializePortal } from "./deploy-l1"
+import { deployBridgeL2, ensureDeployerAccount, type L2Fees } from "./deploy-l2"
+import type { BridgeEvmArtifacts } from "./evm"
+import type { L1Signer } from "./l1"
+import { ensureStandardContracts } from "./standard"
+
+export interface DeployContext {
+	network: BridgeManifest["network"]
+	l1: L1Signer
+	evm: BridgeEvmArtifacts
+	node: AztecNode
+	nodeUrl: string
+	wallet: EmbeddedWallet
+	usdc: Address
+	permit2: Address
+	/** The L2 owner of proxy and bridge. */
+	deployerSecret: Fr
+	fees: L2Fees
+	sponsoredFpc: Hex | undefined
+	log: (m: string) => void
+}
+
+/**
+ * The one deploy order both networks run: the deployer account and the standard contracts the bridge calls in public
+ * (no-ops where present), then the portal, the three deployer-bound L2 instances and their wiring, then
+ * `portal.initialize` (which needs the bridge address) and the router (which needs an initialized portal). Returns the
+ * manifest; verifying it before it is written is the caller's step.
+ */
+export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
+	const info = await c.node.getNodeInfo()
+	const l1c = info.l1ContractAddresses
+	const registry = getAddress(l1c.registryAddress.toString())
+	const deployer = await ensureDeployerAccount(c.wallet, c.node, c.deployerSecret, c.fees, c.log)
+	await ensureStandardContracts(c.wallet, c.node, { from: deployer, ...(c.fees.tx ? { fee: { paymentMethod: c.fees.tx } } : {}) }, c.log)
+	const portal = await deployPortal(c.l1, c.evm)
+	c.log(`portal ${portal.address}`)
+	const l2 = await deployBridgeL2(c.wallet, deployer, c.fees, portal.address, c.log)
+	await initializePortal(c.l1, c.evm, portal.address, registry, c.usdc, l2.bridge.address)
+	c.log("portal initialized")
+	const router = await deployRouter(c.l1, c.evm, c.permit2, portal.address)
+	c.log(`router ${router.address}`)
+	return parseManifest({
+		network: c.network,
+		l1: {
+			chainId: info.l1ChainId,
+			usdc: c.usdc,
+			permit2: c.permit2,
+			portal: portal.address,
+			router: router.address,
+			registry,
+			inbox: getAddress(l1c.inboxAddress.toString()),
+			outbox: getAddress(l1c.outboxAddress.toString()),
+			deployBlock: Number(router.block),
+		},
+		l2: {
+			nodeVersion: info.nodeVersion,
+			rollupVersion: Number(info.rollupVersion),
+			nodeUrl: c.nodeUrl,
+			...(c.sponsoredFpc ? { sponsoredFpc: c.sponsoredFpc } : {}),
+			...l2,
+		},
+	})
+}

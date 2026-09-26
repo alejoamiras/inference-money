@@ -10,7 +10,8 @@
 			"!**/target",
 			"!contracts/evm/lib",
 			"!contracts/evm/out",
-			"!implementations-plan"
+			"!implementations-plan",
+			"!packages/bridge-core/vendor/*.json"
 		]
 	},
 	"formatter": {
