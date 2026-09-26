@@ -1,0 +1,14 @@
+{
+	"name": "@inference-money/contracts-evm",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"build": "bun scripts/remappings.ts && forge build",
+		"test:evm": "bun scripts/remappings.ts && forge fmt --check && forge test --no-match-contract Fork"
+	},
+	"devDependencies": {
+		"@aztec/l1-artifacts": "5.2.0",
+		"@openzeppelin/contracts": "5.6.1",
+		"forge-std": "github:foundry-rs/forge-std#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b"
+	}
+}

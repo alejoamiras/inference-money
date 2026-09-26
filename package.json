@@ -5,12 +5,13 @@
 	"type": "module",
 	"workspaces": [
 		"apps/*",
-		"packages/*"
+		"packages/*",
+		"contracts/evm"
 	],
 	"scripts": {
-		"lint": "biome check . && sort-package-json --check package.json 'packages/*/package.json' 'apps/*/package.json' && bun run lint:shell",
+		"lint": "biome check . && sort-package-json --check package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json' && bun run lint:shell",
 		"lint:actions": "actionlint",
-		"lint:fix": "biome check --write . && sort-package-json package.json 'packages/*/package.json' 'apps/*/package.json'",
+		"lint:fix": "biome check --write . && sort-package-json package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json'",
 		"lint:shell": "git ls-files -z '*.sh' | xargs -0 -r shellcheck",
 		"prepare": "husky",
 		"probe:testnet": "bun run --cwd packages/deployer probe:testnet",
