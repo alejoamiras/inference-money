@@ -50,7 +50,7 @@ export async function withOwnedTmpDir<T>(fn: () => Promise<T>, root = WALLET_TMP
 	} finally {
 		if (previous === undefined) delete process.env.TMPDIR
 		else process.env.TMPDIR = previous
-		rmSync(dir, { recursive: true, force: true })
 		active = false
+		rmSync(dir, { recursive: true, force: true })
 	}
 }
