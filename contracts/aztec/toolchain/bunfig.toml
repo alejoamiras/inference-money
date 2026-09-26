@@ -1,0 +1,5 @@
+[install]
+# bun reads bunfig.toml from the cwd only, so this standalone project restates the root's 7-day gate.
+minimumReleaseAge = 604800
+# The aztec CLI and the TXE server run under node, which expects npm's flat layout.
+linker = "hoisted"

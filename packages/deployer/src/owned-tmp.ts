@@ -4,6 +4,8 @@ import { join } from "node:path"
 
 export const WALLET_TMP_ROOT = join(homedir(), ".cache", "inference-money", "wallet-tmp")
 
+let active = false
+
 function alive(pid: number): boolean {
 	try {
 		process.kill(pid, 0)
@@ -29,21 +31,26 @@ export function reapDead(root: string): string[] {
  * Runs `fn` with TMPDIR at an owner-only `<root>/<pid>`, removed afterwards. Aztec's "ephemeral" embedded wallet and
  * PXE stores are LMDB files under `os.tmpdir()` holding account secret keys, deleted only on a clean close; this keeps
  * them out of the shared tmp dir, and each run first reaps the directories of runs that died before cleaning up.
+ * TMPDIR is process-global and the dir is per-pid, so one scope at a time per process: an overlapping call throws
+ * before touching the active one's dir or TMPDIR.
  */
 export async function withOwnedTmpDir<T>(fn: () => Promise<T>, root = WALLET_TMP_ROOT): Promise<T> {
-	mkdirSync(root, { recursive: true, mode: 0o700 })
-	chmodSync(root, 0o700)
-	reapDead(root)
+	if (active) throw new Error("withOwnedTmpDir: a scope is already active in this process; run wallets inside it")
+	active = true
 	const dir = join(root, String(process.pid))
-	rmSync(dir, { recursive: true, force: true })
-	mkdirSync(dir, { mode: 0o700 })
 	const previous = process.env.TMPDIR
-	process.env.TMPDIR = dir
 	try {
+		mkdirSync(root, { recursive: true, mode: 0o700 })
+		chmodSync(root, 0o700)
+		reapDead(root)
+		rmSync(dir, { recursive: true, force: true })
+		mkdirSync(dir, { mode: 0o700 })
+		process.env.TMPDIR = dir
 		return await fn()
 	} finally {
 		if (previous === undefined) delete process.env.TMPDIR
 		else process.env.TMPDIR = previous
 		rmSync(dir, { recursive: true, force: true })
+		active = false
 	}
 }

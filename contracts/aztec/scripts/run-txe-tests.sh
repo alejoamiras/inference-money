@@ -6,7 +6,7 @@
 #   - aztec-nargo's test runner does not resolve TXE oracles; @aztec/txe serves them over JSON-RPC.
 #   - The server resolves dependency contracts from the crate's target/ as "<dep_package>-<Contract>.json", and
 #     they must be transpiled artifacts (the committed proxy; aztec-standards' published Token).
-#   - The server's dependency set is the committed ../txe-server project (frozen lockfile), never an ad-hoc install.
+#   - The server's dependency set is the committed ../toolchain lockfile (frozen), never an ad-hoc install.
 #   - Pass criterion: the crate's committed txe-manifest.txt names every test that must pass (at least the crate's
 #     floor), so a dropped `mod test;` or a silently skipped file cannot read as green. nargo alone exits 0 on zero
 #     tests.
@@ -64,50 +64,49 @@ if [ -z "${TXE_PORT:-}" ]; then
   PORT_PINNED=0
   TXE_PORT="$(pick_free_port)"
 fi
-TXE_PKG_DIR="$aztec_root/txe-server"
 TXE_PID=""
+TXE_LOG=""
 
-# Tears down only the server this run started; a caller-pinned server is left alone.
+# Tears down only the server and log this run created; a caller-pinned server is left alone.
+# shellcheck disable=SC2329 # invoked by the trap
 cleanup() {
   [ -n "$TXE_PID" ] && kill "$TXE_PID" 2>/dev/null
+  [ -n "$TXE_LOG" ] && rm -f "$TXE_LOG"
   return 0
 }
 trap cleanup EXIT INT TERM
 
 # TXE answers JSON-RPC only (a bare GET fails even once serving), so probe the TCP socket.
 txe_up() { (exec 3<>"/dev/tcp/127.0.0.1/$TXE_PORT") 2>/dev/null; }
-# A connectable port alone may be another run's server that won the race for it. Our server logs this line only after
-# its own bind succeeds (a failed bind exits), so the line plus a live pid proves the listener is ours.
+# A connectable port alone may be another run's server that won the race for it. Each spawn writes to a log file
+# created fresh for it, and the server prints this line only after its own bind succeeds (a failed bind exits), so the
+# line in that file plus a live pid proves the listener is ours.
 owned_up() {
-  grep -q "TXE listening on port $TXE_PORT\$" "$TXE_PKG_DIR/txe-$TXE_PORT.log" 2>/dev/null &&
-    kill -0 "$TXE_PID" 2>/dev/null && txe_up
+  grep -q "TXE listening on port $TXE_PORT\$" "$TXE_LOG" && kill -0 "$TXE_PID" 2>/dev/null && txe_up
 }
 
 start_server() {
   local attempt
-  if [ ! -f "$TXE_PKG_DIR/node_modules/@aztec/txe/dest/bin/index.js" ]; then
-    (cd "$TXE_PKG_DIR" && bun install --frozen-lockfile >/dev/null) || {
-      echo "txe-server install failed — run: (cd $TXE_PKG_DIR && bun install --frozen-lockfile)" >&2
-      exit 1
-    }
-  fi
   for attempt in 1 2 3; do
+    [ -n "$TXE_LOG" ] && rm -f "$TXE_LOG"
+    TXE_LOG="$(mktemp "$TOOLCHAIN_DIR/txe-$TXE_PORT.log.XXXXXX")"
     echo "starting TXE server on :$TXE_PORT (attempt $attempt)"
     # Node, not bun: the native lmdb binding crashes under bun. `exec` makes $! the server, not a subshell.
-    (cd "$TXE_PKG_DIR" && TXE_PORT="$TXE_PORT" NODE_OPTIONS="--max-old-space-size=8192" \
-      exec node node_modules/@aztec/txe/dest/bin/index.js >"$TXE_PKG_DIR/txe-$TXE_PORT.log" 2>&1) &
+    (cd "$TOOLCHAIN_DIR" && TXE_PORT="$TXE_PORT" NODE_OPTIONS="--max-old-space-size=8192" \
+      exec node node_modules/@aztec/txe/dest/bin/index.js >"$TXE_LOG" 2>&1) &
     TXE_PID=$!
     for _ in $(seq 1 60); do
       owned_up && return 0
       kill -0 "$TXE_PID" 2>/dev/null || break
       sleep 1
     done
-    cleanup
+    kill "$TXE_PID" 2>/dev/null || true
     TXE_PID=""
-    [ "$PORT_PINNED" = 1 ] && break
+    if [ "$PORT_PINNED" = 1 ] || [ "$attempt" = 3 ]; then break; fi
     TXE_PORT="$(pick_free_port)"
   done
-  echo "TXE server never came up on :$TXE_PORT — see $TXE_PKG_DIR/txe-$TXE_PORT.log" >&2
+  echo "TXE server never came up on :$TXE_PORT; the end of its log:" >&2
+  tail -n 20 "$TXE_LOG" >&2
   exit 1
 }
 

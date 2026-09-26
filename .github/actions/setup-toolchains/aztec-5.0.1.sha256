@@ -1,5 +1,0 @@
-# sha256 pins for the Aztec 5.0.1 toolchain on linux-x64, relative to ~/.aztec/versions/5.0.1 (the installer: to its
-# download). nargo = the noir-lang v1.0.0-beta.22 release binary; bb = @aztec/bb.js@5.0.1's amd64-linux build.
-314bce4e4c32b3654d19e79f78965b8074170cbd0a7a31249ba96b5addf7d8ce  install
-d57714db2a94f26409b6ff56555438227ecf0b9d185d220fd072b42465dcd686  internal-bin/nargo
-c3a4a1125d99953694ab6a7f09e368db5525c368b372e63c3eb7bda4cc5697d5  node_modules/@aztec/bb.js/build/amd64-linux/bb

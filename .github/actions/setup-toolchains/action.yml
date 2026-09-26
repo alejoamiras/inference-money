@@ -13,7 +13,7 @@ inputs:
     required: false
     default: "false"
   aztec:
-    description: Install the Aztec CLI at toolchain.json's `noir` version (compile, TXE).
+    description: Node, the pinned nargo release and contracts/aztec/toolchain (compile, TXE).
     required: false
     default: "false"
 
@@ -24,7 +24,7 @@ runs:
       id: pins
       shell: bash
       run: |
-        for key in bun foundry halmos noir node; do
+        for key in bun foundry halmos nargo node; do
           echo "$key=$(jq -er --arg k "$key" '.[$k]' toolchain.json)" >> "$GITHUB_OUTPUT"
         done
 
@@ -35,7 +35,7 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.bun/install/cache
-        key: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-${{ hashFiles('bun.lock') }}
+        key: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-${{ hashFiles('bun.lock', 'contracts/aztec/toolchain/bun.lock') }}
         restore-keys: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-
 
     - shell: bash
@@ -56,39 +56,31 @@ runs:
         pipx install "halmos==$HALMOS"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-    # The Aztec installer exits unless node meets its manifest minimum; the TXE server runs on the same node.
+    # The aztec CLI and the TXE server run on node.
     - if: inputs.aztec == 'true'
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ steps.pins.outputs.node }}
 
-    # A compiler that lies can make `compile.sh --check` agree with any committed artifact, so the installer is checked
-    # before it runs and the binaries the gates trust (nargo, bb) after every install or cache restore. A version bump
-    # without a matching aztec-<version>.sha256 fails here.
+    # No aztec-up installer: it runs unpinned remote scripts (noirup, foundryup) and an unlocked npm install. The JS
+    # toolchain (aztec CLI, bb, TXE) comes from contracts/aztec/toolchain's frozen lockfile; nargo is the noir-lang
+    # release, checked against its pin before extraction. A compiler that lies can make `compile.sh --check` agree with
+    # any committed artifact, so a `nargo` bump without a matching nargo-<version>.sha256 fails here.
     - if: inputs.aztec == 'true'
-      id: cache-aztec
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ~/.aztec/versions/${{ steps.pins.outputs.noir }}
-        key: ${{ runner.os }}-aztec-${{ steps.pins.outputs.noir }}-${{ hashFiles('.github/actions/setup-toolchains/aztec-*.sha256') }}
-
-    - if: inputs.aztec == 'true' && steps.cache-aztec.outputs.cache-hit != 'true'
       shell: bash
       env:
-        AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
-        PINS: ${{ github.action_path }}/aztec-${{ steps.pins.outputs.noir }}.sha256
+        NARGO_VERSION: ${{ steps.pins.outputs.nargo }}
+        PINS: ${{ github.action_path }}/nargo-${{ steps.pins.outputs.nargo }}.sha256
       run: |
-        dir="$RUNNER_TEMP/aztec-installer"
+        dir="$RUNNER_TEMP/nargo"
+        asset=nargo-x86_64-unknown-linux-gnu.tar.gz
         mkdir -p "$dir"
-        curl -fsSL "https://install.aztec-labs.com/${AZTEC_VERSION}/install" -o "$dir/install"
-        (cd "$dir" && grep '  install$' "$PINS" | sha256sum -c -)
-        CI=1 VERSION="$AZTEC_VERSION" bash "$dir/install"
+        curl -fsSL "https://github.com/noir-lang/noir/releases/download/v${NARGO_VERSION}/$asset" -o "$dir/$asset"
+        (cd "$dir" && grep -v '^#' "$PINS" | sha256sum -c -)
+        tar -xzf "$dir/$asset" -C "$dir" nargo
+        echo "NARGO=$dir/nargo" >> "$GITHUB_ENV"
 
     - if: inputs.aztec == 'true'
       shell: bash
-      env:
-        AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
-        PINS: ${{ github.action_path }}/aztec-${{ steps.pins.outputs.noir }}.sha256
-      run: |
-        (cd "$HOME/.aztec/versions/$AZTEC_VERSION" && grep -vE '^#|  install$' "$PINS" | sha256sum -c -)
-        echo "AZTEC_HOME=$HOME/.aztec/versions/$AZTEC_VERSION" >> "$GITHUB_ENV"
+      working-directory: contracts/aztec/toolchain
+      run: bun install --frozen-lockfile

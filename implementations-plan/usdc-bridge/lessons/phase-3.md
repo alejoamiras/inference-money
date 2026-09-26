@@ -18,7 +18,7 @@ Status: **green 2026-09-26** (gate evidence below).
 - `noir-deps.sh`: pinned table of the 5 git deps (3 transitive) from a clean-cache probe; fetch → verify (HEAD == pin, clean tree). `--verify --exact` also fails on any unpinned cache entry.
 - `compile.sh --check`: compares against the **HEAD** artifacts (`git show`), restores the working tree.
 - `artifact-identity.ts` + test: the `claim_public` rename keeps the class id equal and fails `compare` (exit 1), the path `--check` takes.
-- `run-txe-tests.sh`: `--crate token_bridge|keystone`, a committed `txe-server/` (frozen lockfile), a per-run port, owned-pid teardown, the manifest gate.
+- `run-txe-tests.sh`: `--crate token_bridge|keystone`, a committed `toolchain/` lockfile (was `txe-server/`; see round 2), a per-run port, owned-pid teardown, the manifest gate.
 - 14 new TXE tests, plus the relayer's private and public balance asserted 0 in `claim_private_via_relayer_mints_to_recipient`.
 - CI `noir` job; `docs/assurance-map.md`.
 
@@ -58,3 +58,19 @@ No theft path found (moderate confidence). 10 findings, all verified against the
 | F10 | Nit | Narration comments in TokenPortal; a false "relayer-submittable" claim on private exits; `[F-x]`/F-001/Phase labels; history in the contract headers. | **Accepted.** All removed or tightened. Class id + ABI re-verified equal to V1 after the header edits. |
 
 "Any ERC20" reserve inference: agreed it is too strong. Exact deltas protect only the portal's own transfers, not rebases or issuer-side balance changes. No code claims otherwise.
+
+Gate after the fixes (`70a7664`): Phase 3 gate `GATE3_EXIT=0` (class ids == V1, TXE 48/48 + 8/8, 15 mutants), EVM gate, fork 8/8, lint/typecheck/test/actionlint.
+
+### Round 2 — same session, resumed with the `70a7664` diff
+
+Codex: "two new findings in the fixes; no new contract-level flaw identified", plus pushback on the F7 residual. All verified against the code before acting:
+
+| # | Sev | Finding | Verdict |
+|---|---|---|---|
+| F11 | M | `withOwnedTmpDir` always uses `<root>/<pid>` and wipes it on entry, so a nested or concurrent call in one process deletes the active scope's wallet stores and restores TMPDIR out of order. | **Accepted.** A module-level guard rejects an overlapping scope before touching the dir or TMPDIR (TMPDIR is process-global, so one scope per process is the real constraint). The regression writes a store inside a scope, asserts the nested call throws and the store survives. |
+| F12 | L | The TXE readiness log was named by port only, so a stale or concurrent run's `TXE listening` line could satisfy `owned_up`. | **Accepted.** Each spawn logs to a fresh `mktemp` file, removed at teardown; a failed start prints the log's tail instead of a path. **Rejected:** a dedicated regression. The file is created empty for that spawn alone, so there is no remaining association logic left to test. |
+| F7 (pushback) | M | The installer's unlocked npm tree still runs in CI. | **Accepted, and wider than claimed.** The installer also runs `noirup` from its `main` branch and `foundryup` via `curl \| bash`. CI no longer runs the installer: `contracts/aztec/toolchain` (renamed from `txe-server/`) locks `@aztec/aztec@5.0.1`, which carries the aztec CLI, `@aztec/bb.js` and `@aztec/txe`. nargo is the noir-lang release tarball, sha256-pinned (equal to GitHub's recorded asset digest) and checked before extraction. `toolchain.sh` also asserts the nargo in use reports `toolchain.json`'s new `nargo` pin, locally as well. |
+
+Found while fixing F7: **bun reads `bunfig.toml` from the cwd only**. A nested standalone project (the old `txe-server/`) ignored the root's 7-day `minimumReleaseAge`. Probe: a subproject installed hoisted despite the root's `linker = "isolated"`, and went isolated once given its own bunfig. So the old TXE lock was resolved without the gate. `toolchain/bunfig.toml` restates it, and the lock was re-resolved under it. The locked `bb` binary hashes to the old pin.
+
+Gate after the fixes: the Phase 3 gate on the local toolchain `GATE3_EXIT=0`; the CI path simulated locally (release tarball checked against the pin, extracted, `NARGO` set, frozen toolchain install) `compile.sh --check` + TXE 48/48 + 8/8, `GATE3_CI_EXIT=0`; a write-mode `compile.sh` leaves both committed artifacts byte-identical; lint, typecheck, actionlint and deployer 11/11 green.

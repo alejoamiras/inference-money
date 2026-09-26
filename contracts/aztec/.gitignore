@@ -3,5 +3,5 @@
 !token_bridge/target/token_bridge_contract-TokenBridge.json
 !token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json
 */txe-run.log
-txe-server/node_modules/
-txe-server/*.log
+toolchain/node_modules/
+toolchain/txe-*.log.*

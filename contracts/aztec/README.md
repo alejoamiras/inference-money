@@ -14,7 +14,8 @@ to deploy.
 
 ## Commands
 
-Install the toolchain once with `aztec-up install 5.0.1`.
+nargo comes from `aztec-up install 5.0.1` (the scripts check it is `toolchain.json`'s `nargo`). The aztec CLI, bb and
+the TXE server come from `toolchain/`, a committed lockfile installed with `--frozen-lockfile` on first use.
 
 ```sh
 bash scripts/noir-deps.sh            # fetch + verify every Noir git dependency against its pinned commit
