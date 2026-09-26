@@ -35,6 +35,24 @@
         "typescript": "6.0.3",
       },
     },
+    "packages/bridge-core": {
+      "name": "@inference-money/bridge-core",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aztec-foundation/aztec-standards": "5.0.1",
+        "@aztec/aztec.js": "5.2.0",
+        "@aztec/constants": "5.2.0",
+        "@aztec/foundation": "5.2.0",
+        "@aztec/stdlib": "5.2.0",
+        "viem": "2.56.7",
+        "zod": "4.6.5",
+      },
+      "devDependencies": {
+        "@aztec/l1-artifacts": "5.2.0",
+        "@types/bun": "1.4.2",
+        "typescript": "6.0.3",
+      },
+    },
     "packages/deployer": {
       "name": "@inference-money/deployer",
       "version": "0.0.0",
@@ -242,6 +260,8 @@
     "@hapi/bourne": ["@hapi/bourne@3.0.0", "", {}, "sha512-Waj1cwPXJDucOib4a3bAISsKJVb15MKi9IvmTI/7ssVEm6sywXGjVJDhl6/umt1pK1ZS7PacXU3A1PmFKHEZ2w=="],
 
     "@harperfast/extended-iterable": ["@harperfast/extended-iterable@1.0.3", "", {}, "sha512-sSAYhQca3rDWtQUHSAPeO7axFIUJOI6hn1gjRC5APVE1a90tuyT8f5WIgRsFhhWA7htNkju2veB9eWL6YHi/Lw=="],
+
+    "@inference-money/bridge-core": ["@inference-money/bridge-core@workspace:packages/bridge-core"],
 
     "@inference-money/contracts-aztec": ["@inference-money/contracts-aztec@workspace:contracts/aztec"],
 

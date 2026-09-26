@@ -6,7 +6,7 @@ Every workflow defaults to `permissions: contents: read`, pins actions by commit
 |---|---|---|
 | `actionlint.yml` | PRs touching `.github/**` or shell scripts | actionlint + shellcheck |
 | `contracts.yml` → `_contracts.yml` | PRs touching `contracts/**`, toolchain pins, the lockfile or these workflows | `evm`: forge fmt/lint/unit/fuzz/invariant, gas snapshot, strict halmos. `noir`: pinned-dep fetch + verify from an empty `~/nargo`, `compile.sh --check`, manifest-gated TXE (token_bridge + keystone), sole-consumer guard, `--exact` (nothing unpinned fetched), clean tree |
-
+| `bridge-core.yml` | PRs touching `packages/bridge-core/**`, `contracts/evm/**`, the committed L2 artifacts, toolchain pins, the lockfile or this workflow | biome, typecheck, unit tests; the test script runs `forge build` first, so the ABI pins compare against fresh forge output and are never skipped |
 | `deployer.yml` | PRs touching `packages/deployer/**`, toolchain pins, the lockfile or this workflow | biome, typecheck, unit tests |
 | `audit.yml` | PRs touching a `bun.lock` or `package.json` | `bun audit` over the workspace and `contracts/aztec/toolchain` lockfiles; advisory (not required), findings in the step summary |
 
