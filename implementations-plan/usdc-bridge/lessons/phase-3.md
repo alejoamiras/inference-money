@@ -85,3 +85,7 @@ Codex: "One new Low-severity bug and one comment correction. High confidence." N
 | F14 | Nit | `toolchain/bunfig.toml` gave the wrong reason for the hoisted linker. | **Accepted.** The reason is that `run-txe-tests.sh` launches the transitive `@aztec/txe` from the root `node_modules`. |
 
 **Round cap.** The plan stops the loop at 3 rounds only when findings are still material. Severity fell every round (4 M → 1 M + 1 L → 1 L + 1 Nit), and F13 is a fail-closed robustness bug in a helper no value path uses yet, so both were fixed and one short confirmation pass on the fix diff closes the loop.
+
+### Confirmation pass — same session, resumed with the `b73505b` diff
+
+Codex: "**No new material findings.** Both fixes are correct (high confidence)." The Arc 1 loop has converged.
