@@ -82,7 +82,7 @@ contract Permit2DepositRouterTest is RouterFixture {
         assertEq(usdc.balanceOf(user), 1_000e6, "nothing moved");
     }
 
-    /// [F-B] Tokens donated to the router are never spent and never absorbed: the deposit is exact regardless.
+    /// Tokens donated to the router are never spent and never absorbed: the deposit is exact regardless.
     function test_donationIsNeitherSpentNorAbsorbed() public {
         usdc.mint(address(router), 500e6);
         _deposit(100e6, false);
@@ -91,7 +91,7 @@ contract Permit2DepositRouterTest is RouterFixture {
         _assertRouterClean(500e6);
     }
 
-    /// [F-E] A token that delivers less than signed is refused at the pull, before the portal sees a wei.
+    /// A token that delivers less than signed is refused at the pull, before the portal sees a wei.
     function test_feeOnTransferRefusedAtThePull() public {
         FeeOnTransferERC20 tax = new FeeOnTransferERC20(1_000);
         _deployStack(tax);
@@ -115,7 +115,7 @@ contract Permit2DepositRouterTest is RouterFixture {
         assertEq(usdc.balanceOf(user), 1_000e6, "nothing left the user");
     }
 
-    /// [F-L] A hostile token re-entering `deposit` from its transfer hook is refused; the outer deposit is exact.
+    /// A hostile token re-entering `deposit` from its transfer hook is refused; the outer deposit is exact.
     function test_reentryFromTokenHookRefused() public {
         HookERC20 hook = new HookERC20();
         _deployStack(hook);

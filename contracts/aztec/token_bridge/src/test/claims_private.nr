@@ -116,3 +116,18 @@ unconstrained fn claim_private_zero_amount_rejected() {
     let recipient = env.create_contract_account();
     env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, 0, 7, 0));
 }
+
+/// A private deposit is unreachable through claim_public, even with its derived secret in hand: the public content
+/// hash commits to (to, amount), the private one to amount alone.
+#[test(should_fail_with = "Tried to consume nonexistent L1-to-L2 message")]
+unconstrained fn claim_public_cannot_redeem_a_private_deposit() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let recipient = env.create_contract_account();
+    let attacker = env.create_light_account();
+    let amount: u128 = 500_000;
+    let salt = 77;
+
+    let leaf = send_mint_to_private_message(env, recipient, amount, salt, bridge);
+    let secret = derive_claim_secret(salt, recipient);
+    env.call_public(attacker, TokenBridge::at(bridge).claim_public(attacker, amount, secret, leaf));
+}

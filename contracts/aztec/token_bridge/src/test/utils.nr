@@ -1,8 +1,5 @@
-// TXE harness for the TokenBridge: deploys the production trio (TokenMinterProxy + standards
-// Token + TokenBridge), wires proxy→token/bridge exactly like the deployer, and exposes
-// helpers for sending L1→L2 mint messages through the SAME content-hash lib the L1 portal uses
-// (token_portal_content_hash_lib) — so a drift between test messages and claim expectations is
-// impossible by construction.
+// Deploys and wires the production trio (proxy, standards Token, bridge) as the deployer does. Test messages are hashed
+// with the same token_portal_content_hash_lib the claims use, so they cannot drift from what the bridge expects.
 
 use crate::TokenBridge;
 use aztec::{

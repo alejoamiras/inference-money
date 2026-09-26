@@ -1,0 +1,37 @@
+name: Dependency audit
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '**/bun.lock'
+      - '**/package.json'
+      - 'bunfig.toml'
+      - '.github/workflows/audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: bun audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchains
+      # Advisory: every current finding is transitive through the exact-pinned @aztec/* stack, which is bumped only as a
+      # whole (toolchain.json). The step summary keeps them visible on every dependency PR.
+      - name: Audit the workspace and the TXE server lockfiles
+        continue-on-error: true
+        run: |
+          status=0
+          for dir in . contracts/aztec/txe-server; do
+            {
+              echo "### bun audit: \`$dir\`"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            (cd "$dir" && bun audit) >>"$GITHUB_STEP_SUMMARY" 2>&1 || status=1
+            echo '```' >>"$GITHUB_STEP_SUMMARY"
+          done
+          exit "$status"

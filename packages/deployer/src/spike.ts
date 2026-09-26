@@ -5,6 +5,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { bridgeFeeJuice } from "./fee-juice"
 import type { NetworkPins } from "./networks"
+import { withOwnedTmpDir } from "./owned-tmp"
 import type { TestnetSecrets } from "./secrets"
 
 export interface SpikeResult {
@@ -17,10 +18,20 @@ export interface SpikeResult {
 
 /**
  * Deploys a throwaway Schnorr account with real client proofs, paying with Fee Juice bridged from L1 and
- * claimed in the same tx. The Aztec key is random, in memory, never logged or persisted, and controls
- * nothing of value; the L1 key only mints the testnet fee asset and bridges it.
+ * claimed in the same tx. The Aztec key is random and never logged; the wallet's key stores live only in an
+ * owner-only temp dir removed afterwards, and it controls nothing of value. The L1 key only mints the testnet fee
+ * asset and bridges it.
  */
 export async function proofCompatSpike(
+	pins: NetworkPins,
+	secrets: Pick<TestnetSecrets, "l1PrivateKey">,
+	l1RpcUrl: string,
+	log: (msg: string) => void,
+): Promise<SpikeResult> {
+	return withOwnedTmpDir(() => deployThrowawayAccount(pins, secrets, l1RpcUrl, log))
+}
+
+async function deployThrowawayAccount(
 	pins: NetworkPins,
 	secrets: Pick<TestnetSecrets, "l1PrivateKey">,
 	l1RpcUrl: string,

@@ -20,7 +20,7 @@ if [ "${1:-}" = "--crate" ]; then
   shift 2
 fi
 case "$crate" in
-  token_bridge) floor=47 ;;
+  token_bridge) floor=48 ;;
   keystone) floor=8 ;;
   *)
     echo "usage: $0 [--crate token_bridge|keystone] [nargo flags...] [-- test names...]" >&2
@@ -76,6 +76,12 @@ trap cleanup EXIT INT TERM
 
 # TXE answers JSON-RPC only (a bare GET fails even once serving), so probe the TCP socket.
 txe_up() { (exec 3<>"/dev/tcp/127.0.0.1/$TXE_PORT") 2>/dev/null; }
+# A connectable port alone may be another run's server that won the race for it. Our server logs this line only after
+# its own bind succeeds (a failed bind exits), so the line plus a live pid proves the listener is ours.
+owned_up() {
+  grep -q "TXE listening on port $TXE_PORT\$" "$TXE_PKG_DIR/txe-$TXE_PORT.log" 2>/dev/null &&
+    kill -0 "$TXE_PID" 2>/dev/null && txe_up
+}
 
 start_server() {
   local attempt
@@ -92,11 +98,10 @@ start_server() {
       exec node node_modules/@aztec/txe/dest/bin/index.js >"$TXE_PKG_DIR/txe-$TXE_PORT.log" 2>&1) &
     TXE_PID=$!
     for _ in $(seq 1 60); do
-      txe_up && break
+      owned_up && return 0
       kill -0 "$TXE_PID" 2>/dev/null || break
       sleep 1
     done
-    txe_up && kill -0 "$TXE_PID" 2>/dev/null && return 0
     cleanup
     TXE_PID=""
     [ "$PORT_PINNED" = 1 ] && break

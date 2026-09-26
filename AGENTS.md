@@ -35,11 +35,11 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment sta
 ## Rules
 
 - **One source of truth for versions:** `toolchain.json` (Aztec node/JS/Noir, Foundry, halmos, solc, Bun). `@aztec/*` npm packages are pinned exactly to `aztecJs`. Never bump one without the others it couples to.
-- **Secrets:** testnet keys live only in `.env.testnet` (git-ignored, mode 0600), are read in-process, and are never printed, logged, passed on argv, or written anywhere else. No agent generates operational keys.
+- **Secrets:** testnet keys live only in `.env.testnet` (git-ignored, mode 0600), are read in-process, and are never printed, logged, passed on argv, or written anywhere else, except that Aztec wallet/PXE stores (LMDB temp files even when "ephemeral") must run inside `withOwnedTmpDir` (deployer). No agent generates operational keys.
 - **Complexity budgets:** cognitive complexity ≤ 15 everywhere; ≤ 80 non-blank lines per production function. Never suppress complexity rules in new code.
 - **Comments** say what the code can't (invariants, external gotchas, non-obvious whys); never narrate, never reference plans or reviews.
 - **Solidity deps come from npm** (`@openzeppelin/contracts`, `@aztec/l1-artifacts`) and forge-std from a pinned GitHub commit (the npm `forge-std` is an unofficial repackage). `foundry.toml` remaps through `contracts/evm/node_modules` with relative targets so bytecode metadata reproduces across machines. Foundry and halmos move together: a newer Foundry breaks halmos 0.3.3.
-- **Formal canaries:** every halmos proof has a forge canary running its body against a one-rule-deleted mutant (`test/mocks/Mutants.sol`). A new proof needs its mutant, and its name in `scripts/halmos-gate.sh`.
+- **Formal canaries:** every halmos `check_` delegates to a public `prove*` body, and a forge canary runs that body against a one-rule-deleted mutant (`test/mocks/Mutants.sol`) and requires it to fail on that rule's assertion (`ProofCanary`). A new proof needs its mutant, its canary, and its (contract, name) pair in `scripts/halmos-gate.sh`.
 - **Noir artifacts are committed and must equal their source:** rebuild only through `contracts/aztec/scripts/compile.sh` (a bare `nargo compile` writes an untranspiled artifact), and run `compile.sh --check` before committing a `.nr` change. A new Noir git dependency, direct or transitive, goes into `noir-deps.sh`'s pinned table or CI's `--exact` step fails.
 - **TXE manifests:** every new Noir test gets its name in the crate's `txe-manifest.txt`; `run-txe-tests.sh` fails on a listed test that did not pass or a count under the crate's floor.
 - **One viem:** bridge-core and web read L1 through canonical `viem`; `@aztec/ethereum` is banned there (biome `noRestrictedImports`).

@@ -43,7 +43,7 @@ unconstrained fn exit_to_l1_public_burns_caller_balance() {
     assert_eq(env.view_public(Token::at(token).balance_of_public(user)), minted - exit_amount);
 }
 
-/// Private exit: burns from the user's private notes; relayer-submittable like claims.
+/// Private exit: the caller's private notes burn by exactly the exited amount.
 #[test]
 unconstrained fn exit_to_l1_private_burns_private_balance() {
     let (mut env, _admin, _proxy, token, bridge) = utils::setup();

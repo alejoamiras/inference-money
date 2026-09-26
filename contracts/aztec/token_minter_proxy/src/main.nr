@@ -1,10 +1,8 @@
 use aztec::macros::aztec;
 
-// Immutable single-minter. The proxy authorizes EXACTLY ONE minter (the bridge), fixed
-// once at bootstrap via the owner-gated, single-shot `set_bridge` (a `PublicImmutable` can only be
-// initialized once). There is no `set_minter` and no owner mint power, so after `set_token` +
-// `set_bridge` the owner has zero standing authority: a compromised owner key can neither mint nor
-// add a minter. Mint/burn assert the caller is the bridge.
+// The token's only minter, forwarding mint/burn for exactly one caller: the bridge, fixed by the owner's single-shot
+// `set_bridge` (a `PublicImmutable`). There is no other minter setter and no owner mint power, so once wired the owner
+// key has no standing authority: compromising it can neither mint nor add a minter.
 #[aztec]
 pub contract TokenMinterProxy {
     use aztec::{
