@@ -56,3 +56,11 @@ Codex listed two Medium findings, both reproduced. Everything else from round 2 
 | R3-2 | M | Teardown finished when the pipes drained. A descendant ignoring SIGTERM with no pipe survived, and cancellation never escalated if the child ignored the signal. | **Accepted.** `reapGroup` sends SIGTERM, polls the group's liveness (`kill(-pgid, 0)`), and sends SIGKILL after 5 s. It runs on SIGINT/SIGTERM and after the child exits. The pipes then get a bounded wait and are destroyed. Unit test: a `trap '' TERM; exec sleep` descendant with ignored stdio is dead when the wrapper returns. |
 
 **Round cap.** The plan stops at 3 rounds only when findings stay material. Severity and count fell every round (6 H + 7 M + 1 L → 1 H + 7 M → 2 M), and both round-3 fixes are narrow. As in Arc 1, both were fixed and one short confirmation pass closes the loop; anything material in it is surfaced, not fixed in a fifth pass.
+
+### Confirmation pass — same session, resumed with the `bde58c4` diff
+
+Codex: "No new material findings." The Arc 2 loop has converged. Integration run 7 on the final Arc 2 code (`0beccc70-it-631040`): 16 pass, 0 fail, 63 expect(), 486 s.
+
+## Arc 3 before Phase 7
+
+Arc 3 (web) is branched from the converged Arc 2 head while Phase 7 waits for funding. When the testnet run happens, its commit (`deployments/testnet.json` plus any fix it forces) lands on `usdc-bridge-core`, and `usdc-bridge-web` is rebased onto it locally; both branches are unpublished until Delivery. Any code change the run forces reopens the Arc 2 codex loop for that diff.
