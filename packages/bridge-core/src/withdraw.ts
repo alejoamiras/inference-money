@@ -10,30 +10,23 @@ import {
 	type TransactionReceipt,
 } from "viem"
 import { OUTBOX_ABI, TOKEN_PORTAL_ABI } from "./abi"
-import type { ExitNode, ExitTicket } from "./exit"
+import { type ExitNode, type ExitTicket, expectedExitMessage } from "./exit"
 import { awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
 import { assertSigningContext } from "./network"
 import type { OutboxReader } from "./outbox"
 import { type L1Ctx, type StageSink, sendChain, signerOf } from "./types"
 
-export interface ExitId {
-	messageHash: Hex
-	l2TxHash: string
-	messageIndexInTx: number
-}
-
-/** The Outbox membership proof `TokenPortal.withdraw` takes. */
+/**
+ * The Outbox membership proof `TokenPortal.withdraw` takes. Only one {@link buildWithdrawProof} returned is accepted,
+ * and only for the exit it was built for: the Outbox checks a leaf's consumed bit before its membership, so a proof of
+ * another, already-withdrawn leaf would read as this exit withdrawn.
+ */
 export interface OutboxProof {
-	/**
-	 * The exit it proves. The Outbox checks a leaf's consumed bit before its membership, so a proof of another,
-	 * already-withdrawn leaf would otherwise read as this exit withdrawn.
-	 */
-	exit: ExitId
-	epoch: bigint
-	numCheckpointsInEpoch: bigint
-	leafIndex: bigint
-	path: Hex[]
+	readonly epoch: bigint
+	readonly numCheckpointsInEpoch: bigint
+	readonly leafIndex: bigint
+	readonly path: readonly Hex[]
 }
 
 /** This occurrence was already withdrawn on L1 (other identical occurrences in the tx are unaffected). */
@@ -65,14 +58,9 @@ const STALE_PROOF_REVERTS = new Set([
 type Sleep = (ms: number) => Promise<void>
 const realSleep: Sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms))
 
-const exitIdOf = (t: ExitTicket): ExitId => ({
-	messageHash: t.messageHash.toLowerCase() as Hex,
-	l2TxHash: t.l2TxHash.toString(),
-	messageIndexInTx: t.messageIndexInTx,
-})
-
-const sameExit = (a: ExitId, b: ExitId) =>
-	a.messageHash.toLowerCase() === b.messageHash.toLowerCase() && a.l2TxHash === b.l2TxHash && a.messageIndexInTx === b.messageIndexInTx
+/** Each built proof, frozen, mapped to the exit it proves; a copy or a hand-made proof is in no entry. */
+const provenExit = new WeakMap<OutboxProof, string>()
+const exitKey = (t: ExitTicket) => `${t.messageHash.toLowerCase()}:${t.l2TxHash.toString()}:${t.messageIndexInTx}`
 
 /**
  * The proof for the ticket's message, or "pending" while the Outbox holds no root covering it yet. A root mismatch
@@ -90,13 +78,14 @@ export async function buildWithdrawProof(
 		try {
 			const w = await computeL2ToL1MembershipWitness(node, outbox, message, t.l2TxHash, t.messageIndexInTx)
 			if (!w) return "pending"
-			return {
-				exit: exitIdOf(t),
+			const proof: OutboxProof = Object.freeze({
 				epoch: BigInt(w.epochNumber),
 				numCheckpointsInEpoch: BigInt(w.numCheckpointsInEpoch),
 				leafIndex: w.leafIndex,
-				path: w.siblingPath.toBufferArray().map((b) => bytesToHex(b)),
-			}
+				path: Object.freeze(w.siblingPath.toBufferArray().map((b) => bytesToHex(b))),
+			})
+			provenExit.set(proof, exitKey(t))
+			return proof
 		} catch (e) {
 			if (!(e instanceof Error && ROOT_MISMATCH.test(e.message))) throw e
 			lastError = e
@@ -143,7 +132,7 @@ function revertName(e: unknown): string | undefined {
  * Only the Outbox's own event for this leaf proves the withdrawal: viem follows a replaced tx to its replacement's
  * receipt, a cancellation included, and a successful self-transfer consumes nothing.
  */
-function assertConsumedIn(receipt: TransactionReceipt, p: OutboxProof, m: BridgeManifest): Hex {
+function assertConsumedIn(receipt: TransactionReceipt, t: ExitTicket, p: OutboxProof, m: BridgeManifest): Hex {
 	const leafId = 2n ** BigInt(p.path.length) + p.leafIndex
 	const events = parseEventLogs({
 		abi: OUTBOX_ABI,
@@ -151,8 +140,7 @@ function assertConsumedIn(receipt: TransactionReceipt, p: OutboxProof, m: Bridge
 		logs: receipt.logs.filter((l) => isAddressEqual(l.address, m.l1.outbox)),
 	})
 	const hit = events.some(
-		({ args }) =>
-			args.messageHash.toLowerCase() === p.exit.messageHash.toLowerCase() && args.epoch === p.epoch && args.leafId === leafId,
+		({ args }) => args.messageHash.toLowerCase() === t.messageHash.toLowerCase() && args.epoch === p.epoch && args.leafId === leafId,
 	)
 	if (!hit) {
 		throw new Error(
@@ -166,15 +154,23 @@ function assertConsumedIn(receipt: TransactionReceipt, p: OutboxProof, m: Bridge
  * Simulates, then sends `TokenPortal.withdraw`; the recipient is fixed by the message, so any account may submit it.
  * Returns the hash of the transaction that mined the withdrawal, which differs from the sent one after a speed-up.
  */
+/** The proof was built for this exit, and the exit's message is the one its recipient and amount produce. */
+async function assertProofFor(t: ExitTicket, p: OutboxProof, m: BridgeManifest): Promise<void> {
+	if (provenExit.get(p) !== exitKey(t)) throw new Error("This proof was not built for this withdrawal.")
+	const message = await expectedExitMessage(t.recipient, t.amount, m)
+	if (message.toString() !== t.messageHash.toLowerCase())
+		throw new Error("The withdrawal's recipient or amount does not match its message.")
+}
+
 export async function withdrawOnL1(t: ExitTicket, p: OutboxProof, l1: L1Ctx, m: BridgeManifest): Promise<Hex> {
-	if (!sameExit(p.exit, exitIdOf(t))) throw new Error("This proof is for a different withdrawal.")
+	await assertProofFor(t, p, m)
 	const expected = { l1Account: l1.account }
 	await assertSigningContext(l1, null, m, expected)
 	const call = {
 		address: m.l1.portal,
 		abi: TOKEN_PORTAL_ABI,
 		functionName: "withdraw",
-		args: [t.recipient, t.amount, false, p.epoch, p.numCheckpointsInEpoch, p.leafIndex, p.path],
+		args: [t.recipient, t.amount, false, p.epoch, p.numCheckpointsInEpoch, p.leafIndex, [...p.path]],
 		account: signerOf(l1),
 	} as const
 	try {
@@ -187,7 +183,7 @@ export async function withdrawOnL1(t: ExitTicket, p: OutboxProof, l1: L1Ctx, m: 
 	}
 	await assertSigningContext(l1, null, m, expected)
 	const hash = await l1.walletClient.writeContract({ ...call, chain: sendChain(l1, m.l1.chainId) })
-	return assertConsumedIn(await awaitL1Receipt(l1.publicClient, hash), p, m)
+	return assertConsumedIn(await awaitL1Receipt(l1.publicClient, hash), t, p, m)
 }
 
 /** Waits for the proof and withdraws, rebuilding a proof the Outbox rejects as stale at most {@link MAX_PROOF_REBUILDS} times. */

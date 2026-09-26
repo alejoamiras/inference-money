@@ -41,7 +41,7 @@ describe("port registry", () => {
 		expect(readFileSync(path, "utf8")).toContain(`| 10012 | inference-money-net-anvil | live | /w | ${DEAD_PID} |`)
 	})
 
-	it("waits out a live holder however old its lock, breaks only a dead holder's, and leaves no temp file", async () => {
+	it("waits out a live holder however old its lock, never breaks a dead holder's, and leaves no temp file", async () => {
 		const lock = `${path}.lock`
 		const hold = (owner: string) => {
 			writeFileSync(lock, owner, { flag: "wx" })
@@ -55,9 +55,10 @@ describe("port registry", () => {
 		await waiting
 		expect(registeredPorts(path).has(10_020)).toBe(true)
 
-		hold(`${DEAD_PID} Thu Jan  1 00:00:00 1970`)
-		await claim("x", { anvil: 10_021 })
 		expect(readdirSync(dir)).toEqual(["ports.md"])
+		hold(`${DEAD_PID} Thu Jan  1 00:00:00 1970`)
+		await expect(claim("x", { anvil: 10_021 })).rejects.toThrow(`held by pid ${DEAD_PID}, which is no longer running`)
+		expect(readdirSync(dir).sort()).toEqual(["ports.md", "ports.md.lock"])
 	})
 
 	it("gives concurrent runs disjoint port sets", async () => {

@@ -58,23 +58,29 @@ export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proces
 	return Object.fromEntries(Object.entries(env).filter(([k]) => !SECRET_NAME.test(k)))
 }
 
-/** Parts of an RPC URL long enough to be a provider's API key or credential. */
-function urlCredentials(url: string): string[] {
+/**
+ * An RPC URL as libraries may print it: as given, normalized, and without its userinfo (viem strips it). Plus its
+ * credential parts: the userinfo, the path + query (where providers put API keys, however short), and any segment or
+ * query value long enough to be a key by itself.
+ */
+function urlForms(url: string): string[] {
+	let u: URL
 	try {
-		const u = new URL(url)
-		return [...u.pathname.split("/"), ...u.searchParams.values(), u.username, u.password].filter((p) => p.length >= 16)
+		u = new URL(url)
 	} catch {
-		return []
+		return [url]
 	}
+	const bare = `${u.protocol}//${u.host}${u.pathname}${u.search}`
+	const tail = `${u.pathname}${u.search}`
+	const userinfo = [u.username, u.password, `${u.username}:${u.password}`].filter((p) => p.length >= 3)
+	const parts = [...u.pathname.split("/"), ...u.searchParams.values()].filter((p) => p.length >= 8)
+	return [url, u.href, bare, bare.replace(/\/$/, ""), ...(tail.length > 1 ? [tail] : []), ...userinfo, ...parts]
 }
 
-/**
- * Every form a secret takes in text, longest first, lowercased: keys with and without 0x, and RPC URLs whole and by
- * their credential-length parts.
- */
+/** Every form a secret takes in text, longest first, lowercased: keys with and without 0x, and every URL form. */
 export function secretNeedles(s: Partial<TestnetSecrets>, env: NodeJS.ProcessEnv = process.env): string[] {
 	const keys = [s.l1PrivateKey, s.aztecSecretKey].flatMap((k) => (k ? [k, k.slice(2)] : []))
-	const urls = [s.sepoliaRpcUrl, env.SEPOLIA_RPC_URL].flatMap((u) => (u ? [u, ...urlCredentials(u)] : []))
+	const urls = [s.sepoliaRpcUrl, env.SEPOLIA_RPC_URL].flatMap((u) => (u ? urlForms(u) : []))
 	return [...new Set([...keys, ...urls].map((n) => n.toLowerCase()))].sort((a, b) => b.length - a.length)
 }
 

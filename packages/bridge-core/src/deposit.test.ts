@@ -8,6 +8,7 @@ import {
 	getAddress,
 	type Hex,
 	type Log,
+	numberToHex,
 	type PublicClient,
 	pad,
 	parseEventLogs,
@@ -61,10 +62,14 @@ function depositLog(d: DepositDraft, o: { address?: Address; blockNumber?: bigin
 	}
 }
 
+const blockHash = (n: bigint) => pad(numberToHex(n), { size: 32 })
+
 /** An L1 whose finalized block, tip, receipts and logs the test sets; counts every send. */
 function chain() {
 	const s = {
 		finalized: { number: 100n, timestamp: NOW },
+		/** What a switched provider reports for the finalized block's hash. */
+		finalizedHashOverride: undefined as Hex | undefined,
 		latest: 150n,
 		receipts: new Map<Hex, { status: "success" | "reverted"; logs: Log[] }>(),
 		logs: [] as Log[],
@@ -87,7 +92,10 @@ function chain() {
 	}
 	const publicClient = {
 		getChainId: async () => s.readerChainId,
-		getBlock: async () => s.finalized,
+		getBlock: async (q: { blockNumber?: bigint }) =>
+			q.blockNumber === undefined
+				? { ...s.finalized, hash: s.finalizedHashOverride ?? blockHash(s.finalized.number) }
+				: { number: q.blockNumber, hash: blockHash(q.blockNumber) },
 		getBlockNumber: async () => s.latest,
 		getTransactionReceipt: receipt,
 		waitForTransactionReceipt: receipt,
@@ -164,7 +172,7 @@ describe("submitDeposit", () => {
 		const { s, l1 } = chain()
 		const d = await draft()
 		expect(await submitDeposit(d, l1, M, LIVE)).toBe(TX)
-		expect(d.submission).toEqual({ account: ACCOUNT, chainId: M.l1.chainId, fromBlock: 100n })
+		expect(d.submission).toEqual({ account: ACCOUNT, chainId: M.l1.chainId, fromBlock: 100n, fromBlockHash: blockHash(100n) })
 		expect(d.l1TxHash).toBe(TX)
 		expect(s.sentOnChain).toBe(M.l1.chainId)
 		await expect(submitDeposit(d, l1, M, LIVE)).rejects.toThrow("already sent")
@@ -327,6 +335,16 @@ describe("reconcileDeposit", () => {
 		const otherRouter = { ...M, l1: { ...M.l1, router: getAddress(a(0xcc)) } }
 		await expect(reconcileDeposit(d, l1, otherRouter)).rejects.toBeInstanceOf(NetworkMismatchError)
 		expect(await reconcileDeposit(d, l1, M)).toBe("not-deposited")
+	})
+
+	it("never trusts a scan boundary another chain reported while the signature was pending", async () => {
+		const { s, l1 } = chain()
+		const d = await draft()
+		s.finalizedHashOverride = pad("0xbad", { size: 32 })
+		await submitDeposit(d, l1, M, LIVE)
+		s.finalizedHashOverride = undefined
+		s.finalized = { number: 140n, timestamp: d.typedData.message.deadline + 1n }
+		await expect(reconcileDeposit(d, l1, M)).rejects.toBeInstanceOf(NetworkMismatchError)
 	})
 
 	it("a draft never submitted is not-deposited without touching the chain", async () => {

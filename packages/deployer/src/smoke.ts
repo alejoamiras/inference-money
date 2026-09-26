@@ -89,13 +89,27 @@ export function assertSmokeComplete(state: SmokeState): void {
 	}
 }
 
+/**
+ * The stored state when it is this bridge's. Another deployment's is dropped only when none of its exits await
+ * withdrawal: those tickets are the only record of how to finish them.
+ */
+export function adoptState(stored: Partial<SmokeState> | undefined, bridge: string): SmokeState {
+	if (stored?.bridge === bridge && stored.exits) return stored as SmokeState
+	const pending = stored?.exits ? pendingExits(stored as SmokeState) : []
+	if (pending.length > 0) {
+		throw new Error(
+			`${SMOKE_STATE} holds a pending ${pending.join(" and ")} exit of bridge ${stored?.bridge}; finish it or move the file aside`,
+		)
+	}
+	return { bridge, exits: {} }
+}
+
 function readState(bridge: string, log: (m: string) => void): SmokeState {
-	const fresh = { bridge, exits: {} }
-	if (!existsSync(SMOKE_STATE)) return fresh
-	const stored = JSON.parse(readFileSync(SMOKE_STATE, "utf8")) as Partial<SmokeState>
-	if (stored.bridge === bridge && stored.exits) return stored as SmokeState
-	log(`discarding smoke state for another deployment (${stored.bridge ?? "unbound"})`)
-	return fresh
+	const stored = existsSync(SMOKE_STATE) ? (JSON.parse(readFileSync(SMOKE_STATE, "utf8")) as Partial<SmokeState>) : undefined
+	const state = adoptState(stored, bridge)
+	if (stored && state.exits !== stored.exits)
+		log(`discarding completed smoke state of another deployment (${stored.bridge ?? "unbound"})`)
+	return state
 }
 
 function writeState(s: SmokeState): void {

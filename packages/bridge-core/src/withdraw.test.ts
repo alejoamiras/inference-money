@@ -127,7 +127,6 @@ describe("buildWithdrawProof", () => {
 		const truth = e.truth(0)
 		const proof = (await buildWithdrawProof(ticket, e.node, e.outbox)) as OutboxProof
 		expect(proof).toEqual({
-			exit: { messageHash: ticket.messageHash, l2TxHash: ticket.l2TxHash.toString(), messageIndexInTx: 0 },
 			epoch: BigInt(e.EPOCH),
 			numCheckpointsInEpoch: 1n,
 			leafIndex: truth.leafIndex,
@@ -168,33 +167,30 @@ describe("waitWithdrawable", () => {
 })
 
 describe("withdrawOnL1", () => {
-	const proofFor = (t: ExitTicket): OutboxProof => ({
-		exit: { messageHash: t.messageHash, l2TxHash: t.l2TxHash.toString(), messageIndexInTx: t.messageIndexInTx },
-		epoch: 5n,
-		numCheckpointsInEpoch: 1n,
-		leafIndex: 2n,
-		path: [pad("0x1")],
-	})
+	const proven = async () => {
+		const { e, ticket } = setup()
+		return { ticket, proof: (await buildWithdrawProof(ticket, e.node, e.outbox)) as OutboxProof }
+	}
 
 	it("sends the 7-argument portal withdraw on the manifest's chain once the simulation passes", async () => {
-		const { ticket } = setup()
+		const { ticket, proof } = await proven()
 		const { s, ctx } = l1()
-		expect(await withdrawOnL1(ticket, proofFor(ticket), ctx, M)).toBe(TX)
+		expect(await withdrawOnL1(ticket, proof, ctx, M)).toBe(TX)
 		expect(s.writes).toEqual([
 			expect.objectContaining({
 				address: M.l1.portal,
 				functionName: "withdraw",
-				args: [RECIPIENT, AMOUNT, false, 5n, 1n, 2n, [pad("0x1")]],
+				args: [RECIPIENT, AMOUNT, false, proof.epoch, proof.numCheckpointsInEpoch, proof.leafIndex, [...proof.path]],
 				chain: expect.objectContaining({ id: M.l1.chainId }),
 			}),
 		])
 	})
 
 	it("returns the mined hash only when the receipt holds the Outbox's event for this leaf", async () => {
-		const { ticket } = setup()
+		const { ticket, proof } = await proven()
 		const sped = l1()
 		sped.s.minedHash = pad("0x5bed", { size: 32 })
-		expect(await withdrawOnL1(ticket, proofFor(ticket), sped.ctx, M)).toBe(sped.s.minedHash)
+		expect(await withdrawOnL1(ticket, proof, sped.ctx, M)).toBe(sped.s.minedHash)
 		const msg = ticket.messageHash
 		for (const minedLogs of [
 			() => [],
@@ -203,15 +199,18 @@ describe("withdrawOnL1", () => {
 		]) {
 			const cancelled = l1()
 			cancelled.s.minedLogs = minedLogs
-			await expect(withdrawOnL1(ticket, proofFor(ticket), cancelled.ctx, M)).rejects.toThrow("without this withdrawal")
+			await expect(withdrawOnL1(ticket, proof, cancelled.ctx, M)).rejects.toThrow("without this withdrawal")
 		}
 	})
 
-	it("refuses a proof built for another exit before touching L1", async () => {
-		const { ticket } = setup()
+	it("refuses, before touching L1, a proof not built for this exit and an exit whose payout fields lost their message", async () => {
+		const { ticket, proof } = await proven()
 		const { s, ctx } = l1()
-		const other = { ...proofFor(ticket), exit: { ...proofFor(ticket).exit, messageIndexInTx: 1 } }
-		await expect(withdrawOnL1(ticket, other, ctx, M)).rejects.toThrow("different withdrawal")
+		const otherOccurrence = { ...ticket, messageIndexInTx: 1 }
+		await expect(withdrawOnL1(otherOccurrence, proof, ctx, M)).rejects.toThrow("not built for this withdrawal")
+		await expect(withdrawOnL1(ticket, { ...proof, leafIndex: 3n }, ctx, M)).rejects.toThrow("not built for this withdrawal")
+		const redirected = { ...ticket, recipient: getAddress(a(0xe2)) }
+		await expect(withdrawOnL1(redirected, proof, ctx, M)).rejects.toThrow("does not match its message")
 		expect(s.simulated).toBe(0)
 	})
 
@@ -219,16 +218,16 @@ describe("withdrawOnL1", () => {
 		["Outbox__AlreadyNullified", AlreadyWithdrawnError],
 		["MerkleLib__InvalidRoot", StaleProofError],
 	] as const)("maps a %s simulation revert without sending", async (name, type) => {
-		const { ticket } = setup()
+		const { ticket, proof } = await proven()
 		const { s, ctx } = l1([revert(name)])
-		await expect(withdrawOnL1(ticket, proofFor(ticket), ctx, M)).rejects.toBeInstanceOf(type)
+		await expect(withdrawOnL1(ticket, proof, ctx, M)).rejects.toBeInstanceOf(type)
 		expect(s.writes).toHaveLength(0)
 	})
 
 	it("refuses a wallet on the wrong chain before simulating", async () => {
-		const { ticket } = setup()
+		const { ticket, proof } = await proven()
 		const { s, ctx } = l1([], 1)
-		await expect(withdrawOnL1(ticket, proofFor(ticket), ctx, M)).rejects.toBeInstanceOf(NetworkMismatchError)
+		await expect(withdrawOnL1(ticket, proof, ctx, M)).rejects.toBeInstanceOf(NetworkMismatchError)
 		expect(s.simulated).toBe(0)
 	})
 })

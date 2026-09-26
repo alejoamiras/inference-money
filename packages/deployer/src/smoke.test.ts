@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { assertSmokeComplete, pendingExits, type SmokeState } from "./smoke"
+import { adoptState, assertSmokeComplete, pendingExits, type SmokeState } from "./smoke"
 
 const exit = (o: { verified?: boolean; withdrawn?: boolean } = {}) => ({
 	tx: "0x01",
@@ -24,5 +24,14 @@ describe("smoke state", () => {
 		expect(() => assertSmokeComplete(unverified)).toThrow("private exit did not complete")
 		unverified.exits.private = exit({ withdrawn: true })
 		expect(() => assertSmokeComplete(unverified)).not.toThrow()
+	})
+
+	it("keeps another deployment's pending exits instead of discarding their only record", () => {
+		const old: SmokeState = { bridge: "0xold", exits: { public: exit({ withdrawn: true }), private: exit() } }
+		expect(() => adoptState(old, "0xnew")).toThrow("pending private exit of bridge 0xold")
+		old.exits.private = exit({ withdrawn: true })
+		expect(adoptState(old, "0xnew")).toEqual({ bridge: "0xnew", exits: {} })
+		expect(adoptState(old, "0xold")).toBe(old as SmokeState)
+		expect(adoptState(undefined, "0xnew")).toEqual({ bridge: "0xnew", exits: {} })
 	})
 })

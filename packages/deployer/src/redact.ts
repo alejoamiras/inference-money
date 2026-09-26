@@ -38,7 +38,9 @@ function pipeRedacted(from: Readable, to: Writable, needles: string[]): Promise<
 
 /**
  * Runs `argv` under this runtime with stdout and stderr redacted line by line. Dependency loggers write to the fds
- * directly, so only a pipe catches everything; the child reads its secrets itself, never from argv or env.
+ * directly, so only a pipe catches everything; the child reads its secrets itself, never from argv or env. The child
+ * leads its own process group, signalled whole and reaped once the child exits: a surviving descendant (a prover, a
+ * build) would keep running and hold the pipes open.
  */
 export async function runRedacted(
 	argv: string[],
@@ -46,14 +48,28 @@ export async function runRedacted(
 	out: Writable = process.stdout,
 	err: Writable = process.stderr,
 ): Promise<number> {
-	const child = spawn(process.execPath, argv, { env: { ...process.env, [REDACTED_CHILD]: "1" }, stdio: ["inherit", "pipe", "pipe"] })
-	const forward = (sig: NodeJS.Signals) => child.kill(sig)
-	process.on("SIGINT", forward).on("SIGTERM", forward)
-	const piped = Promise.all([pipeRedacted(child.stdout, out, needles), pipeRedacted(child.stderr, err, needles)])
-	const code = await new Promise<number>((done) => child.on("close", (c) => done(c ?? 1)))
-	await piped
-	process.off("SIGINT", forward).off("SIGTERM", forward)
-	return code
+	const env = { ...process.env, [REDACTED_CHILD]: "1" }
+	const child = spawn(process.execPath, argv, { env, stdio: ["ignore", "pipe", "pipe"], detached: true })
+	const group = (sig: NodeJS.Signals) => {
+		try {
+			if (child.pid !== undefined) process.kill(-child.pid, sig)
+		} catch {}
+	}
+	process.on("SIGINT", group).on("SIGTERM", group)
+	try {
+		const piped = Promise.all([pipeRedacted(child.stdout, out, needles), pipeRedacted(child.stderr, err, needles)])
+		const code = await new Promise<number>((done, fail) => child.once("exit", (c) => done(c ?? 1)).once("error", fail))
+		group("SIGTERM")
+		const drained = await Promise.race([piped.then(() => true), new Promise<false>((r) => setTimeout(() => r(false), 5_000))])
+		if (!drained) group("SIGKILL")
+		await piped
+		return code
+	} catch (e) {
+		group("SIGKILL")
+		throw e
+	} finally {
+		process.off("SIGINT", group).off("SIGTERM", group)
+	}
 }
 
 /** An error and its causes, one line each: the CLI's only error output. */

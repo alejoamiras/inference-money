@@ -1,4 +1,4 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { processStart } from "./process"
@@ -7,11 +7,10 @@ import { processStart } from "./process"
 export const HOST_REGISTRY = join(homedir(), ".agents", "ports.md")
 
 /**
- * The lock the host's other tooling already takes: `<registry>.lock`, created exclusively. Theirs may be empty and they
- * break any lock after 15 s; ours names its holder, so a live one is never broken here, and an unnamed one only after
- * this long.
+ * The lock the host's other tooling already takes: `<registry>.lock`, created exclusively (theirs may be empty, and they
+ * break any lock after 15 s). Ours names its holder. Nothing here ever breaks a lock: two waiters reclaiming the same
+ * stale lock could both enter, so a dead holder's lock is reported for removal instead.
  */
-const ANONYMOUS_LOCK_STALE_MS = 120_000
 const HEADER = [
 	"# Ports registry — who is RUNNING what, where (atomic-locked)",
 	"",
@@ -29,16 +28,10 @@ const readLock = (lock: string): string | undefined => {
 	}
 }
 
-/** Dead only when the named pid no longer runs with the start time it wrote. */
-function holderDead(lock: string, owner: string): boolean {
+/** Dead only when a named pid no longer runs with the start time it wrote; an unnamed holder is never judged. */
+function holderDead(owner: string): boolean {
 	const [pid, ...start] = owner.split(" ")
-	if (!pid || !/^\d+$/.test(pid)) {
-		try {
-			return Date.now() - statSync(lock).mtimeMs > ANONYMOUS_LOCK_STALE_MS
-		} catch {
-			return false
-		}
-	}
+	if (!pid || !/^\d+$/.test(pid)) return false
 	try {
 		return processStart(Number(pid)) !== start.join(" ")
 	} catch {
@@ -46,7 +39,7 @@ function holderDead(lock: string, owner: string): boolean {
 	}
 }
 
-/** `link` publishes the lock with its holder already written, so no one ever sees it unnamed. */
+/** `link` publishes the lock with its holder already written, so no one ever sees ours unnamed. */
 function tryLock(lock: string, me: string): boolean {
 	const tmp = `${lock}.${process.pid}.tmp`
 	writeFileSync(tmp, me, { mode: 0o600 })
@@ -55,8 +48,9 @@ function tryLock(lock: string, me: string): boolean {
 		return true
 	} catch {
 		const owner = readLock(lock)
-		// Re-read just before removing: only the dead holder's lock is broken, never one taken since.
-		if (owner !== undefined && holderDead(lock, owner) && readLock(lock) === owner) rmSync(lock, { force: true })
+		if (owner !== undefined && holderDead(owner)) {
+			throw new Error(`${lock} is held by pid ${owner.split(" ")[0]}, which is no longer running; remove that file and retry`)
+		}
 		return false
 	} finally {
 		rmSync(tmp, { force: true })
