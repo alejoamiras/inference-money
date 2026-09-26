@@ -45,3 +45,14 @@ Codex: "Material findings remain—high confidence". 8 findings, each verified a
 | R2-8 | M | A fresh run for a new deployment overwrote an older deployment's pending exit tickets. | **Accepted.** `adoptState` refuses, naming the file and the pending exit; only a fully withdrawn state of another bridge is discarded. |
 
 Gate after the fixes: lint, typecheck and unit tests green (bridge-core 114, deployer 26, local-network 13). Integration run 6 (`0beccc70-it-614741`): 16 pass, 0 fail, 63 expect(), 465 s, clean teardown, no lock or registry rows left.
+
+### Round 3 — same session, resumed with the `1e18181` diff
+
+Codex listed two Medium findings, both reproduced. Everything else from round 2 held.
+
+| # | Sev | Finding | Verdict and fix |
+|---|---|---|---|
+| R3-1 | M | `buildWithdrawProof` recorded `exitKey(t)` after its await. A caller changing `messageIndexInTx` mid-build got occurrence 0's proof trusted for occurrence 1, which surfaced as `AlreadyWithdrawnError`. | **Accepted.** The ticket's fields and key are read once, before the first await. `withdrawOnL1` copies the ticket on entry, so what is checked is what is sent. Unit test: the ticket changes while its proof builds, and the proof stays bound to the original occurrence. The `withdrawOnL1` doc comment, stranded above `assertProofFor` by the round-2 edit, was moved back. |
+| R3-2 | M | Teardown finished when the pipes drained. A descendant ignoring SIGTERM with no pipe survived, and cancellation never escalated if the child ignored the signal. | **Accepted.** `reapGroup` sends SIGTERM, polls the group's liveness (`kill(-pgid, 0)`), and sends SIGKILL after 5 s. It runs on SIGINT/SIGTERM and after the child exits. The pipes then get a bounded wait and are destroyed. Unit test: a `trap '' TERM; exec sleep` descendant with ignored stdio is dead when the wrapper returns. |
+
+**Round cap.** The plan stops at 3 rounds only when findings stay material. Severity and count fell every round (6 H + 7 M + 1 L → 1 H + 7 M → 2 M), and both round-3 fixes are narrow. As in Arc 1, both were fixed and one short confirmation pass closes the loop; anything material in it is surfaced, not fixed in a fifth pass.

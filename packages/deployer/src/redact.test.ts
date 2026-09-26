@@ -49,6 +49,15 @@ describe("output redaction", () => {
 		expect(() => process.kill(grandchild, 0)).toThrow()
 	})
 
+	it("kills a descendant that ignores SIGTERM and holds no pipe, before returning", async () => {
+		const [out, err] = [sink(), sink()]
+		const script = `const g = require("node:child_process").spawn("sh", ["-c", "trap '' TERM; exec sleep 31"], { stdio: "ignore" }); console.log(g.pid); setTimeout(() => process.exit(0), 100)`
+		expect(await runRedacted(["-e", script], [], out.stream, err.stream)).toBe(0)
+		const survivor = Number(out.text().trim())
+		await new Promise((r) => setTimeout(r, 200))
+		expect(() => process.kill(survivor, 0)).toThrow()
+	}, 15_000)
+
 	it("describes an error through its causes", () => {
 		const e = new Error("outer", { cause: new TypeError("inner") })
 		expect(describeError(e)).toBe("Error: outer\n  caused by: TypeError: inner")

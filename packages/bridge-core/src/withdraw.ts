@@ -72,11 +72,14 @@ export async function buildWithdrawProof(
 	outbox: OutboxReader,
 	opts: { sleep?: Sleep; retryMs?: number } = {},
 ): Promise<OutboxProof | "pending"> {
-	const message = Fr.fromHexString(t.messageHash)
+	// Read once, before any await: the proof is recorded for exactly the exit it was computed from.
+	const { messageHash, l2TxHash, messageIndexInTx } = t
+	const key = exitKey(t)
+	const message = Fr.fromHexString(messageHash)
 	let lastError: unknown
 	for (let attempt = 1; attempt <= MAX_PROOF_REBUILDS; attempt++) {
 		try {
-			const w = await computeL2ToL1MembershipWitness(node, outbox, message, t.l2TxHash, t.messageIndexInTx)
+			const w = await computeL2ToL1MembershipWitness(node, outbox, message, l2TxHash, messageIndexInTx)
 			if (!w) return "pending"
 			const proof: OutboxProof = Object.freeze({
 				epoch: BigInt(w.epochNumber),
@@ -84,7 +87,7 @@ export async function buildWithdrawProof(
 				leafIndex: w.leafIndex,
 				path: Object.freeze(w.siblingPath.toBufferArray().map((b) => bytesToHex(b))),
 			})
-			provenExit.set(proof, exitKey(t))
+			provenExit.set(proof, key)
 			return proof
 		} catch (e) {
 			if (!(e instanceof Error && ROOT_MISMATCH.test(e.message))) throw e
@@ -150,10 +153,6 @@ function assertConsumedIn(receipt: TransactionReceipt, t: ExitTicket, p: OutboxP
 	return receipt.transactionHash
 }
 
-/**
- * Simulates, then sends `TokenPortal.withdraw`; the recipient is fixed by the message, so any account may submit it.
- * Returns the hash of the transaction that mined the withdrawal, which differs from the sent one after a speed-up.
- */
 /** The proof was built for this exit, and the exit's message is the one its recipient and amount produce. */
 async function assertProofFor(t: ExitTicket, p: OutboxProof, m: BridgeManifest): Promise<void> {
 	if (provenExit.get(p) !== exitKey(t)) throw new Error("This proof was not built for this withdrawal.")
@@ -162,7 +161,13 @@ async function assertProofFor(t: ExitTicket, p: OutboxProof, m: BridgeManifest):
 		throw new Error("The withdrawal's recipient or amount does not match its message.")
 }
 
-export async function withdrawOnL1(t: ExitTicket, p: OutboxProof, l1: L1Ctx, m: BridgeManifest): Promise<Hex> {
+/**
+ * Simulates, then sends `TokenPortal.withdraw`; the recipient is fixed by the message, so any account may submit it.
+ * Returns the hash of the transaction that mined the withdrawal, which differs from the sent one after a speed-up.
+ * The ticket is copied on entry: what is checked is what is sent, whatever the caller changes meanwhile.
+ */
+export async function withdrawOnL1(ticket: ExitTicket, p: OutboxProof, l1: L1Ctx, m: BridgeManifest): Promise<Hex> {
+	const t: ExitTicket = { ...ticket }
 	await assertProofFor(t, p, m)
 	const expected = { l1Account: l1.account }
 	await assertSigningContext(l1, null, m, expected)
