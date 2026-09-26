@@ -35,10 +35,29 @@ export function reapDead(root: string): string[] {
  * before touching the active one's dir or TMPDIR.
  */
 export async function withOwnedTmpDir<T>(fn: () => Promise<T>, root = WALLET_TMP_ROOT): Promise<T> {
+	const exit = enterOwnedTmpDir(root)
+	try {
+		return await fn()
+	} finally {
+		exit()
+	}
+}
+
+/**
+ * {@link withOwnedTmpDir} for a lifetime no single callback spans (a test suite's setup and teardown hooks). The
+ * returned exit restores TMPDIR, frees the scope, then removes the dir; call it exactly once.
+ */
+export function enterOwnedTmpDir(root = WALLET_TMP_ROOT): () => void {
 	if (active) throw new Error("withOwnedTmpDir: a scope is already active in this process; run wallets inside it")
 	active = true
 	const dir = join(root, String(process.pid))
 	const previous = process.env.TMPDIR
+	const exit = () => {
+		if (previous === undefined) delete process.env.TMPDIR
+		else process.env.TMPDIR = previous
+		active = false
+		rmSync(dir, { recursive: true, force: true })
+	}
 	try {
 		mkdirSync(root, { recursive: true, mode: 0o700 })
 		chmodSync(root, 0o700)
@@ -46,11 +65,9 @@ export async function withOwnedTmpDir<T>(fn: () => Promise<T>, root = WALLET_TMP
 		rmSync(dir, { recursive: true, force: true })
 		mkdirSync(dir, { mode: 0o700 })
 		process.env.TMPDIR = dir
-		return await fn()
-	} finally {
-		if (previous === undefined) delete process.env.TMPDIR
-		else process.env.TMPDIR = previous
-		active = false
-		rmSync(dir, { recursive: true, force: true })
+	} catch (e) {
+		exit()
+		throw e
 	}
+	return exit
 }

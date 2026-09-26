@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { Fr } from "@aztec/aztec.js/fields"
 import {
 	type Address,
 	encodeAbiParameters,
@@ -16,6 +17,7 @@ import { PERMIT2_DEPOSIT_ROUTER_ABI } from "./abi"
 import { claimSecretHash } from "./claim-secret"
 import { confirmDeposit, type DepositDraft, prepareDeposit, reconcileDeposit, submitDeposit, ticketFromReceiptLogs } from "./deposit"
 import { NetworkMismatchError } from "./network"
+import { BridgePausedError, type PauseSource } from "./pause"
 import { a, MANIFEST as M } from "./test/fixtures"
 import type { L1Ctx } from "./types"
 
@@ -24,6 +26,13 @@ const TX: Hex = pad("0x7e", { size: 32 })
 const NOW = 1_000n
 const now = () => NOW
 let recipient: AztecAddress
+/** The bridge's pause flag as the L2 node reports it. */
+const pauseFlag = (paused = false) => {
+	const s = { paused }
+	const node: PauseSource = { getPublicStorageAt: async () => new Fr(s.paused ? 1n : 0n) }
+	return { s, node }
+}
+const LIVE = pauseFlag().node
 
 beforeAll(async () => {
 	recipient = await AztecAddress.random()
@@ -65,6 +74,8 @@ function chain() {
 		sends: 0,
 		sendError: undefined as Error | undefined,
 		signError: undefined as Error | undefined,
+		signs: 0,
+		onSign: undefined as (() => void) | undefined,
 	}
 	const receipt = async ({ hash }: { hash: Hex }) => {
 		const r = s.receipts.get(hash)
@@ -92,6 +103,8 @@ function chain() {
 		getChainId: async () => s.chainId,
 		getAddresses: async () => [s.selected],
 		signTypedData: async () => {
+			s.signs++
+			s.onSign?.()
 			if (s.signError) throw s.signError
 			return pad("0x5195", { size: 65 })
 		},
@@ -132,11 +145,11 @@ describe("submitDeposit", () => {
 	it("refuses a wrong chain or a switched account before sending anything", async () => {
 		const wrongChain = chain()
 		wrongChain.s.chainId = 1
-		await expect(submitDeposit(await draft(), wrongChain.l1, M)).rejects.toBeInstanceOf(NetworkMismatchError)
+		await expect(submitDeposit(await draft(), wrongChain.l1, M, LIVE)).rejects.toBeInstanceOf(NetworkMismatchError)
 		const switched = chain()
 		switched.s.selected = getAddress(a(0xbb))
 		const d = await draft()
-		await expect(submitDeposit(d, switched.l1, M)).rejects.toBeInstanceOf(NetworkMismatchError)
+		await expect(submitDeposit(d, switched.l1, M, LIVE)).rejects.toBeInstanceOf(NetworkMismatchError)
 		expect(wrongChain.s.sends + switched.s.sends).toBe(0)
 		expect(d.submission).toBeUndefined()
 	})
@@ -144,10 +157,10 @@ describe("submitDeposit", () => {
 	it("records the pre-send finalized block and the hash, and never sends a draft twice", async () => {
 		const { s, l1 } = chain()
 		const d = await draft()
-		expect(await submitDeposit(d, l1, M)).toBe(TX)
+		expect(await submitDeposit(d, l1, M, LIVE)).toBe(TX)
 		expect(d.submission).toEqual({ account: ACCOUNT, chainId: M.l1.chainId, fromBlock: 100n })
 		expect(d.l1TxHash).toBe(TX)
-		await expect(submitDeposit(d, l1, M)).rejects.toThrow("already sent")
+		await expect(submitDeposit(d, l1, M, LIVE)).rejects.toThrow("already sent")
 		expect(s.sends).toBe(1)
 	})
 
@@ -155,11 +168,11 @@ describe("submitDeposit", () => {
 		const { s, l1 } = chain()
 		const refused = await draft()
 		s.sendError = Object.assign(new Error("User rejected the request."), { code: 4001 })
-		await expect(submitDeposit(refused, l1, M)).rejects.toThrow("rejected")
+		await expect(submitDeposit(refused, l1, M, LIVE)).rejects.toThrow("rejected")
 		expect(refused.submission).toBeUndefined()
 		const lost = await draft()
 		s.sendError = new Error("wallet disconnected")
-		await expect(submitDeposit(lost, l1, M)).rejects.toThrow("disconnected")
+		await expect(submitDeposit(lost, l1, M, LIVE)).rejects.toThrow("disconnected")
 		expect(lost.submission).toBeDefined()
 		expect(lost.l1TxHash).toBeUndefined()
 	})
@@ -168,11 +181,26 @@ describe("submitDeposit", () => {
 		const { s, l1 } = chain()
 		const d = await draft()
 		s.signError = new Error("Method eth_signTypedData_v4 not supported")
-		await expect(submitDeposit(d, l1, M)).rejects.toThrow("not supported")
+		await expect(submitDeposit(d, l1, M, LIVE)).rejects.toThrow("not supported")
 		expect(d.submission).toBeUndefined()
 		expect(s.sends).toBe(0)
 		s.signError = undefined
-		expect(await submitDeposit(d, l1, M)).toBe(TX)
+		expect(await submitDeposit(d, l1, M, LIVE)).toBe(TX)
+	})
+
+	it("a paused bridge is refused before the signature, and a pause that lands during it before the send", async () => {
+		const { s, l1 } = chain()
+		const flag = pauseFlag(true)
+		const d = await draft()
+		await expect(submitDeposit(d, l1, M, flag.node)).rejects.toBeInstanceOf(BridgePausedError)
+		expect(s.signs).toBe(0)
+		flag.s.paused = false
+		s.onSign = () => {
+			flag.s.paused = true
+		}
+		await expect(submitDeposit(d, l1, M, flag.node)).rejects.toBeInstanceOf(BridgePausedError)
+		expect([s.signs, s.sends]).toEqual([1, 0])
+		expect(d.submission).toBeUndefined()
 	})
 })
 
@@ -180,7 +208,7 @@ describe("confirmDeposit and the receipt's Deposit event", () => {
 	it("a reverted receipt throws and leaves the draft intact", async () => {
 		const { s, l1 } = chain()
 		const d = await draft()
-		await submitDeposit(d, l1, M)
+		await submitDeposit(d, l1, M, LIVE)
 		s.receipts.set(TX, { status: "reverted", logs: [] })
 		await expect(confirmDeposit(d, l1, M, undefined, { attempts: 1, waitMs: async () => {} })).rejects.toThrow("reverted")
 		expect(d.l1TxHash).toBe(TX)
@@ -190,7 +218,7 @@ describe("confirmDeposit and the receipt's Deposit event", () => {
 	it("only the router's log counts: a same-signature log the token emitted is ignored, and two router logs are refused", async () => {
 		const { l1 } = chain()
 		const d = await draft()
-		await submitDeposit(d, l1, M)
+		await submitDeposit(d, l1, M, LIVE)
 		const forged = depositLog(d, { address: M.l1.usdc, index: 666n })
 		expect(ticketFromReceiptLogs(d, [forged, depositLog(d)], M)).toMatchObject({ leafIndex: 42n, messageHash: pad("0x4e7") })
 		expect(() => ticketFromReceiptLogs(d, [depositLog(d), depositLog(d, { index: 43n })], M)).toThrow("exactly one")
@@ -202,7 +230,7 @@ describe("reconcileDeposit", () => {
 	it("after a receipt timeout, finds the mined deposit by hash and never re-sends", async () => {
 		const { s, l1 } = chain()
 		const d = await draft()
-		await submitDeposit(d, l1, M)
+		await submitDeposit(d, l1, M, LIVE)
 		await expect(confirmDeposit(d, l1, M, undefined, { attempts: 1, waitMs: async () => {} })).rejects.toThrow("not confirmed")
 		s.receipts.set(TX, { status: "success", logs: [depositLog(d)] })
 		expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n })
@@ -214,7 +242,7 @@ describe("reconcileDeposit", () => {
 			const { s, l1 } = chain()
 			const d = await draft()
 			if (!hashKnown) s.sendError = new Error("wallet response lost")
-			await submitDeposit(d, l1, M).catch(() => {})
+			await submitDeposit(d, l1, M, LIVE).catch(() => {})
 			expect(d.l1TxHash === TX).toBe(hashKnown)
 			s.logs = [depositLog(d, { address: M.l1.usdc, index: 666n }), depositLog(d)]
 			expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n })
@@ -224,7 +252,7 @@ describe("reconcileDeposit", () => {
 	it("finds a deposit re-mined below the tip seen at send time, across several scan chunks", async () => {
 		const { s, l1 } = chain()
 		const d = await draft()
-		await submitDeposit(d, l1, M)
+		await submitDeposit(d, l1, M, LIVE)
 		s.latest = 20_000n
 		s.logs = [depositLog(d, { blockNumber: 101n })]
 		expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n })
@@ -235,7 +263,7 @@ describe("reconcileDeposit", () => {
 	it("is not-deposited only after a complete scan through a finalized block past the deadline", async () => {
 		const { s, l1 } = chain()
 		const d = await draft()
-		await submitDeposit(d, l1, M)
+		await submitDeposit(d, l1, M, LIVE)
 		const deadline = d.typedData.message.deadline
 		s.finalized = { number: 140n, timestamp: deadline }
 		expect(await reconcileDeposit(d, l1, M)).toBe("pending")
@@ -245,6 +273,16 @@ describe("reconcileDeposit", () => {
 		s.failGetLogs = false
 		expect(await reconcileDeposit(d, l1, M)).toBe("not-deposited")
 		expect(s.sends).toBe(1)
+	})
+
+	it("a tip read that lags the finalized block still scans through it before any verdict", async () => {
+		const { s, l1 } = chain()
+		const d = await draft()
+		await submitDeposit(d, l1, M, LIVE)
+		s.latest = 120n
+		s.finalized = { number: 140n, timestamp: d.typedData.message.deadline + 1n }
+		s.logs = [depositLog(d, { blockNumber: 130n })]
+		expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n })
 	})
 
 	it("a draft never submitted is not-deposited without touching the chain", async () => {

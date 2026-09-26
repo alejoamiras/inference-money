@@ -8,6 +8,7 @@ import {
 	BRIDGE_CONTRACTS,
 	type BridgeManifest,
 	instanceFromRecord,
+	isBridgePaused,
 	sponsorInstance,
 } from "@inference-money/bridge-core"
 import type { Abi, Address, Hex, PublicClient } from "viem"
@@ -92,7 +93,7 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 		slot(bridge.address, 1),
 		slot(bridge.address, 3),
 		slot(bridge.address, 4),
-		slot(bridge.address, 6),
+		isBridgePaused(node, m),
 		slot(proxy.address, 1),
 		slot(proxy.address, 3),
 		slot(proxy.address, 5),
@@ -104,7 +105,7 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 		pin("bridge owner == deployer", bOwner, deployer),
 		pin("bridge config.token_minter_proxy", bProxy, proxy.address),
 		check("bridge config.portal", bPortal.toBigInt() === BigInt(m.l1.portal), bPortal.toString()),
-		check("bridge not paused", bPaused.isZero(), bPaused.toString()),
+		check("bridge not paused", !bPaused, String(bPaused)),
 		pin("proxy owner == deployer", pOwner, deployer),
 		pin("proxy token", pToken, token.address),
 		pin("proxy bridge", pBridge, bridge.address),

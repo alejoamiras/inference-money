@@ -12,10 +12,18 @@ import type { StageSink } from "./types"
 export type ClaimResult = "claimed" | "already-consumed"
 
 /**
- * Who pays a private tx's fee. The wallet's default payer is usually the user's own account, which links it to the
- * private claim or exit; the sponsor does not. Only an explicit user choice falls back to the wallet default.
+ * Who pays a tx's fee. The wallet's default payer is usually the user's own account, which links it to a private claim
+ * or exit; the sponsor does not. Private ops default to the sponsor and public ones to the wallet; an explicit choice
+ * wins either way (a fresh account holds no Fee Juice to pay a public claim with).
  */
 export type FeeChoice = "sponsored" | "wallet-default"
+
+/** The payment a sponsored choice sends with, or undefined for the wallet's default payer. */
+export function feeFor(kind: "public" | "private", m: BridgeManifest, choice?: FeeChoice): { paymentMethod: FeePaymentMethod } | undefined {
+	return (choice ?? (kind === "private" ? "sponsored" : "wallet-default")) === "sponsored"
+		? { paymentMethod: sponsoredPayment(m) }
+		: undefined
+}
 
 /** The network's sponsor could not pay (exhausted, missing or refused); the ticket is untouched and can be retried. */
 export class SponsorUnavailableError extends Error {
@@ -119,8 +127,8 @@ export async function waitClaimable(
 }
 
 /**
- * Mints the deposit on L2 from `from` (the recipient or a relayer; a private claim cannot be redirected either way).
- * A private claim is sponsored unless the user explicitly chose the wallet default.
+ * Mints the deposit on L2 from `from` (the recipient or a relayer; a private claim cannot be redirected either way),
+ * paid per {@link FeeChoice}.
  */
 export async function claim(
 	t: ClaimTicket,
@@ -128,8 +136,8 @@ export async function claim(
 	m: BridgeManifest,
 	opts: { from: AztecAddress; fee?: FeeChoice },
 ): Promise<ClaimResult> {
-	const sponsored = t.draft.intent.kind === "private" && opts.fee !== "wallet-default"
-	const fee = sponsored ? { paymentMethod: sponsoredPayment(m) } : undefined
+	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
+	const sponsored = fee !== undefined
 	try {
 		await claimCall(t, wallet, m).send({ from: opts.from, fee })
 		return "claimed"

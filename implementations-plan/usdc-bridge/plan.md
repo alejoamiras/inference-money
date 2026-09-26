@@ -324,7 +324,7 @@ Facts 3–5 are **time-sensitive probe results**; the Phase 1 and Phase 7 probes
 1. The JS 5.2.0 client works against node 5.0.0 with 5.0.1-compiled contracts. **Proof acceptance** is proven by the Phase 1 keyless spike and the Phase 7 smoke (real testnet). **Execution/API** is proven by Phase 6 (local node 5.0.0). **Fallback rule:** if it fails, pin JS to the newest 5.0.x that passes and log it.
 2. ~~The testnet SponsoredFPC holds at least the estimated fee budget for the deploy + smoke.~~ **Refuted 2026-09-26** by the Phase 1 probe: it held 1.20 FJ, while sampled testnet txs cost 1.69 FJ at p50 (budget ≈ 117 FJ). Replaced by D24 (self-funded Fee Juice + a sponsor top-up). Original text: checked by the Phase 1 probe and re-checked right before Phase 7 spends. A non-zero balance alone is insufficient. **Fallback:** hold Phase 7 and surface (fee path = SponsoredFPC only).
 3. ~~`aztec start --local-network` 5.0.0 deploys a funded SponsoredFPC at the canonical address.~~ **Revised 2026-09-26** by Phase 5: the canonical address is funded at genesis (10000 FJ) but its instance is **not published**. A 5.2.0 client registers the vendored 5.0.0 instance and the 5.0.0 HandshakeRegistry compat hook (`bridge-core` `compat.ts`), and then the sponsor pays; this is proven live by both gate runs.
-4. The embedded test wallet honors a dApp `paymentMethod`, and the submitted payer is observable in the tx. **Proven by** Phase 6 (Node) and Phase 10 (browser). Third-party wallets: best effort, unproven.
+4. The embedded test wallet honors a dApp `paymentMethod`, and the submitted payer is observable in the tx. **Proven (Node) 2026-09-26** by Phase 6: the submitted tx's `data.feePayer` is the SponsoredFPC for private claims and exits. Phase 10 (browser) still to prove. Third-party wallets: best effort, unproven.
 5. The freeze `local-network.ts` ports with only V2-hub stripping and runs node 5.0.0.
 6. The Circle faucet provides ≥ 5 Sepolia USDC; the user funds the throwaway accounts.
 7. Testnet epoch proof completes within 60 min; the timeout is extendable and state is kept.
@@ -627,7 +627,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 - Commands: `bun test packages/local-network packages/deployer && bun run net:up && bun run deploy:local && bun run verify:local && bun run net:down`, run twice concurrently (`RUN_ID=a` / `RUN_ID=b`) from two shells.
 - Pass: all exit 0; `verify:local` passes every read-back including the bytecode match and the owners; the concurrent runs get disjoint ports and each reaps only its own pgids (checked via `~/.agents/ports.md` + `ps`); nothing owned is left afterwards.
 
-#### Phase 6 — Integration suite (`packages/integration`)
+#### Phase 6 — Integration suite (`packages/integration`) ✓
 A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 1. Public deposit → `claim_public` → L2 public delta.
 2. Private deposit → `claim_private` (sponsored; the tx's fee payer asserted == SponsoredFPC) → L2 private delta.

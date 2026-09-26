@@ -74,6 +74,23 @@
         "typescript": "6.0.3",
       },
     },
+    "packages/integration": {
+      "name": "@inference-money/integration",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aztec/aztec.js": "5.2.0",
+        "@aztec/stdlib": "5.2.0",
+        "@aztec/wallets": "5.2.0",
+        "@inference-money/bridge-core": "workspace:*",
+        "@inference-money/deployer": "workspace:*",
+        "@inference-money/local-network": "workspace:*",
+        "viem": "2.56.7",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.2",
+        "typescript": "6.0.3",
+      },
+    },
     "packages/local-network": {
       "name": "@inference-money/local-network",
       "version": "0.0.0",
@@ -282,6 +299,8 @@
     "@inference-money/contracts-evm": ["@inference-money/contracts-evm@workspace:contracts/evm"],
 
     "@inference-money/deployer": ["@inference-money/deployer@workspace:packages/deployer"],
+
+    "@inference-money/integration": ["@inference-money/integration@workspace:packages/integration"],
 
     "@inference-money/local-network": ["@inference-money/local-network@workspace:packages/local-network"],
 

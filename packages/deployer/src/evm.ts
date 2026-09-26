@@ -35,13 +35,15 @@ function readArtifact(outDir: string, source: string, name: string): EvmArtifact
 	}
 }
 
+export const forgeRunDir = (runId: string) => join(homedir(), ".cache", "inference-money", "forge", runId)
+
 /**
  * Remapping check, then `forge build` into a per-run out and cache dir, so concurrent runs in one checkout never
  * read artifacts another run is rewriting (`--force`: every artifact recompiled, none trusted from cache). Test and
  * script sources are skipped; `test/mocks` (MockUsdc) is not `.t.sol`, so it still builds.
  */
 export function buildBridgeContracts(runId: string, force: boolean, env: NodeJS.ProcessEnv): BridgeEvmArtifacts {
-	const dir = join(homedir(), ".cache", "inference-money", "forge", runId)
+	const dir = forgeRunDir(runId)
 	execFileSync("bun", ["scripts/check-remappings.ts"], { cwd: EVM_ROOT, stdio: "inherit", env })
 	const skip = ["--skip", "test", "--skip", "script"]
 	const args = ["build", "--out", join(dir, "out"), "--cache-path", join(dir, "cache"), ...skip, ...(force ? ["--force"] : [])]

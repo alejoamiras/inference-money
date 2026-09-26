@@ -3,6 +3,9 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
 	"scripts": {
 		"deploy:local": "bun src/cli.ts deploy local",
 		"probe:testnet": "bun src/cli.ts probe testnet",

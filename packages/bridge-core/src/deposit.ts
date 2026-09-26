@@ -8,6 +8,7 @@ import { isUserRejection } from "./errors"
 import { type AwaitL1ReceiptOptions, awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
 import { assertSigningContext } from "./network"
+import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
 import { type L1Ctx, MAX_L2_AMOUNT, type StageSink } from "./types"
 
@@ -80,14 +81,24 @@ export async function prepareDeposit(i: DepositIntent, m: BridgeManifest, now: (
 	return { intent: i, secretOrSalt, secretHash, witness, typedData: depositPermitTypedData(permit, witness, m.l1.permit2, m.l1.chainId) }
 }
 
-/** Signs and sends the deposit; `d.l1TxHash` is set the moment the wallet returns it. */
-export async function submitDeposit(d: DepositDraft, l1: L1Ctx, m: BridgeManifest, on?: StageSink<DepositStage>): Promise<Hex> {
+/**
+ * Signs and sends the deposit; `d.l1TxHash` is set the moment the wallet returns it. The bridge's pause flag is read
+ * before the signature and again before the send: a deposit into a paused bridge is claimable only after an unpause.
+ */
+export async function submitDeposit(
+	d: DepositDraft,
+	l1: L1Ctx,
+	m: BridgeManifest,
+	l2: PauseSource,
+	on?: StageSink<DepositStage>,
+): Promise<Hex> {
 	if (d.submission) throw new Error("This deposit was already sent. Re-check it instead of sending it again.")
 	const expected = { l1Account: l1.account }
 	await assertSigningContext(l1, null, m, expected)
+	await assertBridgeLive(l2, m)
 	on?.("signing")
 	const signature = await l1.walletClient.signTypedData({ account: l1.account, ...d.typedData })
-	await assertSigningContext(l1, null, m, expected)
+	await Promise.all([assertSigningContext(l1, null, m, expected), assertBridgeLive(l2, m)])
 	const finalized = await l1.publicClient.getBlock({ blockTag: "finalized" })
 	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number }
 	on?.("depositing")
@@ -203,8 +214,10 @@ export async function reconcileDeposit(d: DepositDraft, l1: L1Ctx, m: BridgeMani
 	try {
 		const byHash = await ticketByHash(d, pub, m)
 		if (byHash) return byHash
-		const [latest, finalized] = await Promise.all([pub.getBlockNumber(), pub.getBlock({ blockTag: "finalized" })])
-		const found = await scanForDeposit(d, pub, m, d.submission.fromBlock, latest)
+		// viem caches the tip for seconds; a stale tip below `finalized` would skip blocks the verdict below vouches for.
+		const [latest, finalized] = await Promise.all([pub.getBlockNumber({ cacheTime: 0 }), pub.getBlock({ blockTag: "finalized" })])
+		const to = latest > finalized.number ? latest : finalized.number
+		const found = await scanForDeposit(d, pub, m, d.submission.fromBlock, to)
 		if (found) return found
 		// Timestamps only grow, so once a finalized block is past the deadline Permit2 rejects any later inclusion.
 		return finalized.timestamp > d.typedData.message.deadline ? "not-deposited" : "pending"

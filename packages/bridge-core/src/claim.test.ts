@@ -45,6 +45,10 @@ describe("claim", () => {
 		const chosen = fakeWallet()
 		await claim(await ticket("private"), chosen.wallet, M, { from: recipient, fee: "wallet-default" })
 		expect(chosen.sent[0]).toMatchObject({ calls: ["claim_private"], feePayer: undefined })
+
+		const sponsoredPublic = fakeWallet()
+		await claim(await ticket("public"), sponsoredPublic.wallet, M, { from: recipient, fee: "sponsored" })
+		expect(sponsoredPublic.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_public"], feePayer: M.l2.sponsoredFpc })
 	})
 
 	it("reports an already-consumed message instead of failing", async () => {
