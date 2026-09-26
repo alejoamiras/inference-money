@@ -14,6 +14,16 @@
         "typescript": "6.0.3",
       },
     },
+    "contracts/aztec": {
+      "name": "@inference-money/contracts-aztec",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@aztec-foundation/aztec-standards": "5.0.1",
+        "@aztec/stdlib": "5.2.0",
+        "@types/bun": "1.4.2",
+        "typescript": "6.0.3",
+      },
+    },
     "contracts/evm": {
       "name": "@inference-money/contracts-evm",
       "version": "0.0.0",
@@ -82,6 +92,8 @@
     "@aws-sdk/xml-builder": ["@aws-sdk/xml-builder@3.972.40", "", { "dependencies": { "@smithy/types": "^4.17.2", "tslib": "^2.6.2" } }, "sha512-wlFmCIGUlwF4zx/kncw+bmxTQh1HeSJq4mYV/V5cZUSJadDP3kXvGW8Rn21cimj/7y9ju+47oYWXi97vF7czaA=="],
 
     "@aws/lambda-invoke-store": ["@aws/lambda-invoke-store@0.3.0", "", {}, "sha512-sl4Bm6yiMNYrZKkqqDFWN0UfnWhlS8ivKxrYl+6t0gCLrqr8y3B2IqZZbFRkfaVVp7C/baApyh71P+LeE1A2sQ=="],
+
+    "@aztec-foundation/aztec-standards": ["@aztec-foundation/aztec-standards@5.0.1", "", {}, "sha512-i+O7v7Qqu2O9haFFducx7+42DIpxOUj+JNWUqIaE+laZJ2x+le/XEXuTLr60gCDQfo2m3b97ywH/QLk5engwAA=="],
 
     "@aztec/accounts": ["@aztec/accounts@5.2.0", "", { "dependencies": { "@aztec/aztec.js": "5.2.0", "@aztec/entrypoints": "5.2.0", "@aztec/ethereum": "5.2.0", "@aztec/foundation": "5.2.0", "@aztec/stdlib": "5.2.0", "tslib": "^2.4.0" } }, "sha512-I0M4B17WPKq0RbSTg+ExfRet2r4/AGm1U20pW+VGCPNqcpiKM8w6KQQ9SgWHBC0/V0EI++oD6ctgwxFt0ue2WQ=="],
 
@@ -230,6 +242,8 @@
     "@hapi/bourne": ["@hapi/bourne@3.0.0", "", {}, "sha512-Waj1cwPXJDucOib4a3bAISsKJVb15MKi9IvmTI/7ssVEm6sywXGjVJDhl6/umt1pK1ZS7PacXU3A1PmFKHEZ2w=="],
 
     "@harperfast/extended-iterable": ["@harperfast/extended-iterable@1.0.3", "", {}, "sha512-sSAYhQca3rDWtQUHSAPeO7axFIUJOI6hn1gjRC5APVE1a90tuyT8f5WIgRsFhhWA7htNkju2veB9eWL6YHi/Lw=="],
+
+    "@inference-money/contracts-aztec": ["@inference-money/contracts-aztec@workspace:contracts/aztec"],
 
     "@inference-money/contracts-evm": ["@inference-money/contracts-evm@workspace:contracts/evm"],
 

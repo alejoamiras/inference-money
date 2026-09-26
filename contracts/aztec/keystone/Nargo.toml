@@ -1,0 +1,10 @@
+[package]
+name = "keystone"
+type = "bin"
+compiler_version = ">=1.0.0"
+authors = [""]
+
+[dependencies]
+aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/aztec-nr/aztec" }
+token_portal_content_hash_lib = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/noir-contracts/contracts/libs/token_portal_content_hash_lib" }
+claim_secret_lib = { path = "../claim_secret" }

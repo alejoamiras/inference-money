@@ -558,6 +558,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 - Copy the four crates + `compile.sh`/`run-txe-tests.sh`/`check-sole-consumer.sh` from V1 unchanged, and add **the full V2 QA port Aztec.nr list**. Fix the README prose from 5.0.0 to 5.0.1.
 - Add `noir-deps.sh` (fetch → verify only, no compile; the pinned (url, tag, commit) table includes transitive deps) with `--self-test`: empty cache → fetched + verified; modified source → rejected; wrong commit → rejected. Commit the path-scrubbed artifacts.
 - Extend `contracts.yml`: clean nargo cache → `noir-deps.sh` → `compile.sh --check` (the sole compile: class-id + ABI parity vs HEAD) → **TXE with the manifest gate** → sole-consumer (self-test first) → keystone. V2 also ran TXE in CI (`_bridge-contracts.yml` `txe` job); V1 did not.
+- *As built* (see `lessons/phase-3.md`): CI also ends with `noir-deps.sh --verify --exact`, because a clean cache alone would let nargo fetch an unpinned transitive dep unverified. `toolchain.json` gains `node` for the Aztec installer. The rename regression runs `artifact-identity.ts compare`, the function `--check` calls, rather than a full rebuild.
 
 **Validation gate** (lint + unit/TXE + cross-toolchain):
 - Commands: `bash contracts/aztec/scripts/noir-deps.sh --self-test && bash contracts/aztec/scripts/noir-deps.sh && bash contracts/aztec/scripts/compile.sh --check && bun run test:noir && bash contracts/aztec/scripts/check-sole-consumer.sh --self-test && bash contracts/aztec/scripts/check-sole-consumer.sh`

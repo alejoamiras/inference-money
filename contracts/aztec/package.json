@@ -1,0 +1,17 @@
+{
+	"name": "@inference-money/contracts-aztec",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"test": "bun test scripts",
+		"test:noir": "bash scripts/run-txe-tests.sh --crate token_bridge && bash scripts/run-txe-tests.sh --crate keystone",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"devDependencies": {
+		"@aztec-foundation/aztec-standards": "5.0.1",
+		"@aztec/stdlib": "5.2.0",
+		"@types/bun": "1.4.2",
+		"typescript": "6.0.3"
+	}
+}
