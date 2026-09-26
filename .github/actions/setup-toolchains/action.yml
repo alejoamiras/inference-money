@@ -47,12 +47,13 @@ runs:
       with:
         version: v${{ steps.pins.outputs.foundry }}
 
+    # pipx, not pip: the runner's system Python is externally managed (PEP 668) and refuses `pip install --user`.
     - if: inputs.halmos == 'true'
       shell: bash
       env:
         HALMOS: ${{ steps.pins.outputs.halmos }}
       run: |
-        python3 -m pip install --user "halmos==$HALMOS"
+        pipx install "halmos==$HALMOS"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - if: inputs.aztec == 'true'

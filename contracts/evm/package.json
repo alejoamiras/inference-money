@@ -2,13 +2,21 @@
 	"name": "@inference-money/contracts-evm",
 	"version": "0.0.0",
 	"private": true,
+	"type": "module",
 	"scripts": {
-		"build": "bun scripts/remappings.ts && forge build",
-		"test:evm": "bun scripts/remappings.ts && forge fmt --check && forge test --no-match-contract Fork"
+		"build": "bun scripts/check-remappings.ts && forge build",
+		"test": "bun test scripts",
+		"test:evm": "bun scripts/check-remappings.ts && forge fmt --check && forge lint src -D warnings && forge test --no-match-contract Fork",
+		"test:evm:fork": "bun scripts/check-remappings.ts && bash scripts/fork-gate.sh",
+		"test:evm:formal": "bun scripts/check-remappings.ts && bash scripts/halmos-gate.sh",
+		"test:evm:gas": "bun scripts/check-remappings.ts && forge snapshot --match-test test_gas_ --no-match-contract Fork --check --tolerance 2",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"devDependencies": {
 		"@aztec/l1-artifacts": "5.2.0",
 		"@openzeppelin/contracts": "5.6.1",
-		"forge-std": "github:foundry-rs/forge-std#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b"
+		"@types/bun": "1.4.2",
+		"forge-std": "github:foundry-rs/forge-std#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b",
+		"typescript": "6.0.3"
 	}
 }

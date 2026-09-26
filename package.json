@@ -16,8 +16,12 @@
 		"prepare": "husky",
 		"probe:testnet": "bun run --cwd packages/deployer probe:testnet",
 		"spike:proof-compat": "bun run --cwd packages/deployer spike:proof-compat",
-		"test": "bun run --filter './packages/*' --filter './apps/*' --if-present test",
-		"typecheck": "bun run --filter './packages/*' --filter './apps/*' --if-present typecheck"
+		"test": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present test",
+		"test:evm": "bun run --cwd contracts/evm test:evm",
+		"test:evm:fork": "bun run --cwd contracts/evm test:evm:fork",
+		"test:evm:formal": "bun run --cwd contracts/evm test:evm:formal",
+		"test:evm:gas": "bun run --cwd contracts/evm test:evm:gas",
+		"typecheck": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present typecheck"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
