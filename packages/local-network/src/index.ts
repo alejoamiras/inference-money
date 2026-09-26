@@ -11,4 +11,5 @@ export {
 } from "./handle"
 export { withBlockHeartbeat } from "./heartbeat"
 export { ANVIL_ACCOUNTS, netDown, netStatus, netUp } from "./network"
-export { registeredPorts } from "./registry"
+export { claimServicePorts } from "./ports"
+export { registeredPorts, releasePorts } from "./registry"
