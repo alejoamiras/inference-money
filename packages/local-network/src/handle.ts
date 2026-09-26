@@ -25,7 +25,12 @@ export function runIdFor(env: NodeJS.ProcessEnv = process.env, root = REPO_ROOT)
 	return `${createHash("sha256").update(root).digest("hex").slice(0, 8)}-${tag}`
 }
 
-const processSchema = z.strictObject({ name: z.string(), pgid: z.number().int().positive(), started: z.string().min(1) })
+const processSchema = z.strictObject({
+	name: z.string(),
+	pgid: z.number().int().positive(),
+	started: z.string().min(1),
+	marker: z.string().min(1),
+})
 
 export const netHandleSchema = z.strictObject({
 	runId: z.string(),
@@ -39,7 +44,10 @@ export const netHandleSchema = z.strictObject({
 		aztecP2p: z.number().int(),
 	}),
 	dataDir: z.string(),
+	/** Rewritten as each process spawns, so an interrupted boot still leaves `netDown` everything to stop. */
 	processes: z.array(processSchema),
+	/** Both services answered; until then the handle serves teardown only. */
+	ready: z.boolean(),
 	worktree: z.string(),
 	nodeVersion: z.string(),
 	createdAt: z.string(),
@@ -85,5 +93,6 @@ export function resolveEndpoints(runId: string, env: NodeJS.ProcessEnv = process
 	if (anvilUrl || nodeUrl) throw new Error("NET_L1_RPC and NET_NODE_URL must be set together")
 	const h = readHandle(runId, root)
 	if (!h) throw new Error(`no local network for run ${runId}; run net:up first (or set NET_L1_RPC + NET_NODE_URL)`)
+	if (!h.ready) throw new Error(`the local network for run ${runId} is still booting or never finished; net:down it if stale`)
 	return { anvilUrl: h.anvilUrl, nodeUrl: h.nodeUrl, attached: false }
 }

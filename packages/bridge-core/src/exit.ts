@@ -78,9 +78,39 @@ function exitCall(e: ExitIntent, wallet: Wallet, m: BridgeManifest, nonce: Fr) {
 }
 
 /**
+ * The burn mined but its ticket could not be built. Exiting again would burn again: recover with
+ * {@link exitTicketFromTx} from these fields.
+ */
+export class ExitUnconfirmedError extends Error {
+	constructor(
+		readonly l2TxHash: TxHash,
+		readonly recipient: Address,
+		readonly amount: bigint,
+		options?: ErrorOptions,
+	) {
+		super(
+			`Exit ${l2TxHash} was sent, but its withdrawal could not be located yet. Do not exit again; resume it from this hash.`,
+			options,
+		)
+		this.name = "ExitUnconfirmedError"
+	}
+}
+
+async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: ReturnType<typeof feeFor>): Promise<TxHash> {
+	const proxy = AztecAddress.fromStringUnsafe(m.l2.proxy.address)
+	const { exit, burn } = exitCall(e, wallet, m, Fr.random())
+	if (e.kind === "private") {
+		const witness = await wallet.createAuthWit(e.from, { caller: proxy, call: await burn.getFunctionCall() })
+		return (await exit.send({ from: e.from, authWitnesses: [witness], fee })).receipt.txHash
+	}
+	const allow = await SetPublicAuthwitContractInteraction.create(wallet, e.from, { caller: proxy, action: burn }, true)
+	return (await new BatchCall(wallet, [allow, exit]).send({ from: e.from, fee })).receipt.txHash
+}
+
+/**
  * Burns on L2 and emits the withdraw message, paid per {@link FeeChoice}. The burn is authorized for the proxy (the
  * bridge's only path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry
- * entry batched into the same tx for a public one.
+ * entry batched into the same tx for a public one. Any failure after the send is an {@link ExitUnconfirmedError}.
  */
 export async function exitToL1(
 	e: ExitIntent,
@@ -90,27 +120,20 @@ export async function exitToL1(
 	opts: { fee?: FeeChoice } = {},
 ): Promise<ExitTicket> {
 	assertExitIntent(e, m)
-	const proxy = AztecAddress.fromStringUnsafe(m.l2.proxy.address)
-	const nonce = Fr.random()
-	const { exit, burn } = exitCall(e, wallet, m, nonce)
-	const fee = feeFor(e.kind, m, opts.fee)
-	let txHash: TxHash
-	if (e.kind === "private") {
-		const witness = await wallet.createAuthWit(e.from, { caller: proxy, call: await burn.getFunctionCall() })
-		txHash = (await exit.send({ from: e.from, authWitnesses: [witness], fee })).receipt.txHash
-	} else {
-		const allow = await SetPublicAuthwitContractInteraction.create(wallet, e.from, { caller: proxy, action: burn }, true)
-		txHash = (await new BatchCall(wallet, [allow, exit]).send({ from: e.from, fee })).receipt.txHash
-	}
-	const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
-	const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []
-	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
-	return {
-		l2TxHash: txHash,
-		recipient: e.recipientL1,
-		amount: e.amount,
-		messageHash: expected.toString() as Hex,
-		messageIndexInTx: index,
+	const txHash = await sendExit(e, wallet, m, feeFor(e.kind, m, opts.fee))
+	try {
+		const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
+		const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []
+		if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
+		return {
+			l2TxHash: txHash,
+			recipient: e.recipientL1,
+			amount: e.amount,
+			messageHash: expected.toString() as Hex,
+			messageIndexInTx: index,
+		}
+	} catch (cause) {
+		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
 	}
 }
 

@@ -1,4 +1,4 @@
-import { type Account, type Address, isAddressEqual, type PublicClient, type WalletClient } from "viem"
+import { type Account, type Address, type Chain, defineChain, isAddressEqual, type PublicClient, type WalletClient } from "viem"
 
 /** The connected L1 side: reads through `publicClient`, signs and sends through `walletClient` as `account`. */
 export interface L1Ctx {
@@ -16,6 +16,21 @@ export type StageSink<S extends string> = (stage: S) => void
 export function signerOf(l1: L1Ctx): Account | Address {
 	const own = l1.walletClient.account
 	return own && isAddressEqual(own.address, l1.account) ? own : l1.account
+}
+
+/**
+ * The chain every send names: viem then refuses a wallet on another chain at send time, which `chain: null` skips. The
+ * wallet client's own chain when it is that one (it may carry fee formatters), else a bare definition of the id.
+ */
+export function sendChain(l1: L1Ctx, chainId: number): Chain {
+	const own = l1.walletClient.chain
+	if (own?.id === chainId) return own
+	return defineChain({
+		id: chainId,
+		name: `chain ${chainId}`,
+		nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+		rpcUrls: { default: { http: [] } },
+	})
 }
 
 /** The largest amount the L2 token holds (u128); the router and portal reject anything above it. */

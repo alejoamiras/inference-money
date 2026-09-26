@@ -95,32 +95,36 @@ function nodeEnv(t: Toolchain, anvilUrl: string, tmpDir: string): NodeJS.Process
 	}
 }
 
-async function boot(t: Toolchain, runId: string, ports: NetPorts, dataDir: string, spawned: Spawned[]): Promise<void> {
+async function boot(t: Toolchain, runId: string, ports: NetPorts, dataDir: string, track: (s: Spawned) => void): Promise<void> {
 	const anvilUrl = `http://127.0.0.1:${ports.anvil}`
 	const logs = { anvil: join(NET_LOG_DIR, `${runId}-anvil.log`), aztec: join(NET_LOG_DIR, `${runId}-aztec.log`) }
 	const anvilArgs = ["--host", "127.0.0.1", "--port", String(ports.anvil), "--chain-id", String(L1_CHAIN_ID)]
 	anvilArgs.push("--slots-in-an-epoch", "1", "--accounts", String(ANVIL_ACCOUNTS), "--silent")
 	const anvil = await spawnDetached("anvil", t.anvil, anvilArgs, { env: process.env, logFile: logs.anvil })
-	spawned.push(anvil)
+	track(anvil)
 	await waitHealthy(anvil, anvilUrl, "eth_chainId", 60_000, logs.anvil)
 	const nodeArgs = ["start", "--local-network", "--port", String(ports.aztec), "--admin-port", String(ports.aztecAdmin)]
 	nodeArgs.push("--p2p.p2pPort", String(ports.aztecP2p), "--l1-rpc-urls", anvilUrl, "--data-directory", join(dataDir, "node"))
 	const tmpDir = join(dataDir, "tmp")
 	mkdirSync(tmpDir, { recursive: true, mode: 0o700 })
 	const node = await spawnDetached("aztec", t.aztec, nodeArgs, { env: nodeEnv(t, anvilUrl, tmpDir), logFile: logs.aztec })
-	spawned.push(node)
+	track(node)
 	await waitHealthy(node, `http://127.0.0.1:${ports.aztec}`, "node_getNodeInfo", 300_000, logs.aztec)
 }
 
-const owned = (s: Spawned): OwnedProcess => ({ name: s.name, pgid: s.pgid, started: s.started })
+const owned = (s: Spawned): OwnedProcess => ({ name: s.name, pgid: s.pgid, started: s.started, marker: s.marker })
 
 /**
  * Boots anvil + `aztec start --local-network` for `runId` and returns once both answer. Both run detached and outlive
- * this process; `netDown` is the only teardown. A failed boot tears down whatever it started.
+ * this process; `netDown` is the only teardown, and the handle records each process as it spawns, so it can also stop
+ * a boot this process died during. A boot that fails here tears down whatever it started.
  */
 export async function netUp(runId: string, log: (m: string) => void = console.log): Promise<NetHandle> {
 	const existing = readHandle(runId)
-	if (existing?.processes.some((p) => groupState(p) === "ours")) throw new Error(`run ${runId} is already up; net:down first`)
+	const stillUp = (p: OwnedProcess) => !["gone", "reused"].includes(groupState(p))
+	if (existing?.processes.some(stillUp)) {
+		throw new Error(`run ${runId} is already up (or unverifiable); net:down first`)
+	}
 	if (existing) await netDown(runId, log)
 	const t = resolveToolchain()
 	const dataDir = runDataDir(runId)
@@ -128,36 +132,61 @@ export async function netUp(runId: string, log: (m: string) => void = console.lo
 	mkdirSync(NET_LOG_DIR, { recursive: true, mode: 0o700 })
 	const ports = await claimNetPorts(runId, process.pid, REPO_ROOT)
 	const spawned: Spawned[] = []
-	try {
-		log(`[net] ${runId}: anvil :${ports.anvil}, aztec ${t.version} :${ports.aztec}, data ${dataDir}`)
-		await boot(t, runId, ports, dataDir, spawned)
-		const handle: NetHandle = {
-			runId,
-			anvilUrl: `http://127.0.0.1:${ports.anvil}`,
-			nodeUrl: `http://127.0.0.1:${ports.aztec}`,
-			l1ChainId: L1_CHAIN_ID,
-			ports,
-			dataDir,
-			processes: spawned.map(owned),
-			worktree: REPO_ROOT,
-			nodeVersion: t.version,
-			createdAt: new Date().toISOString(),
-		}
+	const handle: NetHandle = {
+		runId,
+		anvilUrl: `http://127.0.0.1:${ports.anvil}`,
+		nodeUrl: `http://127.0.0.1:${ports.aztec}`,
+		l1ChainId: L1_CHAIN_ID,
+		ports,
+		dataDir,
+		processes: [],
+		ready: false,
+		worktree: REPO_ROOT,
+		nodeVersion: t.version,
+		createdAt: new Date().toISOString(),
+	}
+	const track = (s: Spawned) => {
+		spawned.push(s)
+		handle.processes.push(owned(s))
 		writeHandle(handle)
+	}
+	try {
+		writeHandle(handle)
+		log(`[net] ${runId}: anvil :${ports.anvil}, aztec ${t.version} :${ports.aztec}, data ${dataDir}`)
+		await boot(t, runId, ports, dataDir, track)
 		await setPidHint(runId, spawned[0]!.pgid)
+		handle.ready = true
+		writeHandle(handle)
 		return handle
 	} catch (e) {
-		for (const p of spawned.reverse()) await stopOwnedGroup(p).catch(() => {})
-		await releasePorts(runId)
-		rmSync(dataDir, { recursive: true, force: true })
+		if (await stopAll(runId, handle.processes, log)) {
+			await releasePorts(runId)
+			rmSync(dataDir, { recursive: true, force: true })
+			removeHandle(runId)
+		}
 		throw e
 	}
 }
 
-/** Stops only the process groups this run's handle proves it owns, then releases its ports and removes its state. */
+/** Whether every group is down; one left unverified or surviving keeps the handle for another `netDown`. */
+async function stopAll(runId: string, processes: OwnedProcess[], log: (m: string) => void): Promise<boolean> {
+	let clean = true
+	for (const p of [...processes].reverse()) {
+		const result = await stopOwnedGroup(p).catch((e: Error) => e.message)
+		log(`[net] ${runId}: ${p.name} (pgid ${p.pgid}) ${result}`)
+		clean &&= result === "stopped" || result === "gone" || result === "reused"
+	}
+	return clean
+}
+
+/**
+ * Stops only the process groups this run's handle proves it owns, then releases its ports and removes its state. A
+ * group it cannot prove stopped keeps the handle, so nothing is forgotten while it may still run.
+ */
 export async function netDown(runId: string, log: (m: string) => void = console.log): Promise<void> {
 	const h = readHandle(runId)
-	for (const p of [...(h?.processes ?? [])].reverse()) log(`[net] ${runId}: ${p.name} (pgid ${p.pgid}) ${await stopOwnedGroup(p)}`)
+	if (h && !(await stopAll(runId, h.processes, log)))
+		throw new Error(`run ${runId}: a process group was not verifiably stopped; handle kept`)
 	await releasePorts(runId)
 	rmSync(runDataDir(runId), { recursive: true, force: true })
 	rmSync(localDeploymentDir(runId), { recursive: true, force: true })

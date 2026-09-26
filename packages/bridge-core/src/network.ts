@@ -46,6 +46,12 @@ function mismatches(pins: Pin[]): string[] {
 		.map(([label, actual, expected]) => `${label} is ${String(actual)}, expected ${String(expected)}`)
 }
 
+/** A verdict read from any chain but the manifest's says nothing about its contracts. */
+export async function assertReaderChain(l1: Pick<PublicClient, "getChainId">, chainId: number): Promise<void> {
+	const actual = await l1.getChainId()
+	if (actual !== chainId) throw new NetworkMismatchError([`the L1 reader's chain is ${actual}, expected ${chainId}`])
+}
+
 /** The node and the L1 chain (read through the registry's canonical rollup) must both be the manifest's network. */
 export async function assertNetworkIdentity(node: NodeIdentitySource, l1: PublicClient, m: BridgeManifest): Promise<void> {
 	const [info, chainId, rollup] = await Promise.all([

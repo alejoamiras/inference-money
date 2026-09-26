@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { claim, registerSponsor, SponsorUnavailableError, waitClaimable } from "./claim"
+import type { Fr } from "@aztec/aztec.js/fields"
+import { MerkleTreeId } from "@aztec/stdlib/trees"
+import { claim, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { fakeWallet } from "./test/fake-wallet"
 import { f, MANIFEST as M } from "./test/fixtures"
@@ -17,6 +19,7 @@ const ticket = async (kind: "public" | "private"): Promise<ClaimTicket> => ({
 const fail = (message: string) => () => {
 	throw new Error(message)
 }
+const NO_NULLIFIER: NullifierNode = { findLeavesIndexes: async (_b, _t, leaves) => leaves.map(() => undefined) }
 
 describe("registerSponsor", () => {
 	const SPONSOR = "0x0628377e98bca5913dc86765ad0758f7b7aa83eac49079c6fba125807b393fe1" as const
@@ -35,42 +38,57 @@ describe("registerSponsor", () => {
 describe("claim", () => {
 	it("pays a private claim through the sponsor and leaves a public one to the wallet", async () => {
 		const priv = fakeWallet()
-		expect(await claim(await ticket("private"), priv.wallet, M, { from: recipient })).toBe("claimed")
+		expect(await claim(await ticket("private"), NO_NULLIFIER, priv.wallet, M, { from: recipient })).toBe("claimed")
 		expect(priv.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_private"], feePayer: M.l2.sponsoredFpc })
 
 		const pub = fakeWallet()
-		await claim(await ticket("public"), pub.wallet, M, { from: recipient })
+		await claim(await ticket("public"), NO_NULLIFIER, pub.wallet, M, { from: recipient })
 		expect(pub.sent[0]).toMatchObject({ calls: ["claim_public"], feePayer: undefined })
 
 		const chosen = fakeWallet()
-		await claim(await ticket("private"), chosen.wallet, M, { from: recipient, fee: "wallet-default" })
+		await claim(await ticket("private"), NO_NULLIFIER, chosen.wallet, M, { from: recipient, fee: "wallet-default" })
 		expect(chosen.sent[0]).toMatchObject({ calls: ["claim_private"], feePayer: undefined })
 
 		const sponsoredPublic = fakeWallet()
-		await claim(await ticket("public"), sponsoredPublic.wallet, M, { from: recipient, fee: "sponsored" })
+		await claim(await ticket("public"), NO_NULLIFIER, sponsoredPublic.wallet, M, { from: recipient, fee: "sponsored" })
 		expect(sponsoredPublic.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_public"], feePayer: M.l2.sponsoredFpc })
 	})
 
-	it("reports an already-consumed message instead of failing", async () => {
-		const { wallet } = fakeWallet({ send: fail("Assertion failed: Message not in state: already nullified") })
-		expect(await claim(await ticket("public"), wallet, M, { from: recipient })).toBe("already-consumed")
+	it("reports already-consumed only when this ticket's nullifier is on L2; any other nullifier error stays retryable", async () => {
+		for (const kind of ["public", "private"] as const) {
+			const t = await ticket(kind)
+			const { wallet } = fakeWallet({ send: fail("Assertion failed: L1-to-L2 message is already nullified") })
+			const queried: Fr[] = []
+			const nullified: NullifierNode = {
+				findLeavesIndexes: async (_block, tree, leaves) => {
+					expect(tree).toBe(MerkleTreeId.NULLIFIER_TREE)
+					queried.push(...leaves)
+					return leaves.map(() => ({ data: 7n }) as never)
+				},
+			}
+			expect(await claim(t, nullified, wallet, M, { from: recipient })).toBe("already-consumed")
+			await expect(claim(t, NO_NULLIFIER, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
+			const unreachable: NullifierNode = { findLeavesIndexes: fail("503") as never }
+			await expect(claim(t, unreachable, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
+			expect(queried).toHaveLength(1)
+		}
 	})
 
 	it("surfaces a sponsor that cannot pay, or is missing, as SponsorUnavailableError", async () => {
 		const exhausted = fakeWallet({ send: fail("Not enough balance for fee payer to pay for transaction") })
-		await expect(claim(await ticket("private"), exhausted.wallet, M, { from: recipient })).rejects.toBeInstanceOf(
+		await expect(claim(await ticket("private"), NO_NULLIFIER, exhausted.wallet, M, { from: recipient })).rejects.toBeInstanceOf(
 			SponsorUnavailableError,
 		)
 
 		const none = fakeWallet()
 		const noSponsor = { ...M, l2: { ...M.l2, sponsoredFpc: undefined } }
-		await expect(claim(await ticket("private"), none.wallet, noSponsor, { from: recipient })).rejects.toBeInstanceOf(
+		await expect(claim(await ticket("private"), NO_NULLIFIER, none.wallet, noSponsor, { from: recipient })).rejects.toBeInstanceOf(
 			SponsorUnavailableError,
 		)
 		expect(none.sent).toHaveLength(0)
 
 		const other = fakeWallet({ send: fail("boom") })
-		await expect(claim(await ticket("public"), other.wallet, M, { from: recipient })).rejects.toThrow("boom")
+		await expect(claim(await ticket("public"), NO_NULLIFIER, other.wallet, M, { from: recipient })).rejects.toThrow("boom")
 	})
 })
 

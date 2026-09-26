@@ -38,6 +38,18 @@ describe("owned process groups", () => {
 		expect(groupState(p)).toBe("ours")
 	})
 
+	it("once the leader exits, owns the group only through a member carrying its marker", async () => {
+		const p = await spawnDetached("orphans", "sh", ["-c", "sleep 60 & exit 0"], { env: process.env, logFile: join(dir, "orphans.log") })
+		spawned.push(p)
+		await new Promise((r) => setTimeout(r, 300))
+		expect(membersOf(p.pgid)).toBe(1)
+		expect(groupState({ ...p, marker: "another-run" })).toBe("reused")
+		expect(await stopOwnedGroup({ ...p, marker: "another-run" })).toBe("reused")
+		expect(groupState(p)).toBe("ours")
+		expect(await stopOwnedGroup(p, 2_000)).toBe("stopped")
+		expect(membersOf(p.pgid)).toBe(0)
+	})
+
 	it("rejects a missing binary with its log path, and exposes a quick death through exitCode", async () => {
 		const missing = spawnDetached("gone", join(dir, "no-such-bin"), [], { env: process.env, logFile: join(dir, "gone.log") })
 		await expect(missing).rejects.toThrow(/gone\.log/)

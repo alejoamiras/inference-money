@@ -1,12 +1,17 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { processStart } from "./process"
 
 /** The host-wide record of who is RUNNING what, where; shared with every other agent's tooling on this machine. */
 export const HOST_REGISTRY = join(homedir(), ".agents", "ports.md")
 
-/** A lock older than this belonged to a process that died holding it; waiting forever is the worse failure. */
-const LOCK_STALE_MS = 15_000
+/**
+ * The lock the host's other tooling already takes: `<registry>.lock`, created exclusively. Theirs may be empty and they
+ * break any lock after 15 s; ours names its holder, so a live one is never broken here, and an unnamed one only after
+ * this long.
+ */
+const ANONYMOUS_LOCK_STALE_MS = 120_000
 const HEADER = [
 	"# Ports registry — who is RUNNING what, where (atomic-locked)",
 	"",
@@ -16,35 +21,69 @@ const HEADER = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-function tryLock(lock: string): boolean {
+const readLock = (lock: string): string | undefined => {
 	try {
-		closeSync(openSync(lock, "wx", 0o600))
-		return true
+		return readFileSync(lock, "utf8")
 	} catch {
+		return undefined
+	}
+}
+
+/** Dead only when the named pid no longer runs with the start time it wrote. */
+function holderDead(lock: string, owner: string): boolean {
+	const [pid, ...start] = owner.split(" ")
+	if (!pid || !/^\d+$/.test(pid)) {
 		try {
-			if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock)
-		} catch {}
+			return Date.now() - statSync(lock).mtimeMs > ANONYMOUS_LOCK_STALE_MS
+		} catch {
+			return false
+		}
+	}
+	try {
+		return processStart(Number(pid)) !== start.join(" ")
+	} catch {
 		return false
 	}
 }
 
-/** Rewrites the registry under its lock (created on first use, under that same lock); false when the lock never came free. */
+/** `link` publishes the lock with its holder already written, so no one ever sees it unnamed. */
+function tryLock(lock: string, me: string): boolean {
+	const tmp = `${lock}.${process.pid}.tmp`
+	writeFileSync(tmp, me, { mode: 0o600 })
+	try {
+		linkSync(tmp, lock)
+		return true
+	} catch {
+		const owner = readLock(lock)
+		// Re-read just before removing: only the dead holder's lock is broken, never one taken since.
+		if (owner !== undefined && holderDead(lock, owner) && readLock(lock) === owner) rmSync(lock, { force: true })
+		return false
+	} finally {
+		rmSync(tmp, { force: true })
+	}
+}
+
+/**
+ * Rewrites the registry under its lock, replacing the file whole (a reader or a crash never sees half of it); false
+ * when the lock never came free.
+ */
 async function withRegistry(path: string, mutate: (lines: string[]) => string[]): Promise<boolean> {
 	mkdirSync(dirname(path), { recursive: true })
 	const lock = `${path}.lock`
+	const me = `${process.pid} ${processStart(process.pid) ?? ""}`
 	for (let i = 0; i < 100; i++) {
-		if (tryLock(lock)) {
+		if (tryLock(lock, me)) {
 			try {
 				const current = existsSync(path) ? readFileSync(path, "utf8") : `${HEADER.join("\n")}\n`
-				writeFileSync(path, mutate(current.split("\n")).join("\n"))
+				const tmp = `${path}.${process.pid}.tmp`
+				writeFileSync(tmp, mutate(current.split("\n")).join("\n"))
+				renameSync(tmp, path)
 			} finally {
-				try {
-					unlinkSync(lock)
-				} catch {}
+				if (readLock(lock) === me) rmSync(lock, { force: true })
 			}
 			return true
 		}
-		await sleep(100)
+		await sleep(75 + Math.floor(Math.random() * 50))
 	}
 	return false
 }

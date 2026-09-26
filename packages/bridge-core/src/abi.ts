@@ -139,6 +139,17 @@ export const OUTBOX_ABI = [
 		],
 		outputs: [{ name: "", type: "bool" }],
 	},
+	{
+		type: "event",
+		name: "MessageConsumed",
+		inputs: [
+			{ name: "epoch", type: "uint256", indexed: true },
+			{ name: "root", type: "bytes32", indexed: true },
+			{ name: "messageHash", type: "bytes32", indexed: true },
+			{ name: "leafId", type: "uint256", indexed: false },
+			{ name: "numCheckpointsInEpoch", type: "uint256", indexed: false },
+		],
+	},
 ] as const
 
 export const REGISTRY_ABI = [view("getCanonicalRollup", "address")] as const

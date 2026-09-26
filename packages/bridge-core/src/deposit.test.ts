@@ -69,7 +69,10 @@ function chain() {
 		receipts: new Map<Hex, { status: "success" | "reverted"; logs: Log[] }>(),
 		logs: [] as Log[],
 		failGetLogs: false,
+		onGetLogs: undefined as (() => void) | undefined,
 		chainId: M.l1.chainId,
+		readerChainId: M.l1.chainId,
+		sentOnChain: undefined as number | undefined,
 		selected: ACCOUNT as Address,
 		sends: 0,
 		sendError: undefined as Error | undefined,
@@ -83,12 +86,14 @@ function chain() {
 		return r
 	}
 	const publicClient = {
+		getChainId: async () => s.readerChainId,
 		getBlock: async () => s.finalized,
 		getBlockNumber: async () => s.latest,
 		getTransactionReceipt: receipt,
 		waitForTransactionReceipt: receipt,
 		getLogs: async (q: { address: Address; args: { depositor: Address }; fromBlock: bigint; toBlock: bigint }) => {
 			if (s.failGetLogs) throw new Error("RPC 503")
+			s.onGetLogs?.()
 			const inRange = s.logs.filter((l) => (l.blockNumber ?? 0n) >= q.fromBlock && (l.blockNumber ?? 0n) <= q.toBlock)
 			return parseEventLogs({
 				abi: PERMIT2_DEPOSIT_ROUTER_ABI,
@@ -108,7 +113,8 @@ function chain() {
 			if (s.signError) throw s.signError
 			return pad("0x5195", { size: 65 })
 		},
-		writeContract: async () => {
+		writeContract: async (req: { chain: { id: number } | null }) => {
+			s.sentOnChain = req.chain?.id
 			s.sends++
 			if (s.sendError) throw s.sendError
 			return TX
@@ -160,8 +166,29 @@ describe("submitDeposit", () => {
 		expect(await submitDeposit(d, l1, M, LIVE)).toBe(TX)
 		expect(d.submission).toEqual({ account: ACCOUNT, chainId: M.l1.chainId, fromBlock: 100n })
 		expect(d.l1TxHash).toBe(TX)
+		expect(s.sentOnChain).toBe(M.l1.chainId)
 		await expect(submitDeposit(d, l1, M, LIVE)).rejects.toThrow("already sent")
 		expect(s.sends).toBe(1)
+	})
+
+	it("a concurrent second call is refused outright and cannot disturb the first one's record", async () => {
+		const { s, l1 } = chain()
+		const d = await draft()
+		const [first, second] = await Promise.allSettled([submitDeposit(d, l1, M, LIVE), submitDeposit(d, l1, M, LIVE)])
+		expect(first).toMatchObject({ status: "fulfilled", value: TX })
+		expect(second).toMatchObject({
+			status: "rejected",
+			reason: expect.objectContaining({ message: expect.stringContaining("being sent") }),
+		})
+		expect([s.signs, s.sends]).toEqual([1, 1])
+		expect(d.submission).toBeDefined()
+	})
+
+	it("refuses an L1 reader on another chain before signing: its finalized block would misplace the recovery scan", async () => {
+		const { s, l1 } = chain()
+		s.readerChainId = 1
+		await expect(submitDeposit(await draft(), l1, M, LIVE)).rejects.toBeInstanceOf(NetworkMismatchError)
+		expect(s.signs).toBe(0)
 	})
 
 	it("an explicit refusal of the send leaves the draft sendable; any other failure keeps it submitted", async () => {
@@ -283,6 +310,23 @@ describe("reconcileDeposit", () => {
 		s.finalized = { number: 140n, timestamp: d.typedData.message.deadline + 1n }
 		s.logs = [depositLog(d, { blockNumber: 130n })]
 		expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n })
+	})
+
+	it("never gives a verdict from another chain or deployment: a reader that switches mid-scan throws, keeping the draft", async () => {
+		const { s, l1 } = chain()
+		const d = await draft()
+		await submitDeposit(d, l1, M, LIVE)
+		s.finalized = { number: 140n, timestamp: d.typedData.message.deadline + 1n }
+		s.onGetLogs = () => {
+			s.readerChainId = 1
+		}
+		await expect(reconcileDeposit(d, l1, M)).rejects.toBeInstanceOf(NetworkMismatchError)
+		await expect(reconcileDeposit(d, l1, M)).rejects.toBeInstanceOf(NetworkMismatchError)
+		s.readerChainId = M.l1.chainId
+		s.onGetLogs = undefined
+		const otherRouter = { ...M, l1: { ...M.l1, router: getAddress(a(0xcc)) } }
+		await expect(reconcileDeposit(d, l1, otherRouter)).rejects.toBeInstanceOf(NetworkMismatchError)
+		expect(await reconcileDeposit(d, l1, M)).toBe("not-deposited")
 	})
 
 	it("a draft never submitted is not-deposited without touching the chain", async () => {

@@ -4,6 +4,7 @@ import {
 	type ClaimTicket,
 	claim,
 	confirmDeposit,
+	isClaimConsumed,
 	NetworkMismatchError,
 	prepareDeposit,
 	reconcileDeposit,
@@ -41,18 +42,21 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		const t = await deposit(l1, "private", bob, 3n * USDC)
 		await claimable(t, relayer)
 		const redirected: ClaimTicket = { ...t, draft: { ...t.draft, intent: { ...t.draft.intent, recipient: relayer } } }
-		await expect(claim(redirected, harness().wallet, harness().manifest, { from: relayer })).rejects.toThrow()
-		expect(await claim(t, harness().wallet, harness().manifest, { from: relayer })).toBe("claimed")
+		await expect(claim(redirected, harness().node, harness().wallet, harness().manifest, { from: relayer })).rejects.toThrow()
+		expect(await claim(t, harness().node, harness().wallet, harness().manifest, { from: relayer })).toBe("claimed")
 		expect((await l2Balances(bob)).private).toBe(3n * USDC)
 		expect((await l2Balances(relayer)).private).toBe(0n)
 	})
 
-	it("a second claim of the same deposit reports already-consumed, public and private", async () => {
+	it("a second claim of the same deposit reports already-consumed, public and private, on its nullifier alone", async () => {
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
+		const { node, manifest: m } = harness()
 		for (const kind of ["public", "private"] as const) {
 			const t = await deposit(l1, kind, bob, USDC)
 			await claimable(t, bob)
+			expect(await isClaimConsumed(t, node, m)).toBe(false)
 			expect(await claimFor(t)).toBe("claimed")
+			expect(await isClaimConsumed(t, node, m)).toBe(true)
 			expect(await claimFor(t)).toBe("already-consumed")
 		}
 		expect(await l2Balances(bob)).toEqual({ public: USDC, private: USDC })

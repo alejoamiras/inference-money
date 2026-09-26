@@ -2,6 +2,7 @@ import { REPO_ROOT, runIdFor } from "@inference-money/local-network"
 import { deployLocal, verifyLocal } from "./local"
 import { networkByName, TESTNET } from "./networks"
 import { probeNetwork } from "./preflight"
+import { describeError, outputNeedles, REDACTED_CHILD, runRedacted } from "./redact"
 import { scanForSecrets } from "./scan"
 import { loadTestnetSecrets } from "./secrets"
 import { smokeTestnet } from "./smoke"
@@ -69,6 +70,18 @@ const COMMANDS: Record<string, () => Promise<number> | number> = {
 	"scan secrets": scanSecrets,
 }
 
-const run = COMMANDS[process.argv.slice(2, 4).join(" ")]
-if (!run) console.error(USAGE)
-process.exit(run ? await run() : 2)
+const command = process.argv.slice(2, 4).join(" ")
+const run = COMMANDS[command]
+if (!run) {
+	console.error(USAGE)
+	process.exit(2)
+}
+if (!command.endsWith(" local") && process.env[REDACTED_CHILD] !== "1") {
+	process.exit(await runRedacted(process.argv.slice(1), outputNeedles(REPO_ROOT)))
+}
+try {
+	process.exit(await run())
+} catch (e) {
+	console.error(describeError(e))
+	process.exit(1)
+}

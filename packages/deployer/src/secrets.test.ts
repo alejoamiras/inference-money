@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assertOwnerOnly, containsSecret, parseEnvFile, parseTestnetSecrets, scrubbedEnv } from "./secrets"
 
-const KEY: `0x${string}` = `0x${"ab".repeat(32)}`
+const KEY: `0x${string}` = `0x${"0b".repeat(32)}`
 
 describe("testnet secrets", () => {
 	it("parses keys, strips quotes and export prefixes, ignores comments", () => {
@@ -14,11 +14,23 @@ describe("testnet secrets", () => {
 		expect(parseTestnetSecrets(env)).toEqual({ l1PrivateKey: KEY, aztecSecretKey: KEY, sepoliaRpcUrl: "https://x" })
 	})
 
-	it("names a malformed key without echoing its value", () => {
-		const bad = "0xdeadbeefsecret"
-		const run = () => parseTestnetSecrets(new Map([["TESTNET_L1_PRIVATE_KEY", bad]]))
-		expect(run).toThrow(/TESTNET_L1_PRIVATE_KEY/)
-		expect(run).not.toThrow(new RegExp(bad))
+	it("names a malformed or out-of-range key without echoing its value", () => {
+		const aboveField = `0x${"ab".repeat(32)}`
+		for (const [name, bad] of [
+			["TESTNET_L1_PRIVATE_KEY", "0xdeadbeefsecret"],
+			["TESTNET_L1_PRIVATE_KEY", `0x${"00".repeat(32)}`],
+			["TESTNET_AZTEC_SECRET_KEY", aboveField],
+		] as const) {
+			const run = () =>
+				parseTestnetSecrets(
+					new Map([
+						["TESTNET_L1_PRIVATE_KEY", KEY],
+						[name, bad],
+					]),
+				)
+			expect(run).toThrow(new RegExp(name))
+			expect(run).not.toThrow(new RegExp(bad.slice(2)))
+		}
 	})
 
 	it("scrubs credential-bearing variables from a child env, keeping the rest", () => {

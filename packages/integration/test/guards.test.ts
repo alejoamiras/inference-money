@@ -50,15 +50,15 @@ describe.skipIf(!INTEGRATION)("guards", () => {
 	})
 
 	it("a sponsor that cannot pay is a SponsorUnavailableError and the ticket survives to be claimed", async () => {
-		const { manifest: m, wallet } = harness()
+		const { manifest: m, wallet, node } = harness()
 		const unfunded = await getContractInstanceFromInstantiationParams(sponsoredFpcArtifact, { salt: new Fr(1) })
 		await wallet.registerContract(unfunded, sponsoredFpcArtifact)
 		const broke = { ...m, l2: { ...m.l2, sponsoredFpc: unfunded.address.toString() as `0x${string}` } }
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const t = await deposit(l1, "private", bob, USDC)
 		await claimable(t, bob)
-		await expect(claim(t, wallet, broke, { from: bob })).rejects.toBeInstanceOf(SponsorUnavailableError)
-		expect(await claim(t, wallet, m, { from: bob })).toBe("claimed")
+		await expect(claim(t, node, wallet, broke, { from: bob })).rejects.toBeInstanceOf(SponsorUnavailableError)
+		expect(await claim(t, node, wallet, m, { from: bob })).toBe("claimed")
 		expect((await l2Balances(bob)).private).toBe(USDC)
 	})
 
