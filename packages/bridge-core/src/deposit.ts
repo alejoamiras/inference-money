@@ -31,8 +31,11 @@ export interface DepositDraft {
 	secretHash: Fr
 	witness: DepositWitness
 	typedData: DepositTypedData
-	/** `fromBlock` is the finalized block before the send: a reorg can re-mine the deposit below the tip seen then. */
-	submission?: { account: Address; chainId: number; fromBlock: bigint }
+	/**
+	 * `fromBlock` is the finalized block before the signature (a reorg can re-mine the deposit below the tip seen then);
+	 * its hash proves at recovery that the boundary was read from this chain.
+	 */
+	submission?: { account: Address; chainId: number; fromBlock: bigint; fromBlockHash: Hex }
 	l1TxHash?: Hex
 }
 
@@ -114,7 +117,7 @@ async function signAndSend(d: DepositDraft, l1: L1Ctx, m: BridgeManifest, l2: Pa
 	on?.("signing")
 	const signature = await l1.walletClient.signTypedData({ account: signerOf(l1), ...d.typedData })
 	await Promise.all([assertSigningContext(l1, null, m, expected), assertBridgeLive(l2, m)])
-	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number }
+	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number, fromBlockHash: finalized.hash }
 	on?.("depositing")
 	const { message } = d.typedData
 	try {
@@ -217,9 +220,15 @@ async function scanForDeposit(
 	return undefined
 }
 
-async function locateDeposit(d: DepositDraft, pub: PublicClient, m: BridgeManifest, fromBlock: bigint): Promise<Reconciled> {
+type Submission = NonNullable<DepositDraft["submission"]>
+
+async function locateDeposit(d: DepositDraft, pub: PublicClient, m: BridgeManifest, s: Submission): Promise<Reconciled> {
 	const byHash = await ticketByHash(d, pub, m)
 	if (byHash) return byHash
+	// A boundary read from another chain could sit above this chain's blocks and make an empty scan look complete.
+	const anchor = await pub.getBlock({ blockNumber: s.fromBlock })
+	if (anchor.hash !== s.fromBlockHash) throw new NetworkMismatchError(["the recorded scan boundary is not a block of this chain"])
+	const fromBlock = s.fromBlock
 	// viem caches the tip for seconds; a stale tip below `finalized` would skip blocks the verdict below vouches for.
 	const [latest, finalized] = await Promise.all([pub.getBlockNumber({ cacheTime: 0 }), pub.getBlock({ blockTag: "finalized" })])
 	const to = latest > finalized.number ? latest : finalized.number
@@ -244,7 +253,7 @@ export async function reconcileDeposit(d: DepositDraft, l1: L1Ctx, m: BridgeMani
 	const pub = l1.publicClient
 	try {
 		await assertReaderChain(pub, s.chainId)
-		const verdict = await locateDeposit(d, pub, m, s.fromBlock)
+		const verdict = await locateDeposit(d, pub, m, s)
 		await assertReaderChain(pub, s.chainId)
 		return verdict
 	} catch (e) {

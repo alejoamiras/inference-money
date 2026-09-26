@@ -50,6 +50,29 @@ describe("owned process groups", () => {
 		expect(membersOf(p.pgid)).toBe(0)
 	})
 
+	it("a leaderless group whose members carry no marker at all is unverified, never assumed reused", async () => {
+		const p = await spawnDetached("bare", "sh", ["-c", "env -i sleep 60 & exit 0"], {
+			env: process.env,
+			logFile: join(dir, "bare.log"),
+		})
+		spawned.push(p)
+		await new Promise((r) => setTimeout(r, 300))
+		expect(groupState(p)).toBe("unverified")
+		expect(await stopOwnedGroup(p)).toBe("unverified")
+		expect(membersOf(p.pgid)).toBe(1)
+		process.kill(-p.pgid, "SIGKILL")
+	})
+
+	it("kills the group it just spawned when its identity cannot be read", async () => {
+		const path = process.env.PATH
+		process.env.PATH = "/nonexistent"
+		const failed = spawnDetached("blind", "/bin/sleep", ["3141"], { env: { PATH: path }, logFile: join(dir, "blind.log") })
+		await expect(failed).rejects.toThrow("could not start")
+		process.env.PATH = path
+		await new Promise((r) => setTimeout(r, 200))
+		expect(execFileSync("ps", ["-eo", "args="], { encoding: "utf8" })).not.toContain("sleep 3141")
+	})
+
 	it("rejects a missing binary with its log path, and exposes a quick death through exitCode", async () => {
 		const missing = spawnDetached("gone", join(dir, "no-such-bin"), [], { env: process.env, logFile: join(dir, "gone.log") })
 		await expect(missing).rejects.toThrow(/gone\.log/)

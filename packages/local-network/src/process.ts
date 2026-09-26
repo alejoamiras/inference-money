@@ -28,18 +28,23 @@ export function processStart(pid: number): string | undefined {
 	}
 }
 
-/** Linux `/proc` only; elsewhere, or when `ps` fails, this throws and the group stays unverified. */
-function groupCarries(pgid: number, marker: string): boolean {
-	const needle = `\0${OWNER_MARKER}=${marker}\0`
-	if (!existsSync("/proc/self/environ")) throw new Error("no /proc: a leaderless group cannot be verified here")
+/**
+ * A leaderless group's owner, read from its members' environments: ours on our marker, "reused" only on another
+ * run's marker. A member can clear its env or hide it, so no marker at all proves nothing. Linux `/proc` only.
+ */
+function markerEvidence(pgid: number, marker: string): GroupState {
+	if (!existsSync("/proc/self/environ")) return "unverified"
+	let other = false
 	for (const line of execFileSync("ps", ["-eo", "pid=,pgid="], { encoding: "utf8" }).trim().split("\n")) {
 		const [pid, group] = line.trim().split(/\s+/).map(Number)
 		if (group !== pgid) continue
 		try {
-			if (`\0${readFileSync(`/proc/${pid}/environ`, "latin1")}\0`.includes(needle)) return true
+			const env = `\0${readFileSync(`/proc/${pid}/environ`, "latin1")}\0`
+			if (env.includes(`\0${OWNER_MARKER}=${marker}\0`)) return "ours"
+			other ||= env.includes(`\0${OWNER_MARKER}=`)
 		} catch {}
 	}
-	return false
+	return other ? "reused" : "unverified"
 }
 
 function groupAlive(pgid: number): boolean {
@@ -62,7 +67,7 @@ export function groupState(p: OwnedProcess): GroupState {
 		const start = processStart(p.pgid)
 		if (start !== undefined) return start === p.started ? "ours" : "reused"
 		if (!groupAlive(p.pgid)) return "gone"
-		return groupCarries(p.pgid, p.marker) ? "ours" : "reused"
+		return markerEvidence(p.pgid, p.marker)
 	} catch {
 		return "unverified"
 	}
@@ -122,11 +127,19 @@ export async function spawnDetached(
 		exit = code
 	})
 	child.unref()
-	for (let i = 0; i < 50; i++) {
-		const started = child.pid === undefined ? undefined : processStart(child.pid)
-		if (started && child.pid !== undefined) return { name, pgid: child.pid, started, marker, exitCode: () => exit }
-		if (failure || exit !== undefined) break
-		await sleep(20)
+	try {
+		for (let i = 0; i < 50; i++) {
+			const started = child.pid === undefined ? undefined : processStart(child.pid)
+			if (started && child.pid !== undefined) return { name, pgid: child.pid, started, marker, exitCode: () => exit }
+			if (failure || exit !== undefined) break
+			await sleep(20)
+		}
+	} catch (e) {
+		failure = e as Error
 	}
+	// No handle will ever record this group, so it must not outlive the failure.
+	try {
+		if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL")
+	} catch {}
 	throw new Error(`${name}: could not start ${bin} (${failure?.message ?? `exit ${exit}`}); see ${opts.logFile}`)
 }
