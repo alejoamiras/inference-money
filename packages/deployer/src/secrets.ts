@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs"
 import { resolve } from "node:path"
+import { Fr } from "@aztec/aztec.js/fields"
 import type { Hex } from "viem"
 
 export interface TestnetSecrets {
@@ -9,6 +10,14 @@ export interface TestnetSecrets {
 }
 
 const HEX32 = /^0x[0-9a-fA-F]{64}$/
+const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+
+/** Range-checked here because the libraries that reject an out-of-range key echo it in their error. */
+function assertScalar(name: string, value: string, bound: bigint): void {
+	if (!HEX32.test(value)) throw new Error(`${name} is missing or not 32-byte 0x-hex`)
+	const n = BigInt(value)
+	if (n === 0n || n >= bound) throw new Error(`${name} is out of range for its curve`)
+}
 
 /** Parses dotenv-style `KEY=value` lines; quotes are stripped, comments and blanks skipped. */
 export function parseEnvFile(text: string): Map<string, string> {
@@ -31,8 +40,8 @@ export function parseEnvFile(text: string): Map<string, string> {
 export function parseTestnetSecrets(env: Map<string, string>): TestnetSecrets {
 	const l1 = env.get("TESTNET_L1_PRIVATE_KEY") ?? ""
 	const az = env.get("TESTNET_AZTEC_SECRET_KEY") ?? ""
-	if (!HEX32.test(l1)) throw new Error("TESTNET_L1_PRIVATE_KEY is missing or not 32-byte 0x-hex")
-	if (!HEX32.test(az)) throw new Error("TESTNET_AZTEC_SECRET_KEY is missing or not 32-byte 0x-hex")
+	assertScalar("TESTNET_L1_PRIVATE_KEY", l1, SECP256K1_N)
+	assertScalar("TESTNET_AZTEC_SECRET_KEY", az, Fr.MODULUS)
 	return { l1PrivateKey: l1 as Hex, aztecSecretKey: az as Hex, sepoliaRpcUrl: env.get("SEPOLIA_RPC_URL") || undefined }
 }
 
@@ -49,12 +58,30 @@ export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proces
 	return Object.fromEntries(Object.entries(env).filter(([k]) => !SECRET_NAME.test(k)))
 }
 
-/** Whether `text` holds any secret value, with or without its 0x prefix, in any case. Answers only yes or no. */
+/** Parts of an RPC URL long enough to be a provider's API key or credential. */
+function urlCredentials(url: string): string[] {
+	try {
+		const u = new URL(url)
+		return [...u.pathname.split("/"), ...u.searchParams.values(), u.username, u.password].filter((p) => p.length >= 16)
+	} catch {
+		return []
+	}
+}
+
+/**
+ * Every form a secret takes in text, longest first, lowercased: keys with and without 0x, and RPC URLs whole and by
+ * their credential-length parts.
+ */
+export function secretNeedles(s: Partial<TestnetSecrets>, env: NodeJS.ProcessEnv = process.env): string[] {
+	const keys = [s.l1PrivateKey, s.aztecSecretKey].flatMap((k) => (k ? [k, k.slice(2)] : []))
+	const urls = [s.sepoliaRpcUrl, env.SEPOLIA_RPC_URL].flatMap((u) => (u ? [u, ...urlCredentials(u)] : []))
+	return [...new Set([...keys, ...urls].map((n) => n.toLowerCase()))].sort((a, b) => b.length - a.length)
+}
+
+/** Whether `text` holds any secret, in any case. Answers only yes or no. */
 export function containsSecret(text: string, s: TestnetSecrets): boolean {
 	const haystack = text.toLowerCase()
-	const needles = [s.l1PrivateKey, s.aztecSecretKey].flatMap((v) => [v.toLowerCase(), v.slice(2).toLowerCase()])
-	if (s.sepoliaRpcUrl) needles.push(s.sepoliaRpcUrl.toLowerCase())
-	return needles.some((n) => haystack.includes(n))
+	return secretNeedles(s, {}).some((n) => haystack.includes(n))
 }
 
 export function loadTestnetSecrets(repoRoot: string): TestnetSecrets {

@@ -31,7 +31,8 @@ describe("run identity and endpoints", () => {
 				l1ChainId: 31337,
 				ports: { anvil: 10001, aztec: 10002, aztecAdmin: 10003, aztecP2p: 10004 },
 				dataDir: "/d",
-				processes: [{ name: "anvil", pgid: 42, started: "Mon Jan  1 00:00:00 2026" }],
+				processes: [{ name: "anvil", pgid: 42, started: "Mon Jan  1 00:00:00 2026", marker: "anvil-m" }],
+				ready: false,
 				worktree: "/w",
 				nodeVersion: "5.0.0",
 				createdAt: "2026-09-26T00:00:00.000Z",
@@ -39,6 +40,8 @@ describe("run identity and endpoints", () => {
 			writeHandle(h, root)
 			expect(statSync(handlePath("r", root)).mode & 0o777).toBe(0o600)
 			expect(readHandle("r", root)).toEqual(h)
+			expect(() => resolveEndpoints("r", {}, root)).toThrow("still booting")
+			writeHandle({ ...h, ready: true }, root)
 			expect(resolveEndpoints("r", {}, root)).toEqual({ anvilUrl: h.anvilUrl, nodeUrl: h.nodeUrl, attached: false })
 			expect(() => writeHandle({ ...h, extra: 1 } as NetHandle, root)).toThrow()
 		} finally {

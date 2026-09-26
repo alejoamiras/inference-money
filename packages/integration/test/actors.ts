@@ -102,7 +102,7 @@ export function claimable(t: ClaimTicket, from: AztecAddress): Promise<void> {
 export const payFor = (kind: DepositKind): FeeChoice | undefined => (kind === "public" ? "sponsored" : undefined)
 
 export const claimFor = (t: ClaimTicket, from = t.draft.intent.recipient) =>
-	claim(t, harness().wallet, harness().manifest, { from, fee: payFor(t.draft.intent.kind) })
+	claim(t, harness().node, harness().wallet, harness().manifest, { from, fee: payFor(t.draft.intent.kind) })
 
 /** Deposits and claims, so `recipient` holds `amount` more in the given balance. */
 export async function funded(l1: L1Ctx, kind: DepositKind, recipient: AztecAddress, amount: bigint): Promise<void> {

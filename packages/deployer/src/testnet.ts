@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs"
 import { join } from "node:path"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import { FeeJuicePaymentMethodWithClaim } from "@aztec/aztec.js/fee"
@@ -8,7 +9,7 @@ import { REPO_ROOT } from "@inference-money/local-network"
 import { privateKeyToAccount } from "viem/accounts"
 import { deployBridge } from "./deploy"
 import type { L2Fees } from "./deploy-l2"
-import { buildBridgeContracts } from "./evm"
+import { type BridgeEvmArtifacts, buildBridgeContracts, forgeRunDir } from "./evm"
 import { bridgeFeeJuice } from "./fee-juice"
 import { type L1Signer, l1Signer } from "./l1"
 import { readManifest, writeManifest } from "./manifest"
@@ -19,8 +20,19 @@ import { assertAllPass, verifyDeployment } from "./verify"
 import { withBridgeWallet } from "./wallet"
 
 export const TESTNET_MANIFEST = join(REPO_ROOT, "deployments", "testnet.json")
-/** The forge run dir for testnet builds; always `--force`, so a stale cache can never reach a live deploy. */
-const FORGE_RUN = "testnet"
+
+/**
+ * Always `--force` into a forge dir of this invocation's own, removed once the artifacts are in memory: no stale cache
+ * or concurrent testnet command can reach a live deploy.
+ */
+function buildFresh(): BridgeEvmArtifacts {
+	const run = `testnet-${process.pid}`
+	try {
+		return buildBridgeContracts(run, true, scrubbedEnv())
+	} finally {
+		rmSync(forgeRunDir(run), { recursive: true, force: true })
+	}
+}
 
 export interface TestnetContext {
 	pins: NetworkPins
@@ -64,7 +76,7 @@ function selfFundedFees(c: TestnetContext, node: ReturnType<typeof createAztecNo
 export async function deployTestnet(log: (m: string) => void): Promise<BridgeManifest> {
 	const c = testnetContext()
 	assertAllPass(await probeNetwork(c.pins, c.l1RpcUrl), log)
-	const evm = buildBridgeContracts(FORGE_RUN, true, scrubbedEnv())
+	const evm = buildFresh()
 	const manifest = await withBridgeWallet(c.pins.nodeUrl, { prove: true }, async (wallet, node) => {
 		const sponsor = await sponsorInstance()
 		if (sponsor.address.toString() !== c.pins.sponsoredFpc) throw new Error(`the pinned sponsor derives to ${sponsor.address}`)
@@ -94,7 +106,7 @@ export async function deployTestnet(log: (m: string) => void): Promise<BridgeMan
 export async function verifyTestnet(log: (m: string) => void): Promise<void> {
 	const c = testnetContext()
 	const manifest = readManifest(TESTNET_MANIFEST)
-	const evm = buildBridgeContracts(FORGE_RUN, true, scrubbedEnv())
+	const evm = buildFresh()
 	const node = createAztecNodeClient(manifest.l2.nodeUrl)
 	assertAllPass(await verifyDeployment(manifest, evm, c.l1.publicClient, node, c.l1.account.address), log)
 }

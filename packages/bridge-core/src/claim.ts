@@ -4,7 +4,12 @@ import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec/aztec.j
 import { Fr } from "@aztec/aztec.js/fields"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
+import { siloNullifier } from "@aztec/stdlib/hash"
+import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { computeFeeJuiceMessageNullifier } from "@aztec/stdlib/messaging"
+import { MerkleTreeId } from "@aztec/stdlib/trees"
 import { sponsoredFpcArtifact, tokenBridgeArtifact } from "./artifacts"
+import { deriveClaimSecret } from "./claim-secret"
 import type { ClaimTicket } from "./deposit"
 import type { BridgeManifest } from "./manifest"
 import type { StageSink } from "./types"
@@ -12,13 +17,11 @@ import type { StageSink } from "./types"
 export type ClaimResult = "claimed" | "already-consumed"
 
 /**
- * Who pays a tx's fee. The wallet's default payer is usually the user's own account, which links it to a private claim
- * or exit; the sponsor does not. Private ops default to the sponsor and public ones to the wallet; an explicit choice
- * wins either way (a fresh account holds no Fee Juice to pay a public claim with).
+ * Who pays a tx's fee. The wallet's default payer usually links the user's account to a private claim or exit; the
+ * sponsor does not. Default: sponsored for private ops, the wallet for public ones; an explicit choice overrides.
  */
 export type FeeChoice = "sponsored" | "wallet-default"
 
-/** The payment a sponsored choice sends with, or undefined for the wallet's default payer. */
 export function feeFor(kind: "public" | "private", m: BridgeManifest, choice?: FeeChoice): { paymentMethod: FeePaymentMethod } | undefined {
 	return (choice ?? (kind === "private" ? "sponsored" : "wallet-default")) === "sponsored"
 		? { paymentMethod: sponsoredPayment(m) }
@@ -126,12 +129,29 @@ export async function waitClaimable(
 	throw new Error("The deposit is not claimable yet. It is kept; try again in a few minutes.")
 }
 
+export type NullifierNode = Pick<AztecNode, "findLeavesIndexes">
+
+/**
+ * Whether the bridge has nullified this ticket's message on L2. The nullifier is aztec-nr's
+ * `compute_l1_to_l2_message_nullifier`, which stdlib names after the fee-juice contract; the bridge siloes it.
+ */
+export async function isClaimConsumed(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<boolean> {
+	const { kind, recipient } = t.draft.intent
+	const secret = kind === "private" ? deriveClaimSecret(t.draft.secretOrSalt, recipient) : t.draft.secretOrSalt
+	const inner = await computeFeeJuiceMessageNullifier(Fr.fromHexString(t.messageHash), secret)
+	const siloed = await siloNullifier(AztecAddress.fromStringUnsafe(m.l2.bridge.address), inner)
+	const [hit] = await node.findLeavesIndexes("latest", MerkleTreeId.NULLIFIER_TREE, [siloed])
+	return hit !== undefined
+}
+
 /**
  * Mints the deposit on L2 from `from` (the recipient or a relayer; a private claim cannot be redirected either way),
- * paid per {@link FeeChoice}.
+ * paid per {@link FeeChoice}. "already-consumed" needs this ticket's nullifier on L2: a nullifier error can come from
+ * any part of the tx, and a caller may discard the secret on that verdict.
  */
 export async function claim(
 	t: ClaimTicket,
+	node: NullifierNode,
 	wallet: Wallet,
 	m: BridgeManifest,
 	opts: { from: AztecAddress; fee?: FeeChoice },
@@ -142,7 +162,7 @@ export async function claim(
 		await claimCall(t, wallet, m).send({ from: opts.from, fee })
 		return "claimed"
 	} catch (e) {
-		if (ALREADY_CONSUMED.test(message(e))) return "already-consumed"
+		if (ALREADY_CONSUMED.test(message(e)) && (await isClaimConsumed(t, node, m).catch(() => false))) return "already-consumed"
 		if (sponsored && FEE_PAYER_FAILED.test(message(e))) {
 			throw new SponsorUnavailableError("The fee sponsor could not pay for this claim. It is kept; retry later.", { cause: e })
 		}

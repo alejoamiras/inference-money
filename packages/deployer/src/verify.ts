@@ -166,7 +166,6 @@ export class VerificationFailed extends Error {
 	}
 }
 
-/** Logs every check, then throws {@link VerificationFailed} naming each one that failed. */
 export function assertAllPass(checks: Check[], log: (m: string) => void): void {
 	for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
 	const failures = checks.filter((c) => !c.ok)

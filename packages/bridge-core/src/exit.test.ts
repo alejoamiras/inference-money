@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { getAddress, zeroAddress } from "viem"
-import { type ExitIntent, type ExitNode, exitTicketFromTx, exitToL1, expectedExitMessage } from "./exit"
+import { type ExitIntent, type ExitNode, ExitUnconfirmedError, exitTicketFromTx, exitToL1, expectedExitMessage } from "./exit"
 import { fakeEpoch } from "./test/fake-epoch"
 import { fakeWallet } from "./test/fake-wallet"
 import { a, MANIFEST as M } from "./test/fixtures"
@@ -60,11 +60,15 @@ describe("exitToL1", () => {
 	})
 
 	it.each([
-		["no", () => [new Fr(1)]],
-		["two", () => [message, message]],
-	])("rejects a mined tx with %s matching messages", async (_, msgs) => {
+		["no matching messages", () => effectNode([new Fr(1)]), /without exactly one matching/],
+		["two matching messages", () => effectNode([message, message]), /without exactly one matching/],
+		["a node read that fails", () => ({ getTxEffect: () => Promise.reject(new Error("503")) }) as unknown as ExitNode, /503/],
+	])("after the burn, %s still yields its hash for recovery", async (_, node, cause) => {
 		const w = fakeWallet()
-		await expect(exitToL1(intent(), w.wallet, effectNode(msgs()), M)).rejects.toThrow(/without exactly one matching/)
+		const err = await exitToL1(intent(), w.wallet, node(), M).catch((e: unknown) => e)
+		expect(err).toBeInstanceOf(ExitUnconfirmedError)
+		expect(err).toMatchObject({ l2TxHash: w.txHash, recipient: RECIPIENT, amount: AMOUNT })
+		expect(((err as Error).cause as Error).message).toMatch(cause)
 	})
 })
 

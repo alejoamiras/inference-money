@@ -1,16 +1,20 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import type { Fr } from "@aztec/aztec.js/fields"
 import {
+	type Address,
 	ContractFunctionExecutionError,
 	ContractFunctionRevertedError,
+	encodeAbiParameters,
 	encodeErrorResult,
+	encodeEventTopics,
 	getAddress,
 	type Hex,
+	type Log,
 	type PublicClient,
 	pad,
 	type WalletClient,
 } from "viem"
-import { TOKEN_PORTAL_ABI } from "./abi"
+import { OUTBOX_ABI, TOKEN_PORTAL_ABI } from "./abi"
 import { type ExitTicket, expectedExitMessage } from "./exit"
 import { NetworkMismatchError } from "./network"
 import { fakeEpoch } from "./test/fake-epoch"
@@ -61,10 +65,40 @@ const revert = (errorName: "Outbox__AlreadyNullified" | "MerkleLib__InvalidRoot"
 	})
 }
 
-/** An L1 whose successive `withdraw` simulations fail with the scripted errors, then succeed. */
+type Write = { address: string; functionName: string; args: readonly unknown[]; chain: { id: number } }
+
+/** The Outbox's event for the leaf a sent `withdraw` names, as its receipt carries it. */
+function consumedLog(w: Write, messageHash: Hex, outbox: Address = M.l1.outbox): Log {
+	const [, , , epoch, n, leafIndex, path] = w.args as [unknown, unknown, unknown, bigint, bigint, bigint, Hex[]]
+	return {
+		address: outbox,
+		topics: encodeEventTopics({ abi: OUTBOX_ABI, eventName: "MessageConsumed", args: { epoch, root: pad("0x9"), messageHash } }) as [
+			Hex,
+			...Hex[],
+		],
+		data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }], [2n ** BigInt(path.length) + leafIndex, n]),
+	} as Log
+}
+
+/**
+ * An L1 whose successive `withdraw` simulations fail with the scripted errors, then succeed. A mined withdraw's receipt
+ * carries the Outbox event for `message` unless `s.minedLogs` scripts it (a replacement mined instead).
+ */
 function l1(simulations: (Error | undefined)[] = [], chainId = M.l1.chainId) {
-	const s = { simulated: 0, writes: [] as { address: string; functionName: string; args: readonly unknown[] }[] }
-	const receipt = async () => ({ status: "success" })
+	const s = {
+		simulated: 0,
+		writes: [] as Write[],
+		minedHash: TX,
+		minedLogs: undefined as ((w: Write) => Log[]) | undefined,
+	}
+	const receipt = async () => {
+		const w = s.writes.at(-1) as Write
+		return {
+			status: "success",
+			transactionHash: s.minedHash,
+			logs: (s.minedLogs ?? ((x) => [consumedLog(x, message.toString() as Hex)]))(w),
+		}
+	}
 	const publicClient = {
 		simulateContract: async () => {
 			const failure = simulations[s.simulated++]
@@ -78,7 +112,7 @@ function l1(simulations: (Error | undefined)[] = [], chainId = M.l1.chainId) {
 		chain: undefined,
 		getChainId: async () => chainId,
 		getAddresses: async () => [ACCOUNT],
-		writeContract: async (w: (typeof s.writes)[number]) => {
+		writeContract: async (w: Write) => {
 			s.writes.push(w)
 			return TX
 		},
@@ -93,6 +127,7 @@ describe("buildWithdrawProof", () => {
 		const truth = e.truth(0)
 		const proof = (await buildWithdrawProof(ticket, e.node, e.outbox)) as OutboxProof
 		expect(proof).toEqual({
+			exit: { messageHash: ticket.messageHash, l2TxHash: ticket.l2TxHash.toString(), messageIndexInTx: 0 },
 			epoch: BigInt(e.EPOCH),
 			numCheckpointsInEpoch: 1n,
 			leafIndex: truth.leafIndex,
@@ -133,19 +168,51 @@ describe("waitWithdrawable", () => {
 })
 
 describe("withdrawOnL1", () => {
-	const proof: OutboxProof = { epoch: 5n, numCheckpointsInEpoch: 1n, leafIndex: 2n, path: [pad("0x1")] }
+	const proofFor = (t: ExitTicket): OutboxProof => ({
+		exit: { messageHash: t.messageHash, l2TxHash: t.l2TxHash.toString(), messageIndexInTx: t.messageIndexInTx },
+		epoch: 5n,
+		numCheckpointsInEpoch: 1n,
+		leafIndex: 2n,
+		path: [pad("0x1")],
+	})
 
-	it("sends the 7-argument portal withdraw once the simulation passes", async () => {
+	it("sends the 7-argument portal withdraw on the manifest's chain once the simulation passes", async () => {
 		const { ticket } = setup()
 		const { s, ctx } = l1()
-		expect(await withdrawOnL1(ticket, proof, ctx, M)).toBe(TX)
+		expect(await withdrawOnL1(ticket, proofFor(ticket), ctx, M)).toBe(TX)
 		expect(s.writes).toEqual([
 			expect.objectContaining({
 				address: M.l1.portal,
 				functionName: "withdraw",
 				args: [RECIPIENT, AMOUNT, false, 5n, 1n, 2n, [pad("0x1")]],
+				chain: expect.objectContaining({ id: M.l1.chainId }),
 			}),
 		])
+	})
+
+	it("returns the mined hash only when the receipt holds the Outbox's event for this leaf", async () => {
+		const { ticket } = setup()
+		const sped = l1()
+		sped.s.minedHash = pad("0x5bed", { size: 32 })
+		expect(await withdrawOnL1(ticket, proofFor(ticket), sped.ctx, M)).toBe(sped.s.minedHash)
+		const msg = ticket.messageHash
+		for (const minedLogs of [
+			() => [],
+			(w: Write) => [consumedLog(w, msg, getAddress(a(0x0b)))],
+			(w: Write) => [consumedLog({ ...w, args: [...w.args.slice(0, 5), 3n, w.args[6]] }, msg)],
+		]) {
+			const cancelled = l1()
+			cancelled.s.minedLogs = minedLogs
+			await expect(withdrawOnL1(ticket, proofFor(ticket), cancelled.ctx, M)).rejects.toThrow("without this withdrawal")
+		}
+	})
+
+	it("refuses a proof built for another exit before touching L1", async () => {
+		const { ticket } = setup()
+		const { s, ctx } = l1()
+		const other = { ...proofFor(ticket), exit: { ...proofFor(ticket).exit, messageIndexInTx: 1 } }
+		await expect(withdrawOnL1(ticket, other, ctx, M)).rejects.toThrow("different withdrawal")
+		expect(s.simulated).toBe(0)
 	})
 
 	it.each([
@@ -154,14 +221,14 @@ describe("withdrawOnL1", () => {
 	] as const)("maps a %s simulation revert without sending", async (name, type) => {
 		const { ticket } = setup()
 		const { s, ctx } = l1([revert(name)])
-		await expect(withdrawOnL1(ticket, proof, ctx, M)).rejects.toBeInstanceOf(type)
+		await expect(withdrawOnL1(ticket, proofFor(ticket), ctx, M)).rejects.toBeInstanceOf(type)
 		expect(s.writes).toHaveLength(0)
 	})
 
 	it("refuses a wallet on the wrong chain before simulating", async () => {
 		const { ticket } = setup()
 		const { s, ctx } = l1([], 1)
-		await expect(withdrawOnL1(ticket, proof, ctx, M)).rejects.toBeInstanceOf(NetworkMismatchError)
+		await expect(withdrawOnL1(ticket, proofFor(ticket), ctx, M)).rejects.toBeInstanceOf(NetworkMismatchError)
 		expect(s.simulated).toBe(0)
 	})
 })

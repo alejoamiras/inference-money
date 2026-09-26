@@ -7,10 +7,10 @@ import { deriveClaimSecret } from "./claim-secret"
 import { isUserRejection } from "./errors"
 import { type AwaitL1ReceiptOptions, awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
-import { assertSigningContext } from "./network"
+import { assertReaderChain, assertSigningContext, NetworkMismatchError } from "./network"
 import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
-import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, signerOf } from "./types"
+import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, sendChain, signerOf } from "./types"
 
 export type DepositKind = "public" | "private"
 
@@ -81,6 +81,9 @@ export async function prepareDeposit(i: DepositIntent, m: BridgeManifest, now: (
 	return { intent: i, secretOrSalt, secretHash, witness, typedData: depositPermitTypedData(permit, witness, m.l1.permit2, m.l1.chainId) }
 }
 
+/** Drafts inside `submitDeposit`: a concurrent second call would sign again and could clear the first one's record. */
+const inFlight = new WeakSet<DepositDraft>()
+
 /**
  * Signs and sends the deposit; `d.l1TxHash` is set the moment the wallet returns it. The bridge's pause flag is read
  * before the signature and again before the send: a deposit into a paused bridge is claimable only after an unpause.
@@ -93,13 +96,24 @@ export async function submitDeposit(
 	on?: StageSink<DepositStage>,
 ): Promise<Hex> {
 	if (d.submission) throw new Error("This deposit was already sent. Re-check it instead of sending it again.")
+	if (inFlight.has(d)) throw new Error("This deposit is already being sent.")
+	inFlight.add(d)
+	try {
+		return await signAndSend(d, l1, m, l2, on)
+	} finally {
+		inFlight.delete(d)
+	}
+}
+
+async function signAndSend(d: DepositDraft, l1: L1Ctx, m: BridgeManifest, l2: PauseSource, on?: StageSink<DepositStage>): Promise<Hex> {
 	const expected = { l1Account: l1.account }
 	await assertSigningContext(l1, null, m, expected)
 	await assertBridgeLive(l2, m)
+	await assertReaderChain(l1.publicClient, m.l1.chainId)
+	const finalized = await l1.publicClient.getBlock({ blockTag: "finalized" })
 	on?.("signing")
 	const signature = await l1.walletClient.signTypedData({ account: signerOf(l1), ...d.typedData })
 	await Promise.all([assertSigningContext(l1, null, m, expected), assertBridgeLive(l2, m)])
-	const finalized = await l1.publicClient.getBlock({ blockTag: "finalized" })
 	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number }
 	on?.("depositing")
 	const { message } = d.typedData
@@ -118,7 +132,7 @@ export async function submitDeposit(
 				signature,
 			],
 			account: signerOf(l1),
-			chain: l1.walletClient.chain ?? null,
+			chain: sendChain(l1, m.l1.chainId),
 		})
 	} catch (e) {
 		// An explicit refusal means nothing was broadcast; any other failure may have been, so the draft stays submitted.
@@ -203,25 +217,38 @@ async function scanForDeposit(
 	return undefined
 }
 
+async function locateDeposit(d: DepositDraft, pub: PublicClient, m: BridgeManifest, fromBlock: bigint): Promise<Reconciled> {
+	const byHash = await ticketByHash(d, pub, m)
+	if (byHash) return byHash
+	// viem caches the tip for seconds; a stale tip below `finalized` would skip blocks the verdict below vouches for.
+	const [latest, finalized] = await Promise.all([pub.getBlockNumber({ cacheTime: 0 }), pub.getBlock({ blockTag: "finalized" })])
+	const to = latest > finalized.number ? latest : finalized.number
+	const found = await scanForDeposit(d, pub, m, fromBlock, to)
+	if (found) return found
+	// Timestamps only grow, so once a finalized block is past the deadline Permit2 rejects any later inclusion.
+	return finalized.timestamp > d.typedData.message.deadline ? "not-deposited" : "pending"
+}
+
 /**
  * Finds a sent deposit without ever re-sending it: by tx hash first, and whenever that does not establish it (unknown,
  * dropped or replaced hash, lost wallet response) by scanning the router's `Deposit` logs for this draft's depositor
- * and secret hash, from the pre-send finalized block. Any RPC failure reads as "pending".
+ * and secret hash, from the pre-send finalized block. Any RPC failure reads as "pending"; a manifest for another
+ * deployment, or a reader on another chain before or after the scan, throws {@link NetworkMismatchError}.
  */
 export async function reconcileDeposit(d: DepositDraft, l1: L1Ctx, m: BridgeManifest): Promise<Reconciled> {
-	if (!d.submission) return "not-deposited"
+	const s = d.submission
+	if (!s) return "not-deposited"
+	if (s.chainId !== m.l1.chainId || !isAddressEqual(d.typedData.message.spender, m.l1.router)) {
+		throw new NetworkMismatchError([`the manifest is not the deployment this deposit was sent to (chain ${s.chainId})`])
+	}
 	const pub = l1.publicClient
 	try {
-		const byHash = await ticketByHash(d, pub, m)
-		if (byHash) return byHash
-		// viem caches the tip for seconds; a stale tip below `finalized` would skip blocks the verdict below vouches for.
-		const [latest, finalized] = await Promise.all([pub.getBlockNumber({ cacheTime: 0 }), pub.getBlock({ blockTag: "finalized" })])
-		const to = latest > finalized.number ? latest : finalized.number
-		const found = await scanForDeposit(d, pub, m, d.submission.fromBlock, to)
-		if (found) return found
-		// Timestamps only grow, so once a finalized block is past the deadline Permit2 rejects any later inclusion.
-		return finalized.timestamp > d.typedData.message.deadline ? "not-deposited" : "pending"
-	} catch {
+		await assertReaderChain(pub, s.chainId)
+		const verdict = await locateDeposit(d, pub, m, s.fromBlock)
+		await assertReaderChain(pub, s.chainId)
+		return verdict
+	} catch (e) {
+		if (e instanceof NetworkMismatchError) throw e
 		return "pending"
 	}
 }

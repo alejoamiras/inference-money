@@ -17,6 +17,7 @@ import {
 	confirmDeposit,
 	type DepositKind,
 	type ExitTicket,
+	ExitUnconfirmedError,
 	ensurePermit2Allowance,
 	exitTicketFromTx,
 	exitToL1,
@@ -39,7 +40,7 @@ import { withOwnedTmpDir } from "./owned-tmp"
 import { TESTNET_MANIFEST, type TestnetContext, testnetContext } from "./testnet"
 import { openBridgeWallet, recordingNode, type SentTx } from "./wallet"
 
-/** Exit tickets only (tx hash, recipient, amount): enough to finish a withdrawal, and no secret. */
+/** The bridge plus its exit tickets (tx hash, recipient, amount): enough to finish a withdrawal, and no secret. */
 export const SMOKE_STATE = join(homedir(), ".cache", "inference-money", "smoke", "testnet.json")
 /** One USDC per leg: the smoke's per-leg ceiling is 1.25. */
 export const LEG_AMOUNT = 1_000_000n
@@ -63,11 +64,39 @@ interface StoredExit {
 	tx: string
 	recipient: Address
 	amount: string
+	/** The exit's own checks (its ticket, a private exit's payer) passed. */
+	verified: boolean
 	withdrawn: boolean
 }
-type SmokeState = Partial<Record<DepositKind, StoredExit>>
 
-const readState = (): SmokeState => (existsSync(SMOKE_STATE) ? (JSON.parse(readFileSync(SMOKE_STATE, "utf8")) as SmokeState) : {})
+export interface SmokeState {
+	/** Exits burned on any other bridge are discarded, never resumed. */
+	bridge: string
+	exits: Partial<Record<DepositKind, StoredExit>>
+}
+
+const KINDS = ["public", "private"] as const
+
+/** Stored exits not yet withdrawn; with none, a run clears the state and starts all four legs. */
+export const pendingExits = (state: SmokeState): DepositKind[] =>
+	KINDS.filter((k) => state.exits[k] !== undefined && !state.exits[k].withdrawn)
+
+/** A run passes only when both of its exits were recorded, verified and withdrawn. */
+export function assertSmokeComplete(state: SmokeState): void {
+	const missing = KINDS.filter((k) => !(state.exits[k]?.verified && state.exits[k]?.withdrawn))
+	if (missing.length > 0) {
+		throw new Error(`smoke incomplete: the ${missing.join(" and ")} exit did not complete; the next run starts all four legs again`)
+	}
+}
+
+function readState(bridge: string, log: (m: string) => void): SmokeState {
+	const fresh = { bridge, exits: {} }
+	if (!existsSync(SMOKE_STATE)) return fresh
+	const stored = JSON.parse(readFileSync(SMOKE_STATE, "utf8")) as Partial<SmokeState>
+	if (stored.bridge === bridge && stored.exits) return stored as SmokeState
+	log(`discarding smoke state for another deployment (${stored.bridge ?? "unbound"})`)
+	return fresh
+}
 
 function writeState(s: SmokeState): void {
 	mkdirSync(dirname(SMOKE_STATE), { recursive: true, mode: 0o700 })
@@ -158,7 +187,7 @@ async function depositAndClaim(s: Smoke, kind: DepositKind): Promise<void> {
 	s.log(`${kind} deposit mined (${d.l1TxHash}); waiting until claimable`)
 	await waitClaimable(t, s.node, s.wallet, s.m, s.owner, (w) => s.log(`  ${w}`), CLAIMABLE)
 	const before = await l2Balance(s, kind)
-	const { result, txs } = await sentDuring(s, () => claim(t, s.wallet, s.m, { from: s.owner }))
+	const { result, txs } = await sentDuring(s, () => claim(t, s.node, s.wallet, s.m, { from: s.owner }))
 	if (result !== "claimed") throw new Error(`${kind} claim returned ${result}`)
 	if (kind === "private") assertSponsoredPayer(s, txs, "private claim")
 	const delta = (await l2Balance(s, kind)) - before
@@ -166,17 +195,35 @@ async function depositAndClaim(s: Smoke, kind: DepositKind): Promise<void> {
 	s.log(`leg ${kind} deposit → claim: +${delta} on L2 (${txs[0]?.hash}, payer ${txs[0]?.feePayer})`)
 }
 
+/** The burn is stored before any check, so a failed check still leaves its withdrawal resumable. */
 async function exitLeg(s: Smoke, kind: DepositKind, state: SmokeState): Promise<void> {
 	const e = { kind, from: s.owner, recipientL1: s.l1.account, amount: LEG_AMOUNT }
-	const { result: t, txs } = await sentDuring(s, () => exitToL1(e, s.wallet, s.node, s.m))
-	if (kind === "private") assertSponsoredPayer(s, txs, "private exit")
-	state[kind] = { tx: t.l2TxHash.toString(), recipient: t.recipient, amount: t.amount.toString(), withdrawn: false }
+	const from = s.sent.length
+	const sent = await exitToL1(e, s.wallet, s.node, s.m).then(
+		(t) => ({ tx: t.l2TxHash, failure: undefined }),
+		(x: unknown) => {
+			if (x instanceof ExitUnconfirmedError) return { tx: x.l2TxHash, failure: x }
+			throw x
+		},
+	)
+	const stored: StoredExit = {
+		tx: sent.tx.toString(),
+		recipient: e.recipientL1,
+		amount: e.amount.toString(),
+		verified: false,
+		withdrawn: false,
+	}
+	state.exits[kind] = stored
 	writeState(state)
-	s.log(`${kind} exit sent (${t.l2TxHash}); ticket stored`)
+	if (sent.failure) throw sent.failure
+	if (kind === "private") assertSponsoredPayer(s, s.sent.slice(from), "private exit")
+	stored.verified = true
+	writeState(state)
+	s.log(`${kind} exit sent (${sent.tx}); ticket stored`)
 }
 
 async function withdrawLeg(s: Smoke, kind: DepositKind, state: SmokeState): Promise<void> {
-	const stored = state[kind]
+	const stored = state.exits[kind]
 	if (!stored || stored.withdrawn) return
 	const t = await exitTicketFromTx(TxHash.fromString(stored.tx), stored.recipient, BigInt(stored.amount), s.node, s.outbox, s.m)
 	if (t === "not-found") throw new Error(`${kind} exit ${stored.tx} holds no matching message`)
@@ -189,37 +236,45 @@ async function withdrawLeg(s: Smoke, kind: DepositKind, state: SmokeState): Prom
 		if (delta !== BigInt(stored.amount)) throw new Error(`${kind} withdraw paid ${delta}, expected ${stored.amount}`)
 		s.log(`leg ${kind} exit → withdraw: +${delta} on L1`)
 	}
-	state[kind] = { ...stored, withdrawn: true }
+	stored.withdrawn = true
 	writeState(state)
+}
+
+async function freshLegs(s: Smoke, state: SmokeState): Promise<void> {
+	await ensureUsdc(s, 2n * LEG_AMOUNT)
+	await depositAndClaim(s, "public")
+	await topUpSponsor({
+		node: s.node,
+		wallet: s.wallet,
+		from: s.owner,
+		sponsor: AztecAddress.fromStringUnsafe(s.m.l2.sponsoredFpc as string),
+		bridge: { l1RpcUrl: s.c.l1RpcUrl, l1PrivateKey: s.c.secrets.l1PrivateKey, l1ChainId: s.c.pins.l1ChainId },
+		log: s.log,
+	})
+	await depositAndClaim(s, "private")
+	for (const kind of KINDS) await exitLeg(s, kind, state)
 }
 
 async function runLegs(s: Smoke): Promise<void> {
 	await assertNetworkIdentity(s.node, s.l1.publicClient, s.m)
-	const state = readState()
-	const pending = (Object.keys(state) as DepositKind[]).filter((k) => !state[k]?.withdrawn)
-	if (pending.length === 0) {
-		await ensureUsdc(s, 2n * LEG_AMOUNT)
-		await depositAndClaim(s, "public")
-		await topUpSponsor({
-			node: s.node,
-			wallet: s.wallet,
-			from: s.owner,
-			sponsor: AztecAddress.fromStringUnsafe(s.m.l2.sponsoredFpc as string),
-			bridge: { l1RpcUrl: s.c.l1RpcUrl, l1PrivateKey: s.c.secrets.l1PrivateKey, l1ChainId: s.c.pins.l1ChainId },
-			log: s.log,
-		})
-		await depositAndClaim(s, "private")
-		for (const kind of ["public", "private"] as const) await exitLeg(s, kind, state)
-	} else {
+	let state = readState(s.m.l2.bridge.address, s.log)
+	const pending = pendingExits(state)
+	if (pending.length > 0) {
 		s.log(`resuming stored exits: ${pending.join(", ")}`)
+	} else {
+		state = { bridge: s.m.l2.bridge.address, exits: {} }
+		writeState(state)
+		await freshLegs(s, state)
 	}
-	for (const kind of ["public", "private"] as const) await withdrawLeg(s, kind, state)
+	for (const kind of KINDS) await withdrawLeg(s, kind, state)
+	assertSmokeComplete(state)
 }
 
 /**
  * Four legs against the live testnet with real proofs: public and private deposit → claim, then public and private
  * exit → L1 withdraw, each with its exact delta asserted and each private tx's committed payer checked against the
- * sponsor. Exit tickets are stored as they are sent, so a rerun finishes pending withdrawals instead of repeating legs.
+ * sponsor. Exit tickets are stored as they are sent, so a rerun finishes pending withdrawals instead of repeating legs;
+ * it passes only if both of its exits completed.
  */
 export async function smokeTestnet(log: (m: string) => void): Promise<void> {
 	const c = testnetContext()

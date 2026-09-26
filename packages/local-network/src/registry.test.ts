@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { claimNetPorts } from "./ports"
+import { processStart } from "./process"
 import { claimPorts, PortClaimConflict, registeredPorts, releasePorts, setPidHint } from "./registry"
 
 let dir: string
@@ -38,6 +39,25 @@ describe("port registry", () => {
 
 		await setPidHint("live", DEAD_PID, path)
 		expect(readFileSync(path, "utf8")).toContain(`| 10012 | inference-money-net-anvil | live | /w | ${DEAD_PID} |`)
+	})
+
+	it("waits out a live holder however old its lock, breaks only a dead holder's, and leaves no temp file", async () => {
+		const lock = `${path}.lock`
+		const hold = (owner: string) => {
+			writeFileSync(lock, owner, { flag: "wx" })
+			utimesSync(lock, 0, 0)
+		}
+		hold(`${process.pid} ${processStart(process.pid)}`)
+		const waiting = claim("w", { anvil: 10_020 })
+		await new Promise((r) => setTimeout(r, 400))
+		expect(registeredPorts(path).has(10_020)).toBe(false)
+		rmSync(lock)
+		await waiting
+		expect(registeredPorts(path).has(10_020)).toBe(true)
+
+		hold(`${DEAD_PID} Thu Jan  1 00:00:00 1970`)
+		await claim("x", { anvil: 10_021 })
+		expect(readdirSync(dir)).toEqual(["ports.md"])
 	})
 
 	it("gives concurrent runs disjoint port sets", async () => {
