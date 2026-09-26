@@ -6,7 +6,8 @@
 	"workspaces": [
 		"apps/*",
 		"packages/*",
-		"contracts/evm"
+		"contracts/evm",
+		"contracts/aztec"
 	],
 	"scripts": {
 		"lint": "biome check . && sort-package-json --check package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json' && bun run lint:shell",
@@ -21,6 +22,7 @@
 		"test:evm:fork": "bun run --cwd contracts/evm test:evm:fork",
 		"test:evm:formal": "bun run --cwd contracts/evm test:evm:formal",
 		"test:evm:gas": "bun run --cwd contracts/evm test:evm:gas",
+		"test:noir": "bun run --cwd contracts/aztec test:noir",
 		"typecheck": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present typecheck"
 	},
 	"devDependencies": {

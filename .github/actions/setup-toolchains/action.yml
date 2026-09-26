@@ -24,7 +24,7 @@ runs:
       id: pins
       shell: bash
       run: |
-        for key in bun foundry halmos noir; do
+        for key in bun foundry halmos noir node; do
           echo "$key=$(jq -er --arg k "$key" '.[$k]' toolchain.json)" >> "$GITHUB_OUTPUT"
         done
 
@@ -56,6 +56,12 @@ runs:
         pipx install "halmos==$HALMOS"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+    # The Aztec installer exits unless node meets its manifest minimum; the TXE server runs on the same node.
+    - if: inputs.aztec == 'true'
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+
     - if: inputs.aztec == 'true'
       id: cache-aztec
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -69,7 +75,7 @@ runs:
         AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
       run: |
         export CI=1
-        curl -fsSL "https://install.aztec.network/${AZTEC_VERSION}/install" | VERSION="$AZTEC_VERSION" bash
+        curl -fsSL "https://install.aztec-labs.com/${AZTEC_VERSION}/install" | VERSION="$AZTEC_VERSION" bash
 
     - if: inputs.aztec == 'true'
       shell: bash
