@@ -572,7 +572,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 
 ### Arc 2 — core, harness, testnet
 
-#### Phase 4 — `bridge-core`
+#### Phase 4 — `bridge-core` ✓
 - Copy verbatim: `content-hash`, `claim-secret`, `l2`, `l1-receipt`, `progress`, `status` + tests.
 - Adapt:
   - `permit2.ts`: witness + typed data + mutation tests against the Solidity literals.
