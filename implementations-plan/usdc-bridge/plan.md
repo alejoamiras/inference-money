@@ -71,7 +71,7 @@ Dependency graph (acyclic; `tsc -b` references):
 
 ### Contracts
 
-**L1 — `TokenPortal.sol`**: V1's portal, i.e. the canonical Aztec `TokenPortal` plus the F-001 guards (`immutable initializer = msg.sender`; `initialize` reverts on non-initializer and on re-init), **plus [D19]** V2's portal's `AmountExceedsL2Max`, `InexactTransfer` (deposit pull and withdraw payout) and `nonReentrant` (`ReentrancyGuardTransient`). Content-hash code stays byte-identical to canonical; the guards sit outside the hash preimage. It carries an SPDX Apache-2.0 header with provenance, and compiles against `@aztec/l1-artifacts@5.2.0` Solidity sources via the freeze `gen-remappings` pattern. The Solidity interfaces are unchanged between aztec-packages `v5.0.0` and the 5.2.0 nightly (fable diff; re-verified by the Phase 2 fork test).
+**L1 — `TokenPortal.sol`**: V1's portal, i.e. the canonical Aztec `TokenPortal` plus the F-001 guards (`immutable initializer = msg.sender`; `initialize` reverts on non-initializer and on re-init), **plus [D19]** V2's portal's `AmountExceedsL2Max`, `InexactTransfer` (deposit pull and withdraw payout) and `nonReentrant` (`ReentrancyGuardTransient`). Content-hash code stays byte-identical to canonical; the guards sit outside the hash preimage. It carries an SPDX Apache-2.0 header with provenance, and compiles against `@aztec/l1-artifacts@5.2.0` Solidity sources via static relative remappings through `contracts/evm/node_modules`, asserted by `scripts/check-remappings.ts` (deviation from the freeze `gen-remappings` generator: relative targets keep bytecode metadata reproducible; see lessons/phase-2.md). The Solidity interfaces are unchanged between aztec-packages `v5.0.0` and the 5.2.0 nightly (fable diff; re-verified by the Phase 2 fork test).
 
 **L1 — `Permit2DepositRouter.sol`** (new, trimmed from V1's router `bridge()`):
 ```solidity
@@ -535,8 +535,8 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
   - the spike's account deploy tx is mined on testnet
 - If the faucet mint is below budget, **stop and surface**: Phase 7 has no fee path. (The original sponsor-balance rule fired on 2026-09-26 and was resolved by D24.)
 
-#### Phase 2 — L1 contracts
-- Port `TokenPortal.sol` (V1 + [D19] guards; SPDX + provenance). Write `Permit2DepositRouter.sol` per the Architecture section, plus `MockUsdc`. Remappings via npm + `scripts/gen-remappings.ts`. Foundry pinned to `toolchain.json` (1.7.1).
+#### Phase 2 — L1 contracts ✓
+- Port `TokenPortal.sol` (V1 + [D19] guards; SPDX + provenance). Write `Permit2DepositRouter.sol` per the Architecture section, plus `MockUsdc`. Remappings via npm, static and relative, checked by `scripts/check-remappings.ts` (was `gen-remappings.ts`; see lessons/phase-2.md). Foundry pinned to `toolchain.json` (1.7.1).
 - Tests: **the full V2 QA port Solidity list**, plus:
   - `WitnessHash.t.sol`: literal typehash + witness vector + mutation tests (each field, chain id, spender, nonce, deadline). The vector is fresh, because V2's 12-field literals don't apply.
   - Sepolia fork suite (`skipIf(!SEPOLIA_RPC_URL)`):

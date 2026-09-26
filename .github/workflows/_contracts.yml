@@ -1,0 +1,29 @@
+name: Contracts (reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  evm:
+    name: forge + halmos
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchains
+        with:
+          foundry: "true"
+          halmos: "true"
+      - name: Remapping check (unit)
+        run: bun run --cwd contracts/evm test
+      # fmt, lint (src), unit, fuzz and invariant suites; the Sepolia fork suite runs locally in the phase gate.
+      - name: Forge (hermetic)
+        run: bun run test:evm
+      - name: Gas snapshot
+        run: bun run test:evm:gas
+      # Exact proof names and per-contract counts: a renamed, deleted or failing proof fails the job.
+      - name: Halmos (strict)
+        run: bun run test:evm:formal
