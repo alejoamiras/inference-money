@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 
-/// Always-on regressions for both F-001 guards against the real portal: the fast, readable failure that still runs
+/// Always-on regressions for both initialize guards against the real portal: the fast, readable failure that still runs
 /// when halmos does not. `FormalPortal.t.sol` proves the same guards over all arguments and callers.
 contract PortalReinitTest is Test {
     address internal constant USDC = address(0xA11CE);
@@ -15,7 +15,7 @@ contract PortalReinitTest is Test {
         return new FakeRegistry(address(new FakeRollup(address(new CapturingInbox()), address(new CapturingOutbox()))));
     }
 
-    function test_F001_initializeIsOnceOnly() public {
+    function test_initializeIsOnceOnly() public {
         TokenPortal portal = new TokenPortal();
         FakeRegistry reg = _registry();
         portal.initialize(address(reg), USDC, BRIDGE);
@@ -35,7 +35,7 @@ contract PortalReinitTest is Test {
 
     /// Deploy and initialize are separate transactions: a front-run of the FIRST initialize must revert instead of
     /// binding an attacker registry whose outbox would authorize draining every deposit.
-    function test_F001_frontRunOfFirstInitializeReverts() public {
+    function test_frontRunOfFirstInitializeReverts() public {
         TokenPortal portal = new TokenPortal();
         FakeRegistry evil = _registry();
         vm.prank(makeAddr("attacker"));

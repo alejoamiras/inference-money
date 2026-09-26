@@ -1,12 +1,8 @@
 mod config;
 mod test;
 
-// Minimal token bridge that moves funds between L1 <> L2 via the canonical
-// portal messaging (Inbox/Outbox). Attached to an L1 TokenPortal; mints/burns
-// the L2 token through TokenMinterProxy (the bridge must be an authorized
-// minter on the proxy). Stripped of the reference bridge's identity-attestation
-// layer (clean-hands / passport / Schnorr): this bridge has no compliance
-// gating, which is exactly what lets the private paths stay simple.
+// Moves one token between L1 and L2 through its TokenPortal's Inbox/Outbox messages, minting and burning via
+// TokenMinterProxy, whose sole minter is this bridge. The owner can only pause claims and exits.
 
 use aztec::macros::aztec;
 

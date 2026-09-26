@@ -37,3 +37,24 @@ Status: **green 2026-09-26** (gate evidence below).
 - **The first sole-consumer self-test passed vacuously.** Every fixture shared one directory, and the crate-wide count scanned all of them, so all nine rejected on "found 20". Each fixture now gets its own directory, and the self-test prints each rejection reason so this cannot recur silently.
 - **The first `noir-deps.sh --self-test` failed**: `git tag` wanted a message (the host signs tags), and the EXIT trap referenced a `local`. Then `--exact` missed its own fixture because of the `file://` double slash. All fixed.
 - **Perl locale warnings** (this host's `LC_CTYPE=UTF-8`) came from the path scrub and the comment stripper; both now run under `LC_ALL=C`.
+
+## Arc 1 codex loop
+
+### Round 1 — session `01a0df20-a6e6-7443-8b29-87611c5b8420` (GPT-6 Astra, high)
+
+No theft path found (moderate confidence). 10 findings, all verified against the repo before acting:
+
+| # | Sev | Finding | Verdict |
+|---|---|---|---|
+| F1 | M | `EmbeddedWallet { ephemeral: true }` is not in-memory: `openTmpStore` writes LMDB files under `os.tmpdir()` holding account secret and signing keys, removed only on a clean close. | **Accepted, fixed differently.** Aztec 5 has no in-memory KV store for Node, so a "memory-only store" means writing a new KV layer (over-engineering). `withOwnedTmpDir` points TMPDIR at an owner-only `~/.cache/inference-money/wallet-tmp/<pid>`, removes it after, and reaps dead runs' dirs. The plan's two "in-memory / never written" claims were corrected; this also governs the Phase 5/7 deploy wallets. |
+| F2 | M | Sole-consumer check never pinned claim_public's binding (a claim_public consuming `mint_to_private` passed), nor the derive arguments. | **Accepted.** Both paths are now pinned: content hash, `config.portal` as the sender, derive `(claim_salt, recipient)`, mint target. Every self-test fixture is the real source with one mutation, asserted to fail for its own reason (15). New TXE test `claim_public_cannot_redeem_a_private_deposit`; the floor is now 48. |
+| F3 | M | `fail_on_revert = false` lets a regression that rejects valid deposits pass the invariants vacuously. | **Accepted.** Set to `true`; 0 handler reverts over 768k calls. |
+| F4 | M | The halmos gate matched names globally; both contracts have `check_deposit_rejectsAmountAboveU128`, so one could vanish. | **Accepted.** The gate compares the exact (contract, proof) set, and `--self-test` feeds it a swapped, a missing and a failing proof. |
+| F5 | L | The canaries demonstrated forbidden outcomes but never ran the proof bodies (and the header comment claimed they did). | **Accepted.** Each `check_` delegates to a public `prove*` body; each canary runs that body against its mutant and requires the named assertion (`ProofCanary._assertProofFails`). |
+| F6 | M | No CI runs deployer TS checks; the plan's `bun audit` is not run anywhere. | **Accepted.** `deployer.yml` (biome, typecheck, unit) and `audit.yml` (advisory: all 22 findings are transitive through the exact-pinned `@aztec/*` 5.2.0 stack, which moves only as a whole). |
+| F7 | M | The Aztec installer is piped to bash unverified; the cache key is version-only. | **Accepted.** sha256 pins for the installer (checked before it runs) and for nargo and bb (checked after every install or cache restore), and the pins are in the cache key. nargo matches the noir-lang v1.0.0-beta.22 release; bb matches the npm `@aztec/bb.js@5.0.1` tarball. **Residual:** the installer's `npm install` JS tree has no lockfile, so it is unpinned. |
+| F8 | L | TXE readiness could accept another run's listener that won the port race. | **Accepted in part.** Readiness now requires our own server's post-bind `TXE listening on port N` line plus a live pid. **Rejected:** moving TXE onto the `~/.agents/ports.md` registry. The plan scopes the registry to Phase 5's local network, and proof of ownership already closes the failure. |
+| F9 | L | `expect_rejected` accepted any failure reason. | **Accepted** (folded into F2's rewrite). |
+| F10 | Nit | Narration comments in TokenPortal; a false "relayer-submittable" claim on private exits; `[F-x]`/F-001/Phase labels; history in the contract headers. | **Accepted.** All removed or tightened. Class id + ABI re-verified equal to V1 after the header edits. |
+
+"Any ERC20" reserve inference: agreed it is too strong. Exact deltas protect only the portal's own transfers, not rebases or issuer-side balance changes. No code claims otherwise.

@@ -14,7 +14,6 @@ import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
 
-// Messaging
 import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
 import {IInbox} from "@aztec/core/interfaces/messagebridge/IInbox.sol";
 import {IOutbox} from "@aztec/core/interfaces/messagebridge/IOutbox.sol";
@@ -88,22 +87,13 @@ contract TokenPortal is ReentrancyGuardTransient {
     {
         _requireDeposit(_amount);
 
-        // Preamble
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
-
-        // Hash the message content to be reconstructed in the receiving contract
-        // The purpose of including the function selector is to make the message unique to that specific call. Note that
-        // it has nothing to do with calling the function.
+        // The signature only tags the action so the hash is unique to it; nothing calls it.
         bytes32 contentHash =
             Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", _to, _amount));
 
-        // Hold the tokens in the portal
         _pullExact(_amount);
-
-        // Send message to rollup
         (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
-
-        // Emit event
         emit DepositToAztecPublic(_to, _amount, _secretHash, key, index);
 
         return (key, index);
@@ -123,20 +113,12 @@ contract TokenPortal is ReentrancyGuardTransient {
     {
         _requireDeposit(_amount);
 
-        // Preamble
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
-
-        // Hash the message content to be reconstructed in the receiving contract - the signature below does not correspond
-        // to a real function. It's just an identifier of an action.
+        // The signature only tags the action; no such function exists.
         bytes32 contentHash = Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", _amount));
 
-        // Hold the tokens in the portal
         _pullExact(_amount);
-
-        // Send message to rollup
         (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
-
-        // Emit event
         emit DepositToAztecPrivate(_amount, _secretHashForL2MessageConsumption, key, index);
 
         return (key, index);
@@ -163,8 +145,7 @@ contract TokenPortal is ReentrancyGuardTransient {
         uint256 _leafIndex,
         bytes32[] calldata _path
     ) external nonReentrant {
-        // The purpose of including the function selector is to make the message unique to that specific call. Note that
-        // it has nothing to do with calling the function.
+        // The signature only tags the action so the hash is unique to it; nothing calls it.
         DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
             sender: DataStructures.L2Actor(l2Bridge, rollupVersion),
             recipient: DataStructures.L1Actor(address(this), block.chainid),

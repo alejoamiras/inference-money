@@ -8,7 +8,7 @@
 		"test": "bun test scripts",
 		"test:evm": "bun scripts/check-remappings.ts && forge fmt --check && forge lint src -D warnings && forge test --no-match-contract Fork",
 		"test:evm:fork": "bun scripts/check-remappings.ts && bash scripts/fork-gate.sh",
-		"test:evm:formal": "bun scripts/check-remappings.ts && bash scripts/halmos-gate.sh",
+		"test:evm:formal": "bun scripts/check-remappings.ts && bash scripts/halmos-gate.sh --self-test && bash scripts/halmos-gate.sh",
 		"test:evm:gas": "bun scripts/check-remappings.ts && forge snapshot --match-test test_gas_ --no-match-contract Fork --check --tolerance 2",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},

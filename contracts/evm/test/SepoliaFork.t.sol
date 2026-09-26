@@ -23,7 +23,7 @@ interface IPermit2Errors {
 /// Forks Sepolia and drives the REAL Permit2, Circle USDC, Aztec testnet registry and Inbox through a freshly
 /// deployed portal + router. Skips only when SEPOLIA_RPC_URL is unset; `bun run test:evm:fork` refuses to run
 /// without it, so the gate can never pass on skipped tests. The pins below equal the deployer's network pins and
-/// the node info the Phase 1 probe checked.
+/// the node info the testnet probe checks.
 contract SepoliaForkTest is Test {
     address internal constant REGISTRY = 0xA0BFb1B494FB49041e5c6e8c2C1BE09cD171c6Ba;
     address internal constant INBOX = 0x3047dBF2b7dd9f58AC41113525480F94745a4f7C;

@@ -62,23 +62,33 @@ runs:
       with:
         node-version: ${{ steps.pins.outputs.node }}
 
+    # A compiler that lies can make `compile.sh --check` agree with any committed artifact, so the installer is checked
+    # before it runs and the binaries the gates trust (nargo, bb) after every install or cache restore. A version bump
+    # without a matching aztec-<version>.sha256 fails here.
     - if: inputs.aztec == 'true'
       id: cache-aztec
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.aztec/versions/${{ steps.pins.outputs.noir }}
-        key: ${{ runner.os }}-aztec-${{ steps.pins.outputs.noir }}
+        key: ${{ runner.os }}-aztec-${{ steps.pins.outputs.noir }}-${{ hashFiles('.github/actions/setup-toolchains/aztec-*.sha256') }}
 
     - if: inputs.aztec == 'true' && steps.cache-aztec.outputs.cache-hit != 'true'
       shell: bash
       env:
         AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
+        PINS: ${{ github.action_path }}/aztec-${{ steps.pins.outputs.noir }}.sha256
       run: |
-        export CI=1
-        curl -fsSL "https://install.aztec-labs.com/${AZTEC_VERSION}/install" | VERSION="$AZTEC_VERSION" bash
+        dir="$RUNNER_TEMP/aztec-installer"
+        mkdir -p "$dir"
+        curl -fsSL "https://install.aztec-labs.com/${AZTEC_VERSION}/install" -o "$dir/install"
+        (cd "$dir" && grep '  install$' "$PINS" | sha256sum -c -)
+        CI=1 VERSION="$AZTEC_VERSION" bash "$dir/install"
 
     - if: inputs.aztec == 'true'
       shell: bash
       env:
         AZTEC_VERSION: ${{ steps.pins.outputs.noir }}
-      run: echo "AZTEC_HOME=$HOME/.aztec/versions/$AZTEC_VERSION" >> "$GITHUB_ENV"
+        PINS: ${{ github.action_path }}/aztec-${{ steps.pins.outputs.noir }}.sha256
+      run: |
+        (cd "$HOME/.aztec/versions/$AZTEC_VERSION" && grep -vE '^#|  install$' "$PINS" | sha256sum -c -)
+        echo "AZTEC_HOME=$HOME/.aztec/versions/$AZTEC_VERSION" >> "$GITHUB_ENV"

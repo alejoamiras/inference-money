@@ -238,7 +238,7 @@ export function assertSigningContext(l1: L1Ctx, wallet: Wallet | null, m: Bridge
 - **PXE-anchor claim gating.** Gate on a successful simulation, not on node visibility or a timer.
 - **Secrets never cross a process boundary or reach disk.**
   - The testnet keys live in `.env.testnet` (git-ignored, mode `0600`, **already provisioned 2026-09-25 at the user's request**). The L1 key is a reused Sepolia-only deployer with no mainnet history. The Aztec secret was freshly generated. The deployer reads the file in-process and refuses if its mode is wider than `0600`.
-  - Deploy and smoke wallets/PXEs are **ephemeral** (in-memory stores). No wallet DB or PXE dir is written, and teardown clears them.
+  - Deploy and smoke wallets/PXEs are **ephemeral**, but Aztec 5 has no in-memory store in Node: "ephemeral" stores are LMDB temp files holding the account keys. `withOwnedTmpDir` (deployer) confines them to an owner-only per-process dir, removes it at teardown and reaps a crashed run's dir on the next start.
   - Child processes (forge, aztec) get a scrubbed env.
   - `secrets:scan` runs in-process over tracked + untracked files, `deployments/`, logs and any generated artifact dirs. `.env.testnet` itself is the only exclusion. It prints a boolean only, and is tested with dummy secrets planted in each covered location.
 - **Noir dep integrity.** `noir-deps.sh` only fetches and verifies; it never compiles:
@@ -521,7 +521,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
   - Circle USDC decimals/version
   - Permit2 code present
 - `bun run spike:proof-compat` needs **no user-supplied credentials**. It is the plan's **one explicitly authorized key generation**:
-  - It creates an ephemeral in-memory Aztec test account (random key, never written, logged or reused; it controls nothing of value).
+  - It creates an ephemeral Aztec test account (random key, never logged or reused; its wallet stores stay inside `withOwnedTmpDir`; it controls nothing of value).
   - [D24] It deploys that account on testnet with **real client proofs** from the JS 5.2.0 stack, paying with Fee Juice the throwaway L1 key (`.env.testnet`) mints from the permissionless faucet and bridges, claimed in the same tx.
   - That proves on day one that the testnet 5.0.0 node accepts 5.2.0 account/client proofs. Bridge-artifact compatibility is still Phase 7's job.
   - The general prohibition stays in force: **no operational deploy or pause key is ever generated**; those come only from the user's `.env.testnet`.

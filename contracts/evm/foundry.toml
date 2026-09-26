@@ -25,8 +25,8 @@ runs = 256
 [profile.default.invariant]
 runs = 256
 depth = 500
-# Handlers bound their own inputs and wrap expected reverts; failing on benign no-op reverts adds only noise.
-fail_on_revert = false
+# Handlers bound their inputs and catch the reverts they expect, so any other revert is a regression, not noise.
+fail_on_revert = true
 
 [lint]
 # Tests cast revert data to selectors and mask fuzz deltas to 160 bits on purpose; src/ is gated with `-D warnings`.
