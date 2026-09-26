@@ -36,11 +36,31 @@ function pipeRedacted(from: Readable, to: Writable, needles: string[]): Promise<
 	)
 }
 
+const GRACE_MS = 5_000
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/** Whether the signal reached a member of the group; signal 0 only probes. */
+function signalGroup(pgid: number, sig: NodeJS.Signals | 0): boolean {
+	try {
+		process.kill(-pgid, sig)
+		return true
+	} catch {
+		return false
+	}
+}
+
+/** SIGTERM, then SIGKILL for whatever outlives the grace period: done only when no member of the group is left. */
+async function reapGroup(pgid: number): Promise<void> {
+	signalGroup(pgid, "SIGTERM")
+	for (const end = Date.now() + GRACE_MS; Date.now() < end; await sleep(100)) if (!signalGroup(pgid, 0)) return
+	signalGroup(pgid, "SIGKILL")
+}
+
 /**
  * Runs `argv` under this runtime with stdout and stderr redacted line by line. Dependency loggers write to the fds
  * directly, so only a pipe catches everything; the child reads its secrets itself, never from argv or env. The child
- * leads its own process group, signalled whole and reaped once the child exits: a surviving descendant (a prover, a
- * build) would keep running and hold the pipes open.
+ * leads its own process group, which is reaped on cancellation and after the child exits: a surviving descendant (a
+ * prover, a build) would keep running, and could hold the pipes open.
  */
 export async function runRedacted(
 	argv: string[],
@@ -50,25 +70,25 @@ export async function runRedacted(
 ): Promise<number> {
 	const env = { ...process.env, [REDACTED_CHILD]: "1" }
 	const child = spawn(process.execPath, argv, { env, stdio: ["ignore", "pipe", "pipe"], detached: true })
-	const group = (sig: NodeJS.Signals) => {
-		try {
-			if (child.pid !== undefined) process.kill(-child.pid, sig)
-		} catch {}
+	let reaping: Promise<void> | undefined
+	const reap = () => {
+		reaping ??= child.pid === undefined ? Promise.resolve() : reapGroup(child.pid)
+		return reaping
 	}
-	process.on("SIGINT", group).on("SIGTERM", group)
+	process.on("SIGINT", reap).on("SIGTERM", reap)
 	try {
 		const piped = Promise.all([pipeRedacted(child.stdout, out, needles), pipeRedacted(child.stderr, err, needles)])
 		const code = await new Promise<number>((done, fail) => child.once("exit", (c) => done(c ?? 1)).once("error", fail))
-		group("SIGTERM")
-		const drained = await Promise.race([piped.then(() => true), new Promise<false>((r) => setTimeout(() => r(false), 5_000))])
-		if (!drained) group("SIGKILL")
-		await piped
+		await reap()
+		await Promise.race([piped, sleep(GRACE_MS)])
 		return code
 	} catch (e) {
-		group("SIGKILL")
+		await reap()
 		throw e
 	} finally {
-		process.off("SIGINT", group).off("SIGTERM", group)
+		process.off("SIGINT", reap).off("SIGTERM", reap)
+		child.stdout.destroy()
+		child.stderr.destroy()
 	}
 }
 

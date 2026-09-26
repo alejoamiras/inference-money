@@ -214,6 +214,16 @@ describe("withdrawOnL1", () => {
 		expect(s.simulated).toBe(0)
 	})
 
+	it("records a proof for the exit it was computed from, even if the ticket changes while it builds", async () => {
+		const { e, ticket } = setup()
+		const building = buildWithdrawProof(ticket, e.node, e.outbox)
+		ticket.messageIndexInTx = 1
+		const proof = (await building) as OutboxProof
+		const { ctx } = l1()
+		await expect(withdrawOnL1(ticket, proof, ctx, M)).rejects.toThrow("not built for this withdrawal")
+		expect(await withdrawOnL1({ ...ticket, messageIndexInTx: 0 }, proof, ctx, M)).toBe(TX)
+	})
+
 	it.each([
 		["Outbox__AlreadyNullified", AlreadyWithdrawnError],
 		["MerkleLib__InvalidRoot", StaleProofError],
