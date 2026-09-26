@@ -1,11 +1,11 @@
-name: Deployer
+name: Local network
 
 on:
   workflow_dispatch:
   pull_request:
 
 concurrency:
-  group: deployer-${{ github.head_ref || github.ref }}
+  group: local-network-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -28,23 +28,20 @@ jobs:
         with:
           filters: |
             relevant:
-              - 'packages/deployer/**'
-              - 'packages/bridge-core/**'
               - 'packages/local-network/**'
-              - 'contracts/aztec/*/target/**'
               - 'toolchain.json'
               - 'package.json'
               - 'bun.lock'
               - 'bunfig.toml'
               - 'biome.json'
               - 'tsconfig.base.json'
-              - '.github/workflows/deployer.yml'
+              - '.github/workflows/local-network.yml'
               - '.github/actions/setup-toolchains/**'
       - if: github.event_name == 'workflow_dispatch'
         id: override
         run: echo "relevant=true" >> "$GITHUB_OUTPUT"
 
-  deployer:
+  local-network:
     name: lint, typecheck, unit
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
@@ -53,14 +50,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-toolchains
-      - run: bunx biome ci packages/deployer
-      - run: bun run --cwd packages/deployer typecheck
-      - run: bun run --cwd packages/deployer test
+      - run: bunx biome ci packages/local-network
+      - run: bun run --cwd packages/local-network typecheck
+      - run: bun run --cwd packages/local-network test
 
   status:
-    name: deployer-status
+    name: local-network-status
     if: always()
-    needs: [changes, deployer]
+    needs: [changes, local-network]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -68,11 +65,11 @@ jobs:
       - env:
           CHANGES: ${{ needs.changes.result }}
           RELEVANT: ${{ needs.changes.outputs.relevant }}
-          DEPLOYER: ${{ needs.deployer.result }}
+          NET: ${{ needs.local-network.result }}
         run: |
           [ "$CHANGES" = success ] || { echo "::error::change detection: $CHANGES"; exit 1; }
           if [ "$RELEVANT" = true ]; then
-            [ "$DEPLOYER" = success ] || { echo "::error::deployer ended $DEPLOYER"; exit 1; }
+            [ "$NET" = success ] || { echo "::error::local-network ended $NET"; exit 1; }
           else
-            case "$DEPLOYER" in success|skipped) ;; *) echo "::error::deployer ended $DEPLOYER"; exit 1 ;; esac
+            case "$NET" in success|skipped) ;; *) echo "::error::local-network ended $NET"; exit 1 ;; esac
           fi

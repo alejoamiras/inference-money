@@ -1,0 +1,21 @@
+{
+	"name": "@inference-money/local-network",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Per-run anvil + Aztec local network: registry-claimed ports, detached process groups torn down by verified identity, real-disk state.",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "bun test src",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.2",
+		"typescript": "6.0.3"
+	}
+}

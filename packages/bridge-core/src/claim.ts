@@ -3,7 +3,8 @@ import { Contract } from "@aztec/aztec.js/contracts"
 import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { Wallet } from "@aztec/aztec.js/wallet"
-import { tokenBridgeArtifact } from "./artifacts"
+import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
+import { sponsoredFpcArtifact, tokenBridgeArtifact } from "./artifacts"
 import type { ClaimTicket } from "./deposit"
 import type { BridgeManifest } from "./manifest"
 import type { StageSink } from "./types"
@@ -35,6 +36,25 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 export function sponsoredPayment(m: BridgeManifest): FeePaymentMethod {
 	if (!m.l2.sponsoredFpc) throw new SponsorUnavailableError("This network has no fee sponsor for private transactions.")
 	return new SponsoredFeePaymentMethod(AztecAddress.fromStringUnsafe(m.l2.sponsoredFpc))
+}
+
+/** The one sponsor this code can vouch for: the pinned SponsoredFPC class at salt 0. */
+export const sponsorInstance = () => getContractInstanceFromInstantiationParams(sponsoredFpcArtifact, { salt: Fr.ZERO })
+
+/**
+ * Registers the network's sponsor in `wallet`, which must know its class to pay through it. Refuses a manifest whose
+ * sponsor is not {@link sponsorInstance}.
+ */
+export async function registerSponsor(wallet: Pick<Wallet, "registerContract">, m: BridgeManifest): Promise<AztecAddress> {
+	if (!m.l2.sponsoredFpc) throw new SponsorUnavailableError("This network has no fee sponsor for private transactions.")
+	const instance = await sponsorInstance()
+	if (!instance.address.equals(AztecAddress.fromStringUnsafe(m.l2.sponsoredFpc))) {
+		throw new SponsorUnavailableError(
+			`The manifest's fee sponsor ${m.l2.sponsoredFpc} is not the known SponsoredFPC ${instance.address}.`,
+		)
+	}
+	await wallet.registerContract(instance, sponsoredFpcArtifact)
+	return instance.address
 }
 
 function claimCall(t: ClaimTicket, wallet: Wallet, m: BridgeManifest) {

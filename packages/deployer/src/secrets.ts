@@ -42,6 +42,21 @@ export function assertOwnerOnly(path: string): void {
 	if ((mode & 0o077) !== 0) throw new Error(`${path} is mode ${mode.toString(8)}; chmod 600 it before use`)
 }
 
+const SECRET_NAME = /PRIVATE_KEY|SECRET|MNEMONIC|PASSWORD|TOKEN|RPC_URL|API_KEY/i
+
+/** The environment minus every variable that can carry a credential (an RPC URL often embeds an API key). */
+export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	return Object.fromEntries(Object.entries(env).filter(([k]) => !SECRET_NAME.test(k)))
+}
+
+/** Whether `text` holds any secret value, with or without its 0x prefix, in any case. Answers only yes or no. */
+export function containsSecret(text: string, s: TestnetSecrets): boolean {
+	const haystack = text.toLowerCase()
+	const needles = [s.l1PrivateKey, s.aztecSecretKey].flatMap((v) => [v.toLowerCase(), v.slice(2).toLowerCase()])
+	if (s.sepoliaRpcUrl) needles.push(s.sepoliaRpcUrl.toLowerCase())
+	return needles.some((n) => haystack.includes(n))
+}
+
 export function loadTestnetSecrets(repoRoot: string): TestnetSecrets {
 	const path = resolve(repoRoot, ".env.testnet")
 	assertOwnerOnly(path)

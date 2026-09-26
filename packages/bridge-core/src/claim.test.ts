@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { claim, SponsorUnavailableError, waitClaimable } from "./claim"
+import { claim, registerSponsor, SponsorUnavailableError, waitClaimable } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { fakeWallet } from "./test/fake-wallet"
 import { f, MANIFEST as M } from "./test/fixtures"
@@ -17,6 +17,20 @@ const ticket = async (kind: "public" | "private"): Promise<ClaimTicket> => ({
 const fail = (message: string) => () => {
 	throw new Error(message)
 }
+
+describe("registerSponsor", () => {
+	const SPONSOR = "0x0628377e98bca5913dc86765ad0758f7b7aa83eac49079c6fba125807b393fe1" as const
+
+	it("registers the pinned sponsor, and refuses a manifest naming any other", async () => {
+		const registered: string[] = []
+		const wallet = { registerContract: async (i: { address: { toString(): string } }) => void registered.push(i.address.toString()) }
+		expect((await registerSponsor(wallet as never, { ...M, l2: { ...M.l2, sponsoredFpc: SPONSOR } })).toString()).toBe(SPONSOR)
+		expect(registered).toEqual([SPONSOR])
+
+		await expect(registerSponsor(wallet as never, M)).rejects.toBeInstanceOf(SponsorUnavailableError)
+		expect(registered).toHaveLength(1)
+	})
+})
 
 describe("claim", () => {
 	it("pays a private claim through the sponsor and leaves a public one to the wallet", async () => {
