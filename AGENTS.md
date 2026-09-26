@@ -12,6 +12,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `packages/local-network` | Per-run anvil + Aztec 5.0.0 local network: registry-claimed ports, owned process groups |
 | `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
+| `apps/web` | The React app: wagmi L1, the Aztec wallet-sdk session, a build-embedded manifest; `e2e/` holds the browser harness |
 | `implementations-plan/` | Plans and per-phase lessons; `usdc-bridge/plan.md` is the active plan |
 
 ## Commands
@@ -29,6 +30,10 @@ RUN_ID=a bun run net:up        # anvil + aztec 5.0.0 local network, detached; ne
 RUN_ID=a bun run deploy:local  # deploy, verify every read-back, then write deployments/local/<run>/manifest.json
 RUN_ID=a bun run verify:local  # re-verify the manifest against a fresh forge build --force
 bun run test:integration      # own network + deploy (or NET_L1_RPC + NET_NODE_URL to attach), every spec, teardown
+
+bun run --cwd apps/web test:components           # vitest: session store, grant, build target, test-wallet guard
+BRIDGE_MANIFEST=<file> bun run --cwd apps/web build   # any deployed manifest; build:testnet pins deployments/testnet.json
+bun run test:e2e [-- connect.spec.ts]             # own network + deploy + app/wallet builds + sidecar + Playwright, then reap
 
 bun run deploy:testnet   # probe the pins, deploy with real proofs + self-funded Fee Juice, verify, write deployments/testnet.json
 bun run verify:testnet   # re-verify deployments/testnet.json against the live chains and a fresh forge build
@@ -56,6 +61,8 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment sta
 - **Formal canaries:** every halmos `check_` delegates to a public `prove*` body, and a forge canary runs that body against a one-rule-deleted mutant (`test/mocks/Mutants.sol`) and requires it to fail on that rule's assertion (`ProofCanary`). A new proof needs its mutant, its canary, and its (contract, name) pair in `scripts/halmos-gate.sh`.
 - **Noir artifacts are committed and must equal their source:** rebuild only through `contracts/aztec/scripts/compile.sh` (a bare `nargo compile` writes an untranspiled artifact), and run `compile.sh --check` before committing a `.nr` change. A new Noir git dependency, direct or transitive, goes into `noir-deps.sh`'s pinned table or CI's `--exact` step fails.
 - **TXE manifests:** every new Noir test gets its name in the crate's `txe-manifest.txt`; `run-txe-tests.sh` fails on a listed test that did not pass or a count under the crate's floor.
+- **One network per bundle:** a web build embeds exactly one manifest at build time and has no runtime override; iframe wallet URLs (`WEB_WALLET_URLS`) are accepted only for a `local` manifest, and `build:testnet` refuses every override.
+- **The e2e test wallet enforces its grant:** every call outside what the app requested is refused, as a real wallet does. A new wallet call in the app needs its scope in `src/wallet/capabilities.ts`, or the suite fails.
 - **One viem:** bridge-core and web read L1 through canonical `viem`; `@aztec/ethereum` is banned there (biome `noRestrictedImports`).
 - **Run isolation:** local networks claim ports from `~/.agents/ports.md`, spawn detached, and tear down only the process groups they prove they own (leader pid and start time, or once the leader exits a member carrying the group's `INFERENCE_MONEY_OWNER` marker; unprovable means untouched); data dirs live on real disk under `~/.cache/inference-money/`. Deploys build forge output into a per-run dir, never the shared `contracts/evm/out`.
 - **Mixed versions (JS 5.2.0 on a 5.0.0 node):** the canonical SponsoredFPC is a 5.0.0 class that reads the 5.0.0 HandshakeRegistry, which aztec.js 5.2.0 does not preload. A wallet that should pay through it registers that registry and passes `authorizeLegacyHandshakeReads` as its PXE `authorizeUtilityCall` hook (bridge-core `compat.ts`). A 5.0.0 local network also lacks the 5.0.1 standard contracts testnet has published; the deploy publishes them.

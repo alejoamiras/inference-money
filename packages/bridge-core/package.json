@@ -5,7 +5,8 @@
 	"description": "Framework-agnostic USDC bridge protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw flows, the manifest schema.",
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./manifest": "./src/manifest.ts"
 	},
 	"scripts": {
 		"test": "bun run --cwd ../../contracts/evm build && bun test --preload ../../test-preload.ts src",
