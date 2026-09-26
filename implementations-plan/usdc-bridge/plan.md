@@ -554,7 +554,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
   - `.gas-snapshot --check --tolerance 2` passes
   - no fork test is skipped when the RPC is set
 
-#### Phase 3 — L2 contracts
+#### Phase 3 — L2 contracts ✓
 - Copy the four crates + `compile.sh`/`run-txe-tests.sh`/`check-sole-consumer.sh` from V1 unchanged, and add **the full V2 QA port Aztec.nr list**. Fix the README prose from 5.0.0 to 5.0.1.
 - Add `noir-deps.sh` (fetch → verify only, no compile; the pinned (url, tag, commit) table includes transitive deps) with `--self-test`: empty cache → fetched + verified; modified source → rejected; wrong commit → rejected. Commit the path-scrubbed artifacts.
 - Extend `contracts.yml`: clean nargo cache → `noir-deps.sh` → `compile.sh --check` (the sole compile: class-id + ABI parity vs HEAD) → **TXE with the manifest gate** → sole-consumer (self-test first) → keystone. V2 also ran TXE in CI (`_bridge-contracts.yml` `txe` job); V1 did not.
