@@ -25,13 +25,16 @@ export interface L1Signer {
 	chain: Chain
 }
 
-export function l1Signer(rpcUrl: string, chainId: number, account: Account): L1Signer {
-	const chain = defineChain({
+export const l1Chain = (rpcUrl: string, chainId: number): Chain =>
+	defineChain({
 		id: chainId,
 		name: `chain-${chainId}`,
 		nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
 		rpcUrls: { default: { http: [rpcUrl] } },
 	})
+
+export function l1Signer(rpcUrl: string, chainId: number, account: Account): L1Signer {
+	const chain = l1Chain(rpcUrl, chainId)
 	const transport = http(rpcUrl)
 	return {
 		publicClient: createPublicClient({ chain, transport }) as PublicClient,

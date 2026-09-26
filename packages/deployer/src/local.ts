@@ -1,6 +1,6 @@
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import {
 	authorizeLegacyHandshakeReads,
@@ -46,18 +46,28 @@ function assertAllPass(checks: Check[], log: (m: string) => void): void {
 }
 
 /**
- * Ephemeral wallet, no proving (a local correctness loop), key stores in an owner-only dir removed afterwards. It can
- * execute the 5.0.0 sponsor (see bridge-core's compat).
+ * Ephemeral wallet, no proving (a local correctness loop) that can execute the 5.0.0 sponsor (see bridge-core's
+ * compat). Its key stores land in TMPDIR, so open it inside an owned tmp scope.
  */
-async function withLocalWallet<T>(nodeUrl: string, fn: (w: EmbeddedWallet, node: ReturnType<typeof createAztecNodeClient>) => Promise<T>) {
+export async function openLocalWallet(node: AztecNode): Promise<EmbeddedWallet> {
+	const wallet = await EmbeddedWallet.create(node, {
+		ephemeral: true,
+		pxe: { proverEnabled: false, hooks: { authorizeUtilityCall: authorizeLegacyHandshakeReads } },
+	})
+	try {
+		await registerLegacyHandshakeRegistry(wallet)
+		return wallet
+	} catch (e) {
+		await wallet.stop()
+		throw e
+	}
+}
+
+async function withLocalWallet<T>(nodeUrl: string, fn: (w: EmbeddedWallet, node: AztecNode) => Promise<T>) {
 	return withOwnedTmpDir(async () => {
 		const node = createAztecNodeClient(nodeUrl)
-		const wallet = await EmbeddedWallet.create(node, {
-			ephemeral: true,
-			pxe: { proverEnabled: false, hooks: { authorizeUtilityCall: authorizeLegacyHandshakeReads } },
-		})
+		const wallet = await openLocalWallet(node)
 		try {
-			await registerLegacyHandshakeRegistry(wallet)
 			return await fn(wallet, node)
 		} finally {
 			await wallet.stop()

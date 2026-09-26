@@ -9,7 +9,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec/stdlib/messaging"
 import { type Address, type Hex, isAddressEqual, zeroAddress } from "viem"
 import { tokenArtifact, tokenBridgeArtifact } from "./artifacts"
-import { type FeeChoice, sponsoredPayment } from "./claim"
+import { type FeeChoice, feeFor } from "./claim"
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
 import type { OutboxReader } from "./outbox"
@@ -78,9 +78,9 @@ function exitCall(e: ExitIntent, wallet: Wallet, m: BridgeManifest, nonce: Fr) {
 }
 
 /**
- * Burns on L2 and emits the withdraw message. The burn is authorized for the proxy (the bridge's only path to the token)
- * with a fresh nonce: an off-chain witness for a private exit, and an auth-registry entry batched into the same tx for
- * a public one. A private exit is sponsored unless the user explicitly chose the wallet default.
+ * Burns on L2 and emits the withdraw message, paid per {@link FeeChoice}. The burn is authorized for the proxy (the
+ * bridge's only path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry
+ * entry batched into the same tx for a public one.
  */
 export async function exitToL1(
 	e: ExitIntent,
@@ -93,14 +93,14 @@ export async function exitToL1(
 	const proxy = AztecAddress.fromStringUnsafe(m.l2.proxy.address)
 	const nonce = Fr.random()
 	const { exit, burn } = exitCall(e, wallet, m, nonce)
+	const fee = feeFor(e.kind, m, opts.fee)
 	let txHash: TxHash
 	if (e.kind === "private") {
 		const witness = await wallet.createAuthWit(e.from, { caller: proxy, call: await burn.getFunctionCall() })
-		const fee = opts.fee === "wallet-default" ? undefined : { paymentMethod: sponsoredPayment(m) }
 		txHash = (await exit.send({ from: e.from, authWitnesses: [witness], fee })).receipt.txHash
 	} else {
 		const allow = await SetPublicAuthwitContractInteraction.create(wallet, e.from, { caller: proxy, action: burn }, true)
-		txHash = (await new BatchCall(wallet, [allow, exit]).send({ from: e.from })).receipt.txHash
+		txHash = (await new BatchCall(wallet, [allow, exit]).send({ from: e.from, fee })).receipt.txHash
 	}
 	const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
 	const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []

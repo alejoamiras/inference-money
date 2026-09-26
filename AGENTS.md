@@ -11,6 +11,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `packages/bridge-core` | Framework-agnostic protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw, the manifest schema |
 | `packages/local-network` | Per-run anvil + Aztec 5.0.0 local network: registry-claimed ports, owned process groups |
 | `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
+| `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
 | `implementations-plan/` | Plans and per-phase lessons; `usdc-bridge/plan.md` is the active plan |
 
 ## Commands
@@ -27,6 +28,7 @@ bun run probe:testnet # keyless: pins, L1 wiring, assets, fee faucet budget
 RUN_ID=a bun run net:up        # anvil + aztec 5.0.0 local network, detached; net:status / net:down
 RUN_ID=a bun run deploy:local  # deploy, verify every read-back, then write deployments/local/<run>/manifest.json
 RUN_ID=a bun run verify:local  # re-verify the manifest against a fresh forge build --force
+bun run test:integration      # own network + deploy (or NET_L1_RPC + NET_NODE_URL to attach), every spec, teardown
 
 bun run test:evm        # forge fmt --check, forge lint src, unit + fuzz + invariant (hermetic)
 bun run test:evm:formal # halmos, strict: exact proof names and counts (scripts/halmos-gate.sh)

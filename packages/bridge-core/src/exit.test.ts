@@ -49,11 +49,14 @@ describe("exitToL1", () => {
 		})
 	})
 
-	it("authorizes a public burn in the same batch as the exit", async () => {
+	it("authorizes a public burn in the same batch as the exit, paid by the wallet unless sponsorship is chosen", async () => {
 		const w = fakeWallet()
 		await exitToL1(intent({ kind: "public" }), w.wallet, effectNode([message]), M)
 		expect(w.authWits).toHaveLength(0)
 		expect(w.sent[0]).toMatchObject({ calls: ["set_authorized", "exit_to_l1_public"], feePayer: undefined })
+		const sponsored = fakeWallet()
+		await exitToL1(intent({ kind: "public" }), sponsored.wallet, effectNode([message]), M, { fee: "sponsored" })
+		expect(sponsored.sent[0]).toMatchObject({ feePayer: M.l2.sponsoredFpc })
 	})
 
 	it.each([
