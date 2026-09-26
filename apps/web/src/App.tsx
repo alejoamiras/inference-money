@@ -1,4 +1,5 @@
 import { AztecConnect } from "@/components/aztec/AztecConnect"
+import { BridgePanel } from "@/components/bridge/BridgePanel"
 import { L1Connect } from "@/components/L1Connect"
 import { MANIFEST } from "@/config/network"
 import { aztecSession } from "@/wallet/session"
@@ -20,8 +21,8 @@ export function App() {
 					<AztecConnect snap={snap} session={aztecSession} />
 				</div>
 			</header>
-			<main className="rounded-lg border border-border p-6">
-				<p className="text-sm text-muted-foreground">Connect both wallets to move USDC between Ethereum and Aztec.</p>
+			<main className="rounded-lg border border-border p-4 sm:p-6">
+				<BridgePanel />
 			</main>
 		</div>
 	)
