@@ -1,6 +1,6 @@
 # Phase 8 — App scaffold, wallet layer, e2e harness (`apps/web`)
 
-Status: **in progress** (gate evidence below once green).
+Status: **code complete; ✓ deferred.** Every gate command passes except the literal `bun run --cwd apps/web build`. It embeds `deployments/testnet.json`, which exists only after Phase 7, and Phase 7 is still blocked on testnet USDC. The ✓ lands when Phase 7 does and the literal gate re-runs.
 
 ## What was built
 
@@ -28,3 +28,14 @@ Status: **in progress** (gate evidence below once green).
 
 1. **`@types/node` 24 vs 26.** Pinning `@types/node@24.13.6` (the newest release older than 7 days by publish time) made it the isolated linker's hoisted fallback, and TypeScript loaded it beside bun-types' `@types/node@26.6.1`: local-network's typecheck failed (`Property 'once' does not exist on type 'Server'`). Fix: pin the repo's 26.6.1.
 2. **Run id.** The first e2e run read `net/<RUN_ID>.json`; `runIdFor` namespaces the tag by checkout (`0beccc70-<tag>`). The port claimer now resolves and records the id; every path keys on it. Teardown on that failure was already clean (both groups stopped, rows released).
+3. **The CSP blocked bb.js.** The app never rendered: bb.js fetches its own wasm from a `data:application/gzip` URL, and `connect-src` refused it ("Failed to fetch"). `connect-src` now carries `data: blob:`, and the target test pins it. The stuck run was interrupted with `SIGINT` to its Playwright pid; teardown was clean.
+4. **Account order.** The wallet lists granted accounts in its own order, so the spec compares sorted arrays.
+
+## Gate evidence
+
+- `bun run lint`: exit 0. `bun run typecheck`: exit 0.
+- `bun run --cwd apps/web test:components`: exit 0.
+- The build with a fixture manifest: exit 0. `dist/_headers` is generated.
+- `bun run test:e2e -- connect.spec.ts`: **5/5 passed** (57.4 s), run `0beccc70-web-e2e-686989-64769`. The egress fence was empty after every test. Teardown left no net handle, no run manifest, no registry rows and no sidecar.
+- `bun run test:integration`, re-run after the shared-helper refactor: 16/16 passed, exit 0, teardown clean.
+- Literal `bun run --cwd apps/web build`: blocked on the missing `deployments/testnet.json` (Phase 7).
