@@ -74,3 +74,14 @@ Codex: "two new findings in the fixes; no new contract-level flaw identified", p
 Found while fixing F7: **bun reads `bunfig.toml` from the cwd only**. A nested standalone project (the old `txe-server/`) ignored the root's 7-day `minimumReleaseAge`. Probe: a subproject installed hoisted despite the root's `linker = "isolated"`, and went isolated once given its own bunfig. So the old TXE lock was resolved without the gate. `toolchain/bunfig.toml` restates it, and the lock was re-resolved under it. The locked `bb` binary hashes to the old pin.
 
 Gate after the fixes: the Phase 3 gate on the local toolchain `GATE3_EXIT=0`; the CI path simulated locally (release tarball checked against the pin, extracted, `NARGO` set, frozen toolchain install) `compile.sh --check` + TXE 48/48 + 8/8, `GATE3_CI_EXIT=0`; a write-mode `compile.sh` leaves both committed artifacts byte-identical; lint, typecheck, actionlint and deployer 11/11 green.
+
+### Round 3 — same session, resumed with the `1e3729a` diff
+
+Codex: "One new Low-severity bug and one comment correction. High confidence." No pushback on the F12 regression rejection; the installer replacement, checksum-before-extraction, cache key and local resolution "look sound".
+
+| # | Sev | Finding | Verdict |
+|---|---|---|---|
+| F13 | L | If `withOwnedTmpDir`'s cleanup `rmSync` throws, the `active` flag never resets and every later scope in the process throws "already active". | **Accepted.** The flag is cleared before the removal; a regression locks a subdirectory so cleanup fails with EACCES, then asserts the next scope runs. |
+| F14 | Nit | `toolchain/bunfig.toml` gave the wrong reason for the hoisted linker. | **Accepted.** The reason is that `run-txe-tests.sh` launches the transitive `@aztec/txe` from the root `node_modules`. |
+
+**Round cap.** The plan stops the loop at 3 rounds only when findings are still material. Severity fell every round (4 M → 1 M + 1 L → 1 L + 1 Nit), and F13 is a fail-closed robustness bug in a helper no value path uses yet, so both were fixed and one short confirmation pass on the fix diff closes the loop.

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { withOwnedTmpDir } from "./owned-tmp"
@@ -43,6 +43,21 @@ describe("withOwnedTmpDir", () => {
 			expect(tmpdir()).toBe(join(root, String(process.pid)))
 		}, root)
 		await withOwnedTmpDir(async () => {}, root)
+	})
+
+	it("a failed cleanup surfaces and still frees the scope", async () => {
+		const root = scratchRoot()
+		const locked = join(root, String(process.pid), "locked")
+		await expect(
+			withOwnedTmpDir(async () => {
+				mkdirSync(locked)
+				writeFileSync(join(locked, "store.mdb"), "")
+				chmodSync(locked, 0o500)
+			}, root),
+		).rejects.toThrow(/EACCES/)
+		chmodSync(locked, 0o700)
+		await withOwnedTmpDir(async () => {}, root)
+		expect(existsSync(locked)).toBe(false)
 	})
 
 	it("reaps the directories of dead runs and keeps live ones", async () => {
