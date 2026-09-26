@@ -44,6 +44,12 @@ const FEE_PAYER_FAILED = /fee payer|insufficient fee|not enough balance for fee/
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+/** A sponsored send that failed because the sponsor could not pay, as {@link SponsorUnavailableError}; else undefined. */
+export function sponsorFailure(e: unknown, what: string): SponsorUnavailableError | undefined {
+	if (!FEE_PAYER_FAILED.test(message(e))) return undefined
+	return new SponsorUnavailableError(`The fee sponsor could not pay for this ${what}. It is kept; retry later.`, { cause: e })
+}
+
 export function sponsoredPayment(m: BridgeManifest): FeePaymentMethod {
 	if (!m.l2.sponsoredFpc) throw new SponsorUnavailableError("This network has no fee sponsor for private transactions.")
 	return new SponsoredFeePaymentMethod(AztecAddress.fromStringUnsafe(m.l2.sponsoredFpc))
@@ -163,9 +169,6 @@ export async function claim(
 		return "claimed"
 	} catch (e) {
 		if (ALREADY_CONSUMED.test(message(e)) && (await isClaimConsumed(t, node, m).catch(() => false))) return "already-consumed"
-		if (sponsored && FEE_PAYER_FAILED.test(message(e))) {
-			throw new SponsorUnavailableError("The fee sponsor could not pay for this claim. It is kept; retry later.", { cause: e })
-		}
-		throw e
+		throw (sponsored && sponsorFailure(e, "claim")) || e
 	}
 }
