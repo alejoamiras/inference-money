@@ -52,16 +52,27 @@ async function pickPorts(taken: Set<number>, count: number): Promise<number[]> {
 	}
 }
 
-/** Four distinct free ports, bind-tested together and then claimed in the registry; a pick another run claimed meanwhile is redrawn. */
-export async function claimNetPorts(runId: string, pidHint: number, worktree: string, registry = HOST_REGISTRY): Promise<NetPorts> {
+/**
+ * One distinct free port per service, bind-tested together and then claimed in the registry under `label`; a pick
+ * another run claimed meanwhile is redrawn.
+ */
+export async function claimServicePorts<S extends string>(
+	c: { runId: string; label: string; services: readonly S[]; pidHint: number; worktree: string },
+	registry = HOST_REGISTRY,
+): Promise<Record<S, number>> {
 	for (let attempt = 0; ; attempt++) {
-		const [anvil, aztec, aztecAdmin, aztecP2p] = (await pickPorts(registeredPorts(registry), 4)) as [number, number, number, number]
-		const ports = { anvil, aztec, aztecAdmin, aztecP2p }
+		const picked = await pickPorts(registeredPorts(registry), c.services.length)
+		const ports = Object.fromEntries(c.services.map((s, i) => [s, picked[i] as number])) as Record<S, number>
 		try {
-			await claimPorts({ runId, label: "inference-money-net", ports: { ...ports }, pidHint, worktree }, registry)
+			await claimPorts({ runId: c.runId, label: c.label, ports, pidHint: c.pidHint, worktree: c.worktree }, registry)
 			return ports
 		} catch (e) {
 			if (!(e instanceof PortClaimConflict) || attempt >= 4) throw e
 		}
 	}
+}
+
+export function claimNetPorts(runId: string, pidHint: number, worktree: string, registry = HOST_REGISTRY): Promise<NetPorts> {
+	const services = ["anvil", "aztec", "aztecAdmin", "aztecP2p"] as const
+	return claimServicePorts({ runId, label: "inference-money-net", services, pidHint, worktree }, registry)
 }

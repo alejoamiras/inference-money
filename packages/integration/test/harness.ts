@@ -1,10 +1,7 @@
 import { rmSync } from "node:fs"
-import { NO_FROM } from "@aztec/aztec.js/account"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
-import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import { Fr } from "@aztec/aztec.js/fields"
 import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
-import { TxStatus } from "@aztec/aztec.js/tx"
 import type { EmbeddedWallet } from "@aztec/wallets/embedded"
 import {
 	type BridgeManifest,
@@ -12,7 +9,6 @@ import {
 	outboxReader,
 	registerBridgeContracts,
 	registerSponsor,
-	sponsoredPayment,
 } from "@inference-money/bridge-core"
 import {
 	deployLocal,
@@ -20,20 +16,14 @@ import {
 	forgeRunDir,
 	LOCAL_DEPLOYER_SECRET,
 	l1Chain,
+	newSponsoredAccount,
 	openBridgeWallet,
 	recordingNode,
 	type SentTx,
 	signingKeyFor,
+	startBlockHeartbeat,
 } from "@inference-money/deployer"
-import {
-	L1_CHAIN_ID,
-	localDeploymentDir,
-	netDown,
-	netUp,
-	resolveEndpoints,
-	runIdFor,
-	withBlockHeartbeat,
-} from "@inference-money/local-network"
+import { L1_CHAIN_ID, localDeploymentDir, netDown, netUp, resolveEndpoints, runIdFor } from "@inference-money/local-network"
 import { type Chain, createPublicClient, createTestClient, http, type PublicClient, type TestClient } from "viem"
 
 export const INTEGRATION = Boolean(process.env.INTEGRATION)
@@ -58,13 +48,7 @@ export function harness(): Harness {
 	return current
 }
 
-/** A fresh Schnorr account in `wallet`, deployed through the sponsor. */
-export async function newAccount(wallet: EmbeddedWallet, m: BridgeManifest, secret = Fr.random()): Promise<AztecAddress> {
-	const manager = await wallet.createSchnorrAccount(secret, Fr.ZERO, signingKeyFor(secret))
-	const deploy = await manager.getDeployMethod()
-	await deploy.send({ from: NO_FROM, fee: { paymentMethod: sponsoredPayment(m) } })
-	return manager.address
-}
+export const newAccount = newSponsoredAccount
 
 async function openWallet(node: AztecNode, m: BridgeManifest): Promise<EmbeddedWallet> {
 	const wallet = await openBridgeWallet(node, { prove: false })
@@ -74,21 +58,9 @@ async function openWallet(node: AztecNode, m: BridgeManifest): Promise<EmbeddedW
 	return wallet
 }
 
-/**
- * The local network builds a block only when a tx arrives, so a separate wallet (never recorded) keeps revoking a
- * random, never-granted public authwit: the cheapest public tx, and one that exercises the published AuthRegistry.
- */
+/** The heartbeat runs in a wallet of its own, so its txs never land in `sent`. */
 async function startHeartbeat(node: AztecNode, m: BridgeManifest): Promise<void> {
-	const wallet = await openWallet(node, m)
-	const beater = await newAccount(wallet, m)
-	const send = { from: beater, fee: { paymentMethod: sponsoredPayment(m) }, wait: { waitForStatus: TxStatus.PROPOSED } }
-	const forceBlock = async () => (await SetPublicAuthwitContractInteraction.create(wallet, beater, Fr.random(), false)).send(send)
-	const stop = Promise.withResolvers<void>()
-	const beating = withBlockHeartbeat(forceBlock, () => stop.promise)
-	cleanup.push(async () => {
-		stop.resolve()
-		await beating
-	})
+	cleanup.push(await startBlockHeartbeat(await openWallet(node, m), m))
 }
 
 async function open(log: (m: string) => void): Promise<Harness> {
