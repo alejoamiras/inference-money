@@ -5,7 +5,6 @@ import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorizati
 import { Fr } from "@aztec/aztec.js/fields"
 import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
-import type { Tx } from "@aztec/stdlib/tx"
 import type { EmbeddedWallet } from "@aztec/wallets/embedded"
 import {
 	type BridgeManifest,
@@ -21,7 +20,9 @@ import {
 	forgeRunDir,
 	LOCAL_DEPLOYER_SECRET,
 	l1Chain,
-	openLocalWallet,
+	openBridgeWallet,
+	recordingNode,
+	type SentTx,
 	signingKeyFor,
 } from "@inference-money/deployer"
 import {
@@ -36,12 +37,6 @@ import {
 import { type Chain, createPublicClient, createTestClient, http, type PublicClient, type TestClient } from "viem"
 
 export const INTEGRATION = Boolean(process.env.INTEGRATION)
-
-/** A tx the actor wallet submitted, with the fee payer its kernel committed to. */
-export interface SentTx {
-	hash: string
-	feePayer: string
-}
 
 export interface Harness {
 	manifest: BridgeManifest
@@ -71,21 +66,8 @@ export async function newAccount(wallet: EmbeddedWallet, m: BridgeManifest, secr
 	return manager.address
 }
 
-/** Wraps the node so every `sendTx` records its hash and committed fee payer before it is forwarded. */
-function recordingNode(node: AztecNode, sent: SentTx[]): AztecNode {
-	return new Proxy(node, {
-		get(target, key, receiver) {
-			if (key !== "sendTx") return Reflect.get(target, key, receiver)
-			return (tx: Tx) => {
-				sent.push({ hash: tx.getTxHash().toString(), feePayer: tx.data.feePayer.toString() })
-				return target.sendTx(tx)
-			}
-		},
-	})
-}
-
 async function openWallet(node: AztecNode, m: BridgeManifest): Promise<EmbeddedWallet> {
-	const wallet = await openLocalWallet(node)
+	const wallet = await openBridgeWallet(node, { prove: false })
 	cleanup.push(() => wallet.stop())
 	await registerSponsor(wallet, m)
 	await registerBridgeContracts(wallet, m)

@@ -30,6 +30,11 @@ RUN_ID=a bun run deploy:local  # deploy, verify every read-back, then write depl
 RUN_ID=a bun run verify:local  # re-verify the manifest against a fresh forge build --force
 bun run test:integration      # own network + deploy (or NET_L1_RPC + NET_NODE_URL to attach), every spec, teardown
 
+bun run deploy:testnet   # probe the pins, deploy with real proofs + self-funded Fee Juice, verify, write deployments/testnet.json
+bun run verify:testnet   # re-verify deployments/testnet.json against the live chains and a fresh forge build
+bun run smoke:testnet    # four 1-USDC legs with real proofs; exit tickets kept in ~/.cache/inference-money/smoke to resume
+bun run secrets:scan     # yes/no only: any .env.testnet value outside it, any wallet store left on disk
+
 bun run test:evm        # forge fmt --check, forge lint src, unit + fuzz + invariant (hermetic)
 bun run test:evm:formal # halmos, strict: exact proof names and counts (scripts/halmos-gate.sh)
 bun run test:evm:gas    # .gas-snapshot --check --tolerance 2

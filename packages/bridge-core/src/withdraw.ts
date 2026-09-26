@@ -7,7 +7,7 @@ import { awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
 import { assertSigningContext } from "./network"
 import type { OutboxReader } from "./outbox"
-import type { L1Ctx, StageSink } from "./types"
+import { type L1Ctx, type StageSink, signerOf } from "./types"
 
 /** The Outbox membership proof `TokenPortal.withdraw` takes. */
 export interface OutboxProof {
@@ -118,7 +118,7 @@ export async function withdrawOnL1(t: ExitTicket, p: OutboxProof, l1: L1Ctx, m: 
 		abi: TOKEN_PORTAL_ABI,
 		functionName: "withdraw",
 		args: [t.recipient, t.amount, false, p.epoch, p.numCheckpointsInEpoch, p.leafIndex, p.path],
-		account: l1.account,
+		account: signerOf(l1),
 	} as const
 	try {
 		await l1.publicClient.simulateContract(call)

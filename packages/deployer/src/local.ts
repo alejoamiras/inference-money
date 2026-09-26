@@ -1,14 +1,7 @@
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
-import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import {
-	authorizeLegacyHandshakeReads,
-	type BridgeManifest,
-	registerLegacyHandshakeRegistry,
-	sponsoredFpcArtifact,
-	sponsorInstance,
-} from "@inference-money/bridge-core"
+import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { type BridgeManifest, sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
 import { ANVIL_ACCOUNTS, L1_CHAIN_ID, resolveEndpoints } from "@inference-money/local-network"
 import type { Hex } from "viem"
 import { mnemonicToAccount } from "viem/accounts"
@@ -17,10 +10,9 @@ import { deployMockUsdc } from "./deploy-l1"
 import { buildBridgeContracts } from "./evm"
 import { installCanonicalPermit2, l1Signer } from "./l1"
 import { localManifestPath, readManifest, writeManifest } from "./manifest"
-import { withOwnedTmpDir } from "./owned-tmp"
-import type { Check } from "./preflight"
 import { scrubbedEnv } from "./secrets"
-import { verifyDeployment } from "./verify"
+import { assertAllPass, verifyDeployment } from "./verify"
+import { withBridgeWallet } from "./wallet"
 
 /** Anvil's public test mnemonic: the local network's own keys, not a credential. */
 const ANVIL_MNEMONIC = "test test test test test test test test test test test junk"
@@ -32,49 +24,6 @@ export const localL1Account = () => mnemonicToAccount(ANVIL_MNEMONIC, { addressI
 /** A fixed local-only secret (like anvil's keys), so every process of a run can rebuild the L2 owner account. */
 export const LOCAL_DEPLOYER_SECRET = new Fr(0x1a7e0de9107e5n)
 
-export class VerificationFailed extends Error {
-	constructor(readonly failures: Check[]) {
-		super(`verification failed: ${failures.map((c) => `${c.name}: ${c.detail}`).join("; ")}`)
-		this.name = "VerificationFailed"
-	}
-}
-
-function assertAllPass(checks: Check[], log: (m: string) => void): void {
-	for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
-	const failures = checks.filter((c) => !c.ok)
-	if (failures.length > 0) throw new VerificationFailed(failures)
-}
-
-/**
- * Ephemeral wallet, no proving (a local correctness loop) that can execute the 5.0.0 sponsor (see bridge-core's
- * compat). Its key stores land in TMPDIR, so open it inside an owned tmp scope.
- */
-export async function openLocalWallet(node: AztecNode): Promise<EmbeddedWallet> {
-	const wallet = await EmbeddedWallet.create(node, {
-		ephemeral: true,
-		pxe: { proverEnabled: false, hooks: { authorizeUtilityCall: authorizeLegacyHandshakeReads } },
-	})
-	try {
-		await registerLegacyHandshakeRegistry(wallet)
-		return wallet
-	} catch (e) {
-		await wallet.stop()
-		throw e
-	}
-}
-
-async function withLocalWallet<T>(nodeUrl: string, fn: (w: EmbeddedWallet, node: AztecNode) => Promise<T>) {
-	return withOwnedTmpDir(async () => {
-		const node = createAztecNodeClient(nodeUrl)
-		const wallet = await openLocalWallet(node)
-		try {
-			return await fn(wallet, node)
-		} finally {
-			await wallet.stop()
-		}
-	})
-}
-
 /** Deploys the bridge onto this run's local network, verifies every read-back, and only then writes the manifest. */
 export async function deployLocal(runId: string, log: (m: string) => void): Promise<{ manifest: BridgeManifest; path: string }> {
 	const net = resolveEndpoints(runId)
@@ -83,7 +32,7 @@ export async function deployLocal(runId: string, log: (m: string) => void): Prom
 	const permit2 = await installCanonicalPermit2(l1)
 	const usdc = (await deployMockUsdc(l1, evm)).address
 	log(`L1 deployer ${l1.account.address}; Permit2 ${permit2}; MockUsdc ${usdc}`)
-	const manifest = await withLocalWallet(net.nodeUrl, async (wallet, node) => {
+	const manifest = await withBridgeWallet(net.nodeUrl, { prove: false }, async (wallet, node) => {
 		const sponsor = await sponsorInstance()
 		await wallet.registerContract(sponsor, sponsoredFpcArtifact)
 		const sponsored = new SponsoredFeePaymentMethod(sponsor.address)

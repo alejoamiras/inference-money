@@ -10,7 +10,7 @@ import type { BridgeManifest } from "./manifest"
 import { assertSigningContext } from "./network"
 import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
-import { type L1Ctx, MAX_L2_AMOUNT, type StageSink } from "./types"
+import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, signerOf } from "./types"
 
 export type DepositKind = "public" | "private"
 
@@ -97,7 +97,7 @@ export async function submitDeposit(
 	await assertSigningContext(l1, null, m, expected)
 	await assertBridgeLive(l2, m)
 	on?.("signing")
-	const signature = await l1.walletClient.signTypedData({ account: l1.account, ...d.typedData })
+	const signature = await l1.walletClient.signTypedData({ account: signerOf(l1), ...d.typedData })
 	await Promise.all([assertSigningContext(l1, null, m, expected), assertBridgeLive(l2, m)])
 	const finalized = await l1.publicClient.getBlock({ blockTag: "finalized" })
 	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number }
@@ -117,7 +117,7 @@ export async function submitDeposit(
 				message.deadline,
 				signature,
 			],
-			account: l1.account,
+			account: signerOf(l1),
 			chain: l1.walletClient.chain ?? null,
 		})
 	} catch (e) {

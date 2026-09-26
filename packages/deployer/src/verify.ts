@@ -158,3 +158,17 @@ export async function verifyDeployment(
 		...(await attempt("environment", () => verifyEnvironment(node, m))),
 	]
 }
+
+export class VerificationFailed extends Error {
+	constructor(readonly failures: Check[]) {
+		super(`verification failed: ${failures.map((c) => `${c.name}: ${c.detail}`).join("; ")}`)
+		this.name = "VerificationFailed"
+	}
+}
+
+/** Logs every check, then throws {@link VerificationFailed} naming each one that failed. */
+export function assertAllPass(checks: Check[], log: (m: string) => void): void {
+	for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
+	const failures = checks.filter((c) => !c.ok)
+	if (failures.length > 0) throw new VerificationFailed(failures)
+}
