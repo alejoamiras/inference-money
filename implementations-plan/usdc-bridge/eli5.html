@@ -178,8 +178,9 @@
       <div class="arc-head"><h3>Chunk 1: Contracts</h3><span class="pr">PR 1 of 3</span></div>
       <div class="phase">
         <h3><span class="n">1</span>Set up the repo and check the testnet</h3>
-        <p>Create the project skeleton with your usual tooling. Before writing any contract, read the live testnet (no keys needed) to confirm its version, its messaging contracts and that the fee sponsor holds enough for our deploy. Then send one throwaway test transaction with real proofs to confirm the testnet accepts our software version.</p>
-        <p class="proves"><b>Proves itself by:</b> lint and type checks pass, the testnet check prints matching values and enough sponsor funds, and the test transaction lands.</p>
+        <p>Create the project skeleton with your usual tooling. Before writing any contract, read the live testnet (no keys needed) to confirm its version, its messaging contracts and that the free testnet fee faucet can cover our deploy. Then send one throwaway test transaction with real proofs to confirm the testnet accepts our software version.</p>
+        <p><b>Changed during this phase:</b> the shared fee sponsor turned out to hold far too little for our deploy. So the deploy now pays its own fees: the throwaway Ethereum key mints free fee tokens from the testnet faucet and bridges them to Aztec, and the smoke test tops up the shared sponsor that private-mode users rely on. You approved this.</p>
+        <p class="proves"><b>Proves itself by:</b> lint and type checks pass, the testnet check prints matching values and a faucet mint that covers the estimated fees, and the test transaction lands (paid this way, twice).</p>
       </div>
       <div class="phase">
         <h3><span class="n">2</span>Ethereum contracts</h3>
@@ -212,7 +213,7 @@
       </div>
       <div class="phase">
         <h3><span class="n">7</span>Deploy to testnet and run a live smoke test</h3>
-        <p>Using the throwaway key you provide in a locked file, deploy to Sepolia and the Aztec testnet, then move about 1 USDC through all four paths.</p>
+        <p>Using the throwaway key you provide in a locked file, deploy to Sepolia and the Aztec testnet, then move about 1 USDC through all four paths. Fees come from the faucet path set up in phase 1.</p>
         <p class="proves"><b>Proves itself by:</b> all four legs settle with the right balance changes, and a scan confirms the key never landed in any file.</p>
       </div>
     </div>
