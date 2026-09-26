@@ -1,8 +1,8 @@
+import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { type BridgeProgress, computeProgress } from "./progress"
 
-export interface ProvenBlockSource {
-	getProvenBlockNumber(): Promise<bigint | number>
-}
+/** The node's proven tip; aztec.js 5.x names it by tag, not by a dedicated getter. */
+export type ProvenBlockSource = Pick<AztecNode, "getBlockNumber">
 
 /** Deposit (L1->L2) progress: time-based, ~4 min inclusion by default. */
 export function depositStatus(createdAtMs: number, maxWaitMs = 240_000, nowMs: number = Date.now()): BridgeProgress {
@@ -16,6 +16,6 @@ export async function withdrawStatus(
 	startBlock: number,
 	secondsPerBlock = 36,
 ): Promise<BridgeProgress> {
-	const provenBlock = Number(await node.getProvenBlockNumber())
+	const provenBlock = Number(await node.getBlockNumber("proven"))
 	return computeProgress({ provenBlock, neededBlock, startBlock, elapsedMs: 0, maxWaitMs: 0, secondsPerBlock })
 }

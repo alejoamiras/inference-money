@@ -2,7 +2,16 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { getAddress, zeroAddress } from "viem"
-import { type ExitIntent, type ExitNode, ExitUnconfirmedError, exitTicketFromTx, exitToL1, expectedExitMessage } from "./exit"
+import { SponsorUnavailableError } from "./claim"
+import {
+	type ExitIntent,
+	type ExitNode,
+	ExitUnconfirmedError,
+	exitTicketFromTx,
+	exitToL1,
+	expectedExitMessage,
+	isExitWithdrawn,
+} from "./exit"
 import { fakeEpoch } from "./test/fake-epoch"
 import { fakeWallet } from "./test/fake-wallet"
 import { a, MANIFEST as M } from "./test/fixtures"
@@ -59,6 +68,23 @@ describe("exitToL1", () => {
 		expect(sponsored.sent[0]).toMatchObject({ feePayer: M.l2.sponsoredFpc })
 	})
 
+	it("surfaces a sponsor that cannot pay as SponsorUnavailableError, with nothing burned", async () => {
+		const w = fakeWallet({
+			send: () => {
+				throw new Error("Not enough balance for fee payer to pay for transaction")
+			},
+		})
+		await expect(exitToL1(intent(), w.wallet, effectNode([message]), M)).rejects.toBeInstanceOf(SponsorUnavailableError)
+		const unsponsored = fakeWallet({
+			send: () => {
+				throw new Error("Not enough balance for fee payer to pay for transaction")
+			},
+		})
+		await expect(exitToL1(intent({ kind: "public" }), unsponsored.wallet, effectNode([message]), M)).rejects.not.toBeInstanceOf(
+			SponsorUnavailableError,
+		)
+	})
+
 	it.each([
 		["no matching messages", () => effectNode([new Fr(1)]), /without exactly one matching/],
 		["two matching messages", () => effectNode([message, message]), /without exactly one matching/],
@@ -93,5 +119,19 @@ describe("exitTicketFromTx", () => {
 		const e = fakeEpoch([message])
 		e.state.outboxRoot = ["unproven"]
 		expect(await exitTicketFromTx(e.txHash, RECIPIENT, AMOUNT, e.node, e.outbox, M)).toMatchObject({ messageIndexInTx: 0 })
+	})
+})
+
+describe("isExitWithdrawn", () => {
+	it("reads one occurrence's consumed bit, and false while its epoch is unproven", async () => {
+		const e = fakeEpoch([message, message])
+		const t = await exitTicketFromTx(e.txHash, RECIPIENT, AMOUNT, e.node, e.outbox, M, 1)
+		if (typeof t === "string") throw new Error(t)
+		e.state.consumed.add(0)
+		expect(await isExitWithdrawn(t, e.node, e.outbox)).toBe(false)
+		e.state.consumed.add(1)
+		expect(await isExitWithdrawn(t, e.node, e.outbox)).toBe(true)
+		e.state.outboxRoot = ["unproven"]
+		expect(await isExitWithdrawn(t, e.node, e.outbox)).toBe(false)
 	})
 })

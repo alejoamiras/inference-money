@@ -9,7 +9,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec/stdlib/messaging"
 import { type Address, type Hex, isAddressEqual, zeroAddress } from "viem"
 import { tokenArtifact, tokenBridgeArtifact } from "./artifacts"
-import { type FeeChoice, feeFor } from "./claim"
+import { type FeeChoice, feeFor, type SponsorUnavailableError, sponsorFailure } from "./claim"
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
 import type { OutboxReader } from "./outbox"
@@ -110,7 +110,8 @@ async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: R
 /**
  * Burns on L2 and emits the withdraw message, paid per {@link FeeChoice}. The burn is authorized for the proxy (the
  * bridge's only path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry
- * entry batched into the same tx for a public one. Any failure after the send is an {@link ExitUnconfirmedError}.
+ * entry batched into the same tx for a public one. A sponsor that cannot pay is a {@link SponsorUnavailableError} with
+ * nothing burned; any failure after the send is an {@link ExitUnconfirmedError}.
  */
 export async function exitToL1(
 	e: ExitIntent,
@@ -120,7 +121,13 @@ export async function exitToL1(
 	opts: { fee?: FeeChoice } = {},
 ): Promise<ExitTicket> {
 	assertExitIntent(e, m)
-	const txHash = await sendExit(e, wallet, m, feeFor(e.kind, m, opts.fee))
+	const fee = feeFor(e.kind, m, opts.fee)
+	let txHash: TxHash
+	try {
+		txHash = await sendExit(e, wallet, m, fee)
+	} catch (err) {
+		throw (fee && sponsorFailure(err, "withdrawal")) || err
+	}
 	try {
 		const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
 		const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []
@@ -142,6 +149,11 @@ async function isConsumed(node: ExitNode, outbox: OutboxReader, txHash: TxHash, 
 	const witness = await computeL2ToL1MembershipWitness(node, outbox, message, txHash, index)
 	if (!witness) return false
 	return outbox.isConsumed(BigInt(witness.epochNumber), getL2ToL1MessageLeafId(witness))
+}
+
+/** Whether this occurrence of the exit is already withdrawn on L1; false while its epoch is unproven. */
+export function isExitWithdrawn(t: ExitTicket, node: ExitNode, outbox: OutboxReader): Promise<boolean> {
+	return isConsumed(node, outbox, t.l2TxHash, Fr.fromHexString(t.messageHash), t.messageIndexInTx)
 }
 
 /**
