@@ -51,7 +51,7 @@ Port a prior "V1" single-token bridge into this repo as a **USDC-only** L1 ↔ L
 ```
 contracts/
   evm/                Foundry. src/{TokenPortal.sol, Permit2DepositRouter.sol, interfaces/}, test/, script/
-  aztec/              token_bridge/, token_minter_proxy/, claim_secret/, keystone/, scripts/{compile,run-txe-tests,check-sole-consumer,noir-deps,nargo-5}.sh, txe-server/
+  aztec/              token_bridge/, token_minter_proxy/, claim_secret/, keystone/, scripts/{compile,run-txe-tests,check-sole-consumer,noir-deps,nargo-5}.sh, toolchain/
 packages/
   bridge-core/        protocol logic (hashes, secrets, typed data, deposit/claim/exit/withdraw flows, manifest schema). Framework-agnostic; bun:test
   local-network/      anvil + `aztec start --local-network` lifecycle (pinned node version), ~/.agents/ports.md registry
@@ -441,7 +441,7 @@ Adapted from V2, plus new work:
   Also:
   - Strengthen `claim_private_via_relayer_*`: the relayer's balance stays 0.
 - **`txe-manifest.txt`** + gate in `run-txe-tests.sh` (`--show-output`): every named test must appear as passed, with a floor equal to the current count. `nargo test` exits 0 when zero tests ran, or when a `should_fail` passes vacuously on a TXE crash.
-- **`txe-server/`**: a committed package (`@aztec/txe@5.0.1` + `bun.lock`, installed with `--frozen-lockfile`). It replaces V1's ad-hoc `bun add` into a home-dir cache.
+- **`toolchain/`** (as built; planned as `txe-server/`): a committed package locking `@aztec/aztec@5.0.1` (the aztec CLI, bb and `@aztec/txe`) under its own 7-day `bunfig.toml`, installed with `--frozen-lockfile`. It replaces V1's ad-hoc `bun add` into a home-dir cache, and in CI the unpinned aztec-up installer.
 - **`TXE_TEST_THREADS=2`**: the TXE lmdb store opens with `maxReaders 2`, and 4 threads aborted V2's CI mid-suite.
 - **`nargo-5.sh`**: a pinned-toolchain wrapper. A bare `nargo compile` overwrites the committed transpiled artifact.
 - **`check-sole-consumer.sh` hardening**:

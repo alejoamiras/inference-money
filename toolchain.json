@@ -3,6 +3,7 @@
 	"aztecNode": "5.0.0",
 	"aztecJs": "5.2.0",
 	"noir": "5.0.1",
+	"nargo": "1.0.0-beta.22",
 	"node": "24.12.0",
 	"foundry": "1.7.1",
 	"halmos": "0.3.3",

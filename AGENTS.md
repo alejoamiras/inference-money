@@ -34,7 +34,7 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment sta
 
 ## Rules
 
-- **One source of truth for versions:** `toolchain.json` (Aztec node/JS/Noir, Foundry, halmos, solc, Bun). `@aztec/*` npm packages are pinned exactly to `aztecJs`. Never bump one without the others it couples to.
+- **One source of truth for versions:** `toolchain.json` (Aztec node/JS/Noir, nargo, Foundry, halmos, solc, Bun). `@aztec/*` npm packages are pinned exactly to `aztecJs`, except `contracts/aztec/toolchain` (the Noir scripts' aztec CLI, bb and TXE), pinned to `noir`. Never bump one without the others it couples to.
 - **Secrets:** testnet keys live only in `.env.testnet` (git-ignored, mode 0600), are read in-process, and are never printed, logged, passed on argv, or written anywhere else, except that Aztec wallet/PXE stores (LMDB temp files even when "ephemeral") must run inside `withOwnedTmpDir` (deployer). No agent generates operational keys.
 - **Complexity budgets:** cognitive complexity ≤ 15 everywhere; ≤ 80 non-blank lines per production function. Never suppress complexity rules in new code.
 - **Comments** say what the code can't (invariants, external gotchas, non-obvious whys); never narrate, never reference plans or reviews.

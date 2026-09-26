@@ -33,6 +33,18 @@ describe("withOwnedTmpDir", () => {
 		expect(process.env.TMPDIR).toBe(before)
 	})
 
+	it("refuses an overlapping scope without disturbing the active one's store", async () => {
+		const root = scratchRoot()
+		await withOwnedTmpDir(async () => {
+			const store = join(tmpdir(), "store.mdb")
+			writeFileSync(store, "synthetic secret key bytes")
+			await expect(withOwnedTmpDir(async () => {}, root)).rejects.toThrow("already active")
+			expect(existsSync(store)).toBe(true)
+			expect(tmpdir()).toBe(join(root, String(process.pid)))
+		}, root)
+		await withOwnedTmpDir(async () => {}, root)
+	})
+
 	it("reaps the directories of dead runs and keeps live ones", async () => {
 		const root = scratchRoot()
 		const dead = Bun.spawnSync(["true"]).pid

@@ -6,7 +6,7 @@ on:
     paths:
       - '**/bun.lock'
       - '**/package.json'
-      - 'bunfig.toml'
+      - '**/bunfig.toml'
       - '.github/workflows/audit.yml'
 
 permissions:
@@ -22,11 +22,11 @@ jobs:
       - uses: ./.github/actions/setup-toolchains
       # Advisory: every current finding is transitive through the exact-pinned @aztec/* stack, which is bumped only as a
       # whole (toolchain.json). The step summary keeps them visible on every dependency PR.
-      - name: Audit the workspace and the TXE server lockfiles
+      - name: Audit the workspace and the Aztec toolchain lockfiles
         continue-on-error: true
         run: |
           status=0
-          for dir in . contracts/aztec/txe-server; do
+          for dir in . contracts/aztec/toolchain; do
             {
               echo "### bun audit: \`$dir\`"
               echo '```'
