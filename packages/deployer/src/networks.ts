@@ -15,6 +15,8 @@ export interface NetworkPins {
 	usdcDecimals: number
 	usdcEip712Version: string
 	permit2: Address
+	feeJuicePortal: Address
+	feeAssetHandler: Address
 	sponsoredFpc: `0x${string}`
 }
 
@@ -32,6 +34,9 @@ export const TESTNET: NetworkPins = {
 	usdcDecimals: 6,
 	usdcEip712Version: "2",
 	permit2: "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+	feeJuicePortal: "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3",
+	// Permissionless testnet faucet for the fee asset: the self-funded fee path mints here, then bridges.
+	feeAssetHandler: "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
 	// Canonical SponsoredFPC (salt 0) for the 5.0.0 CLI; its address commits to the contract class.
 	sponsoredFpc: "0x0628377e98bca5913dc86765ad0758f7b7aa83eac49079c6fba125807b393fe1",
 }

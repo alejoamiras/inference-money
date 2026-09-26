@@ -322,7 +322,7 @@ Facts 3–5 are **time-sensitive probe results**; the Phase 1 and Phase 7 probes
 
 ### Inferences (unverified — attack these)
 1. The JS 5.2.0 client works against node 5.0.0 with 5.0.1-compiled contracts. **Proof acceptance** is proven by the Phase 1 keyless spike and the Phase 7 smoke (real testnet). **Execution/API** is proven by Phase 6 (local node 5.0.0). **Fallback rule:** if it fails, pin JS to the newest 5.0.x that passes and log it.
-2. The testnet SponsoredFPC holds at least the estimated fee budget for the deploy + smoke. **Checked by** the Phase 1 probe and re-checked right before Phase 7 spends. A non-zero balance alone is insufficient. **Fallback:** hold Phase 7 and surface (fee path = SponsoredFPC only).
+2. ~~The testnet SponsoredFPC holds at least the estimated fee budget for the deploy + smoke.~~ **Refuted 2026-09-26** by the Phase 1 probe: it held 1.20 FJ, while sampled testnet txs cost 1.69 FJ at p50 (budget ≈ 117 FJ). Replaced by D24 (self-funded Fee Juice + a sponsor top-up). Original text: checked by the Phase 1 probe and re-checked right before Phase 7 spends. A non-zero balance alone is insufficient. **Fallback:** hold Phase 7 and surface (fee path = SponsoredFPC only).
 3. `aztec start --local-network` 5.0.0 deploys a funded SponsoredFPC at the canonical address. **Proven by** Phase 5.
 4. The embedded test wallet honors a dApp `paymentMethod`, and the submitted payer is observable in the tx. **Proven by** Phase 6 (Node) and Phase 10 (browser). Third-party wallets: best effort, unproven.
 5. The freeze `local-network.ts` ports with only V2-hub stripping and runs node 5.0.0.
@@ -505,7 +505,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 
 ### Arc 1 — contracts
 
-#### Phase 1 — Repo scaffold + keyless testnet probe
+#### Phase 1 — Repo scaffold + keyless testnet probe ✓
 - The first commit is `chore: initialize repository` (LICENSE, README stub, `.gitignore` incl. `.env*`); it becomes `main` at Delivery.
 - Then the my-stack scaffold:
   - Bun workspaces (`apps/*`, `packages/*`), `bunfig.toml` (min-age 604800, isolated linker), `biome.json` (budgets + `noRestrictedImports` for `@aztec/ethereum`), `tsconfig.base.json` with project references.
@@ -516,12 +516,13 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 - `bun run probe:testnet` is keyless and read-only. It checks:
   - node info equals the expected pins
   - `registry → canonical rollup → inbox/outbox/version` equal node info
-  - the SponsoredFPC instance is present, with its Fee Juice balance read and compared against an **estimated fee budget** for Phase 7 (deploy 3 L2 contracts + wiring + 4 smoke legs, from `predictedWorstMinFees` × estimated gas, ×3 headroom)
+  - [D24] the fee faucet's `mintAmount` covers an **estimated fee budget** for Phase 7, and the SponsoredFPC instance is present with its balance reported (informational; the smoke tops it up)
+  - (superseded) the SponsoredFPC balance compared against the budget for Phase 7 (deploy 3 L2 contracts + wiring + 4 smoke legs, from `predictedWorstMinFees` × estimated gas, ×3 headroom)
   - Circle USDC decimals/version
   - Permit2 code present
 - `bun run spike:proof-compat` needs **no user-supplied credentials**. It is the plan's **one explicitly authorized key generation**:
   - It creates an ephemeral in-memory Aztec test account (random key, never written, logged or reused; it controls nothing of value).
-  - It deploys that account on testnet via SponsoredFPC with **real client proofs** from the JS 5.2.0 stack, spending a small amount of public sponsorship.
+  - [D24] It deploys that account on testnet with **real client proofs** from the JS 5.2.0 stack, paying with Fee Juice the throwaway L1 key (`.env.testnet`) mints from the permissionless faucet and bridges, claimed in the same tx.
   - That proves on day one that the testnet 5.0.0 node accepts 5.2.0 account/client proofs. Bridge-artifact compatibility is still Phase 7's job.
   - The general prohibition stays in force: **no operational deploy or pause key is ever generated**; those come only from the user's `.env.testnet`.
   - On failure, apply the Inference 1 fallback rule (pin JS to the newest 5.0.x that passes) before writing any core code.
@@ -530,9 +531,9 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 - Commands: `bun install --frozen-lockfile && bun run lint && bun run typecheck && bun run lint:actions && bun run probe:testnet && bun run spike:proof-compat`
 - Pass:
   - all exit 0
-  - the probe prints matching identities and a sponsor balance ≥ the estimated budget
+  - the probe prints matching identities and a faucet mint ≥ the estimated budget [D24]
   - the spike's account deploy tx is mined on testnet
-- If the balance is below budget, **stop and surface**: Inference 2 has failed, and Phase 7 has no fee path.
+- If the faucet mint is below budget, **stop and surface**: Phase 7 has no fee path. (The original sponsor-balance rule fired on 2026-09-26 and was resolved by D24.)
 
 #### Phase 2 — L1 contracts
 - Port `TokenPortal.sol` (V1 + [D19] guards; SPDX + provenance). Write `Permit2DepositRouter.sol` per the Architecture section, plus `MockUsdc`. Remappings via npm + `scripts/gen-remappings.ts`. Foundry pinned to `toolchain.json` (1.7.1).
@@ -616,7 +617,7 @@ Every phase: after each meaningful step, run the fast layers (`bun run lint`, `b
 - Also port `handle.ts`.
 - Deployer:
   - `deploy-l1.ts`: viem + forge artifacts. Local: Permit2 via `anvil_setCode` at the canonical address, and `MockUsdc`.
-  - `deploy-l2.ts`: aztec.js, **deployer-bound** instances, SponsoredFPC fee payment.
+  - `deploy-l2.ts`: aztec.js, **deployer-bound** instances; fee payment via SponsoredFPC locally, and via self-funded Fee Juice (faucet → FeeJuicePortal → claim) on testnet [D24].
   - `verify.ts`: the full list in Architecture, against a fresh `forge build --force` (a stale or missing `out/` fails, never skips).
   - `manifest.ts`, `secrets.ts` (`.env.testnet` 0600 loader + scrubbed child env + boolean scanner).
   - CLI: `net:up|down|status`, `deploy:local`, `verify:local`.
@@ -649,7 +650,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 
 #### Phase 7 — Testnet deploy + Node smoke
 - **Precondition:** `.env.testnet` exists with mode 0600 (provisioned), and the L1 address holds ≥ 5 Circle Sepolia USDC (user funds it). If either is missing, surface and hold. Never create or rotate operational keys autonomously.
-- The deploy and smoke use ephemeral wallets/PXEs only. `probe:testnet` re-checks that the sponsor balance is at or above budget immediately before spending.
+- The deploy and smoke use ephemeral wallets/PXEs only. [D24] The deploy pays with self-funded Fee Juice; immediately before the private smoke legs, bridge ≥ 100 FJ to the canonical SponsoredFPC (a public claim anyone may make) and re-check its balance covers the two private legs.
 - Commit `deployments/testnet.json`. Pass the user the pause-key reminder (accepted: they keep the key).
 
 **Validation gate** (e2e-live-network, real proofs):
@@ -765,6 +766,7 @@ Also:
 | D21 | Noir artifact gate | `compile.sh --check` as the sole compile: class-id parity **plus** normalized SDK-facing ABI parity against the HEAD-committed artifacts; a mutated-name regression | byte-level `git diff --exit-code` (false-reds on non-semantic JSON noise); class id alone (misses public ABI corruption — codex r4 M1) | V2 QA port; codex r4 M1/M2 | settled |
 | D22 | TXE in CI | yes, behind the manifest gate (committed `txe-server/`, 2 threads), as V2's final CI did | local-only (V1; an unenforced manifest is a suggestion) | V2 QA port; codex r4 L6 correction | settled |
 | D23 | V2 QA port | adopt the filtered list (§ V2 QA port) | port V2 wholesale (factory/hub/fuel surface absent); keep V1's QA (user asked for V2-grade) | user request + 3 sweeps | settled |
+| D24 | Testnet fee path | self-funded Fee Juice: the throwaway L1 key mints the testnet fee asset from the permissionless `FeeAssetHandler` (1000 FEE/mint) and bridges it via `FeeJuicePortal`; bridge ≥ 100 FJ to the canonical SponsoredFPC before the private smoke legs so the sponsored-payer assertion still runs | SponsoredFPC-only (drained: 1.20 FJ vs ≈117 FJ budget); self-fund without top-up (loses the testnet sponsored-payer proof); hold for a refill (may never come) | Phase 1 probe; user 2026-09-26 | settled |
 | D10 | viem | canonical only; viem outbox reader; import ban | dual viem + `L1Port` seam | fable M3, codex (untyped seam) | settled |
 | D11 | Integration location | `packages/integration` | inside bridge-core (dependency cycle) | fable M4 | settled |
 | D12 | L1 transport | injected connector only | public RPC `http()` (egress leak) | fable M5 | settled |
