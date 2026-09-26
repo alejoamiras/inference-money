@@ -18,24 +18,12 @@ import {
 } from "@inference-money/bridge-core"
 import { l1Signer } from "@inference-money/deployer"
 import { L1_CHAIN_ID } from "@inference-money/local-network"
-import { type Address, erc20Abi, getAbiItem, maxUint256, parseAbi, type WalletClient } from "viem"
-import { generatePrivateKey, type LocalAccount, privateKeyToAccount } from "viem/accounts"
+import { type Address, erc20Abi, getAbiItem, maxUint256, parseAbi } from "viem"
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { harness, newAccount } from "./harness"
 
 export const USDC = 1_000_000n
 const MOCK_USDC_ABI = parseAbi(["function mint(address to, uint256 amount)"])
-
-/**
- * Core names its signer by address, as a browser wallet's JSON-RPC account; viem would then ask anvil to sign, and anvil
- * holds no key for a fresh actor. This signs those requests with the actor's key, as an injected wallet would.
- */
-function injectedLike(wallet: WalletClient, account: LocalAccount): WalletClient {
-	return {
-		...wallet,
-		signTypedData: (args: Parameters<WalletClient["signTypedData"]>[0]) => wallet.signTypedData({ ...args, account }),
-		writeContract: (args: Parameters<WalletClient["writeContract"]>[0]) => wallet.writeContract({ ...args, account }),
-	} as WalletClient
-}
 
 /** A fresh anvil key with gas money and `usdc` MockUsdc, Permit2 already approved: a returning bridge user. */
 export async function l1Actor(usdc = 1_000n * USDC): Promise<L1Ctx> {
@@ -72,7 +60,7 @@ export async function l1Actor(usdc = 1_000n * USDC): Promise<L1Ctx> {
 		waitReceipt: (hash) => l1.publicClient.waitForTransactionReceipt({ hash }),
 		needed: usdc,
 	})
-	return { publicClient: l1.publicClient, walletClient: injectedLike(signer.walletClient, signer.account as LocalAccount), account }
+	return { publicClient: l1.publicClient, walletClient: signer.walletClient, account }
 }
 
 export const l2Actor = (): Promise<AztecAddress> => newAccount(harness().wallet, harness().manifest)

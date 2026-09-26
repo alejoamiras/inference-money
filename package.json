@@ -11,6 +11,7 @@
 	],
 	"scripts": {
 		"deploy:local": "bun packages/deployer/src/cli.ts deploy local",
+		"deploy:testnet": "bun run --cwd packages/deployer deploy:testnet",
 		"lint": "biome check . && sort-package-json --check package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json' && bun run lint:shell",
 		"lint:actions": "actionlint",
 		"lint:fix": "biome check --write . && sort-package-json package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json'",
@@ -20,6 +21,8 @@
 		"net:up": "bun packages/local-network/src/cli.ts up",
 		"prepare": "husky",
 		"probe:testnet": "bun run --cwd packages/deployer probe:testnet",
+		"secrets:scan": "bun run --cwd packages/deployer secrets:scan",
+		"smoke:testnet": "bun run --cwd packages/deployer smoke:testnet",
 		"spike:proof-compat": "bun run --cwd packages/deployer spike:proof-compat",
 		"test": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present test",
 		"test:evm": "bun run --cwd contracts/evm test:evm",
@@ -29,7 +32,8 @@
 		"test:integration": "bun run --cwd packages/integration test:integration",
 		"test:noir": "bun run --cwd contracts/aztec test:noir",
 		"typecheck": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present typecheck",
-		"verify:local": "bun packages/deployer/src/cli.ts verify local"
+		"verify:local": "bun packages/deployer/src/cli.ts verify local",
+		"verify:testnet": "bun run --cwd packages/deployer verify:testnet"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
