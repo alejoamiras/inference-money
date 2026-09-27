@@ -5,20 +5,22 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig, type Plugin } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
-import { type BuildTarget, headersFile, ISOLATION_HEADERS, resolveTarget, servedHeaders } from "./build/target.ts"
+import { type BuildTarget, EMBEDDED_MANIFEST, headersFile, ISOLATION_HEADERS, resolveTarget, servedHeaders } from "./build/target.ts"
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url))
 
-function headersPlugin(target: BuildTarget): Plugin {
+/** `_headers` for Workers static assets, and the exact manifest string the bundle embeds, for the identity check. */
+function outputsPlugin(target: BuildTarget, embedded: string): Plugin {
 	let outDir = "dist"
 	return {
-		name: "usdc-bridge-headers",
+		name: "usdc-bridge-outputs",
 		apply: "build",
 		configResolved(config) {
 			outDir = resolve(config.root, config.build.outDir)
 		},
 		closeBundle() {
 			writeFileSync(resolve(outDir, "_headers"), headersFile(target))
+			writeFileSync(resolve(outDir, EMBEDDED_MANIFEST), embedded)
 		},
 	}
 }
@@ -26,9 +28,10 @@ function headersPlugin(target: BuildTarget): Plugin {
 export default defineConfig(() => {
 	const target = resolveTarget(process.env, REPO_ROOT)
 	const devPort = Number(process.env.WEB_DEV_PORT) || 5180
+	const embedded = JSON.stringify(target.manifest)
 	return {
 		define: {
-			__BRIDGE_MANIFEST__: JSON.stringify(target.manifest),
+			__BRIDGE_MANIFEST__: embedded,
 			__WEB_WALLET_URLS__: JSON.stringify(target.webWalletUrls),
 		},
 		resolve: {
@@ -49,7 +52,7 @@ export default defineConfig(() => {
 			tailwindcss(),
 			// Aztec packages read `process`/`Buffer` at module top level.
 			nodePolyfills({ globals: { Buffer: true, global: true, process: true } }),
-			headersPlugin(target),
+			outputsPlugin(target, embedded),
 		],
 		// Dev keeps the inline HMR preamble, so it gets isolation only; preview serves exactly what production does.
 		server: { port: devPort, strictPort: !process.env.WEB_DEV_PORT, headers: ISOLATION_HEADERS },

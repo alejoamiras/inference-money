@@ -29,7 +29,11 @@ export default defineConfig({
 		actionTimeout: 60_000,
 		navigationTimeout: 60_000,
 	},
-	projects: [{ name: "chromium" }],
+	// The expiry spec moves L1 time past a permit deadline; its project runs after everything else, never beside it.
+	projects: [
+		{ name: "bridge", testIgnore: /expiry\.spec\.ts$/ },
+		{ name: "expiry", testMatch: /expiry\.spec\.ts$/, dependencies: ["bridge"] },
+	],
 	webServer: [
 		{
 			// The production build, served with the exact headers production serves.

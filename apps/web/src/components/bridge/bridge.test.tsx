@@ -7,12 +7,13 @@ import { DepositFlow } from "@/bridge/deposit-flow"
 import type { BridgeOps } from "@/bridge/env"
 import { useFlow } from "@/bridge/flow-store"
 import { deferred, fakeEnv, L1_ACCOUNT, offlineDepositOps } from "@/bridge/test/fake-env"
-import type { WithdrawFlow } from "@/bridge/withdraw-flow"
+import type { WithdrawFlow, WithdrawSnapshot } from "@/bridge/withdraw-flow"
 import { MANIFEST } from "@/config/network"
 import { TESTIDS } from "@/lib/testids"
 import { DepositForm, PRIVACY_COPY } from "./DepositForm"
 import { DepositProgress } from "./DepositProgress"
 import { WithdrawForm } from "./WithdrawForm"
+import { WithdrawProgress } from "./WithdrawProgress"
 
 const L2_ACCOUNT = `0x${"0a".repeat(32)}`
 const tid = (id: string) => screen.getByTestId(id)
@@ -123,5 +124,31 @@ describe("DepositProgress", () => {
 		await userEvent.setup().click(tid(TESTIDS.feeFallbackAccept))
 		await waitFor(() => expect(tid(TESTIDS.stepper)).toHaveAttribute("data-current", "done"))
 		expect(claim.mock.calls.map((c) => c[4].fee)).toEqual([undefined, "wallet-default"])
+	})
+})
+
+describe("WithdrawProgress", () => {
+	it("shows the Aztec tx hash to save while the exit is in flight, and keeps it once done", () => {
+		const hash = `0x${"1b".repeat(32)}`
+		const s: WithdrawSnapshot = {
+			step: "withdrawing",
+			kind: "private",
+			amount: 4_000_000n,
+			recipient: L1_ACCOUNT,
+			l2TxHash: hash,
+			l1TxHash: null,
+			outcome: null,
+			notice: null,
+			recovery: null,
+			proving: null,
+		}
+		const flow = {} as WithdrawFlow
+		const { rerender } = render(<WithdrawProgress flow={flow} s={s} />)
+		expect(tid(TESTIDS.withdrawTxHash)).toHaveTextContent(hash)
+		expect(screen.getByText(/Save these to finish later/)).toBeInTheDocument()
+
+		rerender(<WithdrawProgress flow={flow} s={{ ...s, step: "done", outcome: "withdrawn" }} />)
+		expect(tid(TESTIDS.withdrawTxHash)).toHaveTextContent(hash)
+		expect(screen.queryByText(/Save these to finish later/)).toBeNull()
 	})
 })

@@ -20,39 +20,40 @@ import { WithdrawProgress } from "./WithdrawProgress"
 type Direction = "deposit" | "withdraw"
 type WithdrawMode = "new" | "finish"
 
+/** Each side's account once it is usable: the Ethereum one on the bridge's chain, the Aztec one with contracts registered. */
 interface Accounts {
-	readonly l1: `0x${string}`
-	readonly l2: string
+	readonly l1: `0x${string}` | null
+	readonly l2: string | null
 }
 
-/** Both wallets connected, on the bridge's networks, with the bridge's contracts registered; else null. */
-function useAccounts(): Accounts | null {
+function useAccounts(): Accounts {
 	const l1 = useL1()
 	const snap = useAztecSession(aztecSession)
-	const l1Ready = l1.status === "connected" && !l1.wrongChain && l1.address
-	const l2Ready = snap.status === "connected" && snap.contractsReady && snap.selectedAccount
-	return l1Ready && l2Ready && l1.address && snap.selectedAccount ? { l1: l1.address, l2: snap.selectedAccount } : null
+	return {
+		l1: l1.status === "connected" && !l1.wrongChain && l1.address ? l1.address : null,
+		l2: snap.status === "connected" && snap.contractsReady && snap.selectedAccount ? snap.selectedAccount : null,
+	}
 }
 
-function useBalances(accounts: Accounts | null) {
+function useBalances(accounts: Accounts) {
 	const { env } = useBridge()
 	const m = env.manifest
 	const l1 = useReadContract({
 		address: m.l1.usdc,
 		abi: erc20Abi,
 		functionName: "balanceOf",
-		args: accounts ? [accounts.l1] : undefined,
+		args: accounts.l1 ? [accounts.l1] : undefined,
 		chainId: L1_CHAIN.id,
-		query: { enabled: accounts !== null, refetchInterval: 30_000 },
+		query: { enabled: accounts.l1 !== null, refetchInterval: 30_000 },
 	})
 	const l2 = useQuery({
-		queryKey: ["l2-balances", accounts?.l2],
+		queryKey: ["l2-balances", accounts.l2],
 		queryFn: async () => {
 			const ctx = env.l2()
 			const [pub, priv] = await Promise.all([env.ops.l2Balance(ctx, m, "public"), env.ops.l2Balance(ctx, m, "private")])
 			return { public: pub, private: priv }
 		},
-		enabled: accounts !== null,
+		enabled: accounts.l2 !== null,
 		refetchInterval: 60_000,
 	})
 	const paused = useQuery({
@@ -62,6 +63,8 @@ function useBalances(accounts: Accounts | null) {
 	})
 	return { l1: l1.data, l2: l2.data, paused: paused.data === true }
 }
+
+type Balances = ReturnType<typeof useBalances>
 
 function Balance({ label, value, testId }: { label: string; value: bigint | undefined; testId: string }) {
 	return (
@@ -90,14 +93,14 @@ function Gate({ children }: { children: ReactNode }) {
 	)
 }
 
-const GATE_COPY = "Connect your Ethereum wallet and your Aztec wallet to move USDC between them."
+const BOTH = "Connect your Ethereum wallet and your Aztec wallet to move USDC between them."
 
-function DepositPanel({ accounts, balances }: { accounts: Accounts | null; balances: ReturnType<typeof useBalances> }) {
+function DepositPanel({ accounts, balances }: { accounts: Accounts; balances: Balances }) {
 	const { deposit } = useBridge()
 	const s = useFlow(deposit.store)
 	useRefreshOnDone(s.step === "done")
 	if (s.step !== "idle") return <DepositProgress flow={deposit} s={s} />
-	if (!accounts) return <Gate>{GATE_COPY}</Gate>
+	if (!accounts.l1 || !accounts.l2) return <Gate>{BOTH}</Gate>
 	return (
 		<DepositForm
 			flow={deposit}
@@ -115,37 +118,46 @@ const MODES = [
 	{ value: "finish", label: "Finish a withdrawal" },
 ] as const
 
-function WithdrawPanel({ accounts, balances }: { accounts: Accounts | null; balances: ReturnType<typeof useBalances> }) {
+function NewWithdrawal({ accounts, balances }: { accounts: Accounts; balances: Balances }) {
 	const { withdraw, env } = useBridge()
+	const s = useFlow(withdraw.store)
+	if (!accounts.l1 || !accounts.l2) return <Gate>{BOTH}</Gate>
+	return (
+		<WithdrawForm
+			flow={withdraw}
+			manifest={env.manifest}
+			notice={s.notice}
+			l1Account={accounts.l1}
+			l2Account={accounts.l2}
+			l2Balances={balances.l2}
+			paused={balances.paused}
+		/>
+	)
+}
+
+function WithdrawPanel({ accounts, balances }: { accounts: Accounts; balances: Balances }) {
+	const { withdraw } = useBridge()
 	const s = useFlow(withdraw.store)
 	const [mode, setMode] = useState<WithdrawMode>("new")
 	useRefreshOnDone(s.step === "done")
-	if (s.step === "unconfirmed" && accounts) {
+	if (s.step === "unconfirmed") {
 		return (
 			<div className="grid gap-4">
 				<Notice tone="warning">{s.notice}</Notice>
-				<FinishForm flow={withdraw} notice={null} l1Account={accounts.l1} prefill={s.recovery} />
+				<FinishForm flow={withdraw} notice={null} l1Account={accounts.l1 ?? ""} prefill={s.recovery} />
 			</div>
 		)
 	}
 	if (s.step !== "idle") return <WithdrawProgress flow={withdraw} s={s} />
-	if (!accounts) return <Gate>{GATE_COPY}</Gate>
 	return (
 		<div className="grid gap-4">
 			<Choices name="withdraw-mode" value={mode} choices={MODES} onChange={setMode} testId={TESTIDS.withdrawMode} />
-			{mode === "new" ? (
-				<WithdrawForm
-					flow={withdraw}
-					manifest={env.manifest}
-					notice={s.notice}
-					l1Account={accounts.l1}
-					l2Account={accounts.l2}
-					l2Balances={balances.l2}
-					paused={balances.paused}
-				/>
-			) : (
+			{mode === "new" ? <NewWithdrawal accounts={accounts} balances={balances} /> : null}
+			{mode === "finish" && accounts.l1 ? (
 				<FinishForm flow={withdraw} notice={s.notice} l1Account={accounts.l1} prefill={null} />
-			)}
+			) : null}
+			{/* Finishing only submits on Ethereum, so it needs no Aztec wallet. */}
+			{mode === "finish" && !accounts.l1 ? <Gate>Connect your Ethereum wallet to finish a withdrawal.</Gate> : null}
 		</div>
 	)
 }
@@ -167,13 +179,11 @@ export function BridgePanel() {
 					The bridge is paused. New deposits and withdrawals are refused until it resumes; nothing you already sent is lost.
 				</p>
 			) : null}
-			{accounts ? (
-				<div className="flex flex-wrap gap-6">
-					<Balance label="Ethereum" value={balances.l1} testId={TESTIDS.balanceL1} />
-					<Balance label="Aztec, private" value={balances.l2?.private} testId={TESTIDS.balanceL2Private} />
-					<Balance label="Aztec, public" value={balances.l2?.public} testId={TESTIDS.balanceL2Public} />
-				</div>
-			) : null}
+			<div className="flex flex-wrap gap-6">
+				{accounts.l1 ? <Balance label="Ethereum" value={balances.l1} testId={TESTIDS.balanceL1} /> : null}
+				{accounts.l2 ? <Balance label="Aztec, private" value={balances.l2?.private} testId={TESTIDS.balanceL2Private} /> : null}
+				{accounts.l2 ? <Balance label="Aztec, public" value={balances.l2?.public} testId={TESTIDS.balanceL2Public} /> : null}
+			</div>
 			{direction === "deposit" ? (
 				<DepositPanel accounts={accounts} balances={balances} />
 			) : (

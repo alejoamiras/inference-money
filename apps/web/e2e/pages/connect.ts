@@ -46,7 +46,7 @@ export async function connectAztec(page: Page, o: ConnectOptions): Promise<void>
 	await expect(page.locator(tid(TESTIDS.aztecStatus))).toHaveAttribute("data-status", "connected", { timeout: 120_000 })
 }
 
-async function chooseAccountIfAsked(page: Page, o: ConnectOptions): Promise<void> {
+export async function chooseAccountIfAsked(page: Page, o: ConnectOptions): Promise<void> {
 	const modal = page.locator(tid(TESTIDS.accountChoice))
 	const connected = page.locator(`${tid(TESTIDS.aztecStatus)}[data-status="connected"]`)
 	await Promise.race([modal.waitFor({ state: "visible", timeout: 120_000 }), connected.waitFor({ state: "attached", timeout: 120_000 })])

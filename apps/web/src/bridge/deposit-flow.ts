@@ -97,7 +97,11 @@ export class DepositFlow {
 	readonly #env: BridgeEnv
 	#draft: DepositDraft | null = null
 	#ticket: ClaimTicket | null = null
-	#busy = false
+	/** The running action's id, 0 when idle. */
+	#action = 0
+	#actions = 0
+	/** Bumped when a send the wallet never answered is given up on, so its late answer changes nothing. */
+	#sendEpoch = 0
 
 	constructor(env: BridgeEnv) {
 		this.#env = env
@@ -113,7 +117,16 @@ export class DepositFlow {
 			await this.#confirmMined(await this.#env.l1(), d)
 		})
 
-	readonly recheck = () => this.#act(["stuck"], () => this.#recheck())
+	/**
+	 * Looks for the deposit on Ethereum. While the send is still awaiting the wallet, this gives up on that answer
+	 * (the wallet may have broadcast and lost the reply): the request was recorded, so it is only ever looked for.
+	 */
+	readonly recheck = () => {
+		if (this.store.get().step !== "sending" || !this.#draft?.submission) return this.#act(["stuck"], () => this.#recheck())
+		this.#sendEpoch++
+		this.#action = 0
+		return this.#act(["sending"], () => this.#recheck())
+	}
 
 	readonly discard = () =>
 		this.#act(["stuck"], async () => {
@@ -135,15 +148,17 @@ export class DepositFlow {
 	readonly reset = () => this.#act(["idle", "done"], async () => this.store.set(IDLE))
 
 	async #act(from: DepositStep[], fn: () => Promise<void>): Promise<void> {
-		if (this.#busy || !from.includes(this.store.get().step)) return
-		this.#busy = true
+		if (this.#action !== 0 || !from.includes(this.store.get().step)) return
+		const id = ++this.#actions
+		this.#action = id
 		try {
 			await fn()
 		} catch (e) {
 			// A step that threw past its own handling (a wallet gone mid-action) keeps the step, with the reason.
-			this.store.set({ notice: explain(e) })
+			if (this.#action === id) this.store.set({ notice: explain(e) })
 		} finally {
-			this.#busy = false
+			// A superseded action must not release the one that replaced it.
+			if (this.#action === id) this.#action = 0
 		}
 	}
 
@@ -216,16 +231,19 @@ export class DepositFlow {
 
 	async #send(l1: L1Ctx, d: DepositDraft): Promise<void> {
 		const env = this.#env
+		const epoch = this.#sendEpoch
 		try {
 			await env.ops.submitDeposit(d, l1, env.manifest, env.node, (stage) =>
 				this.store.set({ step: stage === "signing" ? "signing" : "sending" }),
 			)
 		} catch (e) {
+			if (epoch !== this.#sendEpoch) return
 			// No submission recorded means nothing can have been broadcast: the draft, and its secret, are dropped.
 			if (d.submission) return this.#stuck(e)
 			this.#drop()
 			return this.#back(e)
 		}
+		if (epoch !== this.#sendEpoch) return
 		this.store.set({ l1TxHash: d.l1TxHash ?? null })
 		await this.#confirmMined(l1, d)
 	}

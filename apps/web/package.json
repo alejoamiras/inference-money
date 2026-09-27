@@ -7,7 +7,7 @@
 	"scripts": {
 		"build": "vite build",
 		"build:test-wallet": "vite build --config e2e/test-wallet/vite.config.ts",
-		"build:testnet": "BRIDGE_TARGET=testnet vite build",
+		"build:testnet": "BRIDGE_TARGET=testnet vite build && BUILT_TARGET=testnet vitest run build/manifest-identity.test.ts",
 		"dev": "vite",
 		"preview": "vite preview",
 		"test": "vitest run",

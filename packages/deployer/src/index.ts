@@ -1,5 +1,6 @@
 export { signingKeyFor } from "./deploy-l2"
 export { forgeRunDir } from "./evm"
+export { bridgeFeeJuice } from "./fee-juice"
 export { type L1Signer, l1Chain, l1Signer } from "./l1"
 export { deployLocal, LOCAL_DEPLOYER_SECRET, localL1Account } from "./local"
 export { newSponsoredAccount, startBlockHeartbeat } from "./local-actors"

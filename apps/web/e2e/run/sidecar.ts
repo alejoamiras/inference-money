@@ -4,7 +4,11 @@
  *
  *   RUN_ID=<run>  SIDECAR_PORT=<port>  bun e2e/run/sidecar.ts
  *
- * POST /actors {"count": n} → {"actors": [{secret, signingKey, address}]}; GET /health → 200 once ready.
+ * GET /health → 200 once ready.
+ * POST /actors {"count": n, "feeJuice"?: true} → {"actors": [{secret, signingKey, address}]}; Fee Juice lets the
+ *   actor's own wallet pay its public txs.
+ * POST /fund {"address", "amount"} → a public USDC balance of `amount` (base units, decimal string), claimed.
+ * POST /exit {"from", "amount", "recipient"} → {"l2TxHash"}: a public exit for the page to finish.
  */
 import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -20,6 +24,8 @@ import {
 	startBlockHeartbeat,
 } from "@inference-money/deployer"
 import { resolveEndpoints, runIdFor } from "@inference-money/local-network"
+import { getAddress } from "viem"
+import { aztecAddress, createFunder, type Funder } from "./funder"
 
 const MAX_ACTORS_PER_REQUEST = 16
 
@@ -46,17 +52,51 @@ async function newActor(wallet: EmbeddedWallet, m: BridgeManifest) {
 	return { secret: secret.toString(), signingKey: signingKeyFor(secret).toString(), address: address.toString() }
 }
 
+const amountOf = (v: unknown): bigint => {
+	if (typeof v !== "string" || !/^[1-9]\d*$/.test(v)) throw new Error(`amount must be a positive decimal string, got ${String(v)}`)
+	return BigInt(v)
+}
+
+type Queue = <T>(run: () => Promise<T>) => Promise<T>
+type Route = (body: Record<string, unknown>) => Promise<unknown>
+
+function routes(wallet: EmbeddedWallet, m: BridgeManifest, funder: Funder, queue: Queue): Record<string, Route> {
+	return {
+		"/actors": async ({ count, feeJuice }) => {
+			if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_ACTORS_PER_REQUEST) {
+				throw new Error(`count must be 1..${MAX_ACTORS_PER_REQUEST}`)
+			}
+			const actors = []
+			for (let i = 0; i < (count as number); i++) {
+				const actor = await queue(() => newActor(wallet, m))
+				if (feeJuice === true) await queue(() => funder.feeJuice(aztecAddress(actor.address)))
+				actors.push(actor)
+			}
+			return { actors }
+		},
+		"/fund": async ({ address, amount }) => {
+			await queue(() => funder.fundPublic(aztecAddress(address), amountOf(amount)))
+			return { ok: true }
+		},
+		"/exit": async ({ from, amount, recipient }) => ({
+			l2TxHash: await queue(() => funder.exitPublic(aztecAddress(from), amountOf(amount), getAddress(String(recipient)))),
+		}),
+	}
+}
+
 async function main(): Promise<void> {
 	const runId = runIdFor()
 	const port = Number(process.env.SIDECAR_PORT)
 	if (!Number.isInteger(port) || port <= 0) throw new Error("SIDECAR_PORT must name the port this run claimed")
 	const m = readManifest(localManifestPath(runId))
-	const { nodeUrl } = resolveEndpoints(runId)
+	const { nodeUrl, anvilUrl } = resolveEndpoints(runId)
 	const exitTmp = enterOwnedTmpDir()
 	const wallet = await openWallet(nodeUrl, m)
 	const beatWallet = await openWallet(nodeUrl, m)
 	const stopBeat = await startBlockHeartbeat(beatWallet, m)
-	const queue = serialized<unknown>()
+	const queue = serialized<unknown>() as Queue
+	const funder = await createFunder({ wallet, node: createAztecNodeClient(nodeUrl), m, anvilUrl })
+	const table = routes(wallet, m, funder, queue)
 
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
@@ -64,14 +104,9 @@ async function main(): Promise<void> {
 		async fetch(req) {
 			const { pathname } = new URL(req.url)
 			if (req.method === "GET" && pathname === "/health") return Response.json({ ok: true })
-			if (req.method !== "POST" || pathname !== "/actors") return new Response("not found", { status: 404 })
-			const { count } = (await req.json()) as { count?: unknown }
-			if (!Number.isInteger(count) || (count as number) < 1 || (count as number) > MAX_ACTORS_PER_REQUEST) {
-				return new Response(`count must be 1..${MAX_ACTORS_PER_REQUEST}`, { status: 400 })
-			}
-			const actors = []
-			for (let i = 0; i < (count as number); i++) actors.push(await queue(() => newActor(wallet, m)))
-			return Response.json({ actors })
+			const route = req.method === "POST" ? table[pathname] : undefined
+			if (!route) return new Response("not found", { status: 404 })
+			return Response.json(await route((await req.json()) as Record<string, unknown>))
 		},
 		error: (e) => new Response(e instanceof Error ? e.message : String(e), { status: 500 }),
 	})

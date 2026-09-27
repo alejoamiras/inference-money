@@ -52,6 +52,7 @@ export function Choices<T extends string>(p: {
 			{p.choices.map((c) => (
 				<label
 					key={c.value}
+					data-choice={c.value}
 					className={cn(
 						"cursor-pointer rounded px-3 py-1 text-sm",
 						p.value === c.value ? "bg-muted font-medium" : "text-muted-foreground",

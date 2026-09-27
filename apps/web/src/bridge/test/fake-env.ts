@@ -27,6 +27,8 @@ export function fakeL1() {
 		signs: [] as { message: unknown }[],
 		sends: [] as WriteRequest[],
 		onSign: undefined as (() => void) | undefined,
+		/** The next deposit send is recorded and never answered, as a wallet that broadcast and lost the reply. */
+		hangNextSend: false,
 	}
 	const receipt = async () => ({ status: "success", logs: [] })
 	const publicClient = {
@@ -50,6 +52,10 @@ export function fakeL1() {
 		writeContract: async (req: WriteRequest) => {
 			s.sends.push(req)
 			if (req.functionName === "approve") s.allowance = maxUint256
+			if (req.functionName === "deposit" && s.hangNextSend) {
+				s.hangNextSend = false
+				return new Promise<never>(() => {})
+			}
 			return L1_TX
 		},
 	} as unknown as WalletClient

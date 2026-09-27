@@ -42,6 +42,8 @@ export interface L1WalletControl {
 	/** How often the page asked for one wallet-side method (`eth_sendTransaction`,
 	 *  `eth_signTypedData_v4`, `personal_sign`), held and refused calls included. */
 	calls(method: string): number
+	/** How many transactions the page asked the wallet to send to `to`, held and refused ones included. */
+	transactionsTo(to: Address): number
 	/** The chain `eth_chainId` answers; a change emits `chainChanged` in every page of the context. */
 	setChainId(chainId: number): Promise<void>
 	/** Swap the signing key; emits `accountsChanged`. */
@@ -112,6 +114,7 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 	const swallows: Array<{ match?: HoldMatch }> = []
 	const parked: Array<{ perform: () => Promise<unknown>; resolve: (v: unknown) => void; reject: (e: unknown) => void }> = []
 	const counts: Record<string, number> = {}
+	const targets: string[] = []
 	const permits: SignedPermit[] = []
 	let signed = 0
 	const recordPermit = (typed: ReturnType<typeof typedDataOf>) => {
@@ -178,8 +181,9 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 		},
 		eth_sendTransaction: (params) => {
 			count("eth_sendTransaction")
-			refuse("transaction")
 			const tx = params[0] as { to?: Address; data?: Hex; value?: Hex; gas?: Hex }
+			targets.push((tx.to ?? "").toLowerCase())
+			refuse("transaction")
 			const send = () => {
 				signed++
 				return client.sendTransaction({
@@ -275,6 +279,7 @@ export async function installL1Wallet(context: BrowserContext, o: L1WalletOption
 			return signed
 		},
 		calls: (method) => counts[method] ?? 0,
+		transactionsTo: (to) => targets.filter((t) => t === to.toLowerCase()).length,
 		permits: () => [...permits],
 		setChainId: switchChain,
 		async setAccount(privateKey) {

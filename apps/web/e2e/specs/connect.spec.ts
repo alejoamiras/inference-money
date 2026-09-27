@@ -49,7 +49,7 @@ test("both frames are cross-origin isolated", async ({ page, run }) => {
 	expect(await walletFrame(page, run, "main").evaluate(() => crossOriginIsolated)).toBe(true)
 })
 
-test("the L1 wallet connects through wagmi and the chain guard holds writes until it switches", async ({ page, l1 }) => {
+test("[A12] the L1 wallet connects through wagmi and the chain guard holds writes until it switches", async ({ page, l1 }) => {
 	await page.goto("/")
 	await page.locator(tid(TESTIDS.l1Connect)).click()
 	const status = page.locator(tid(TESTIDS.l1Status))
