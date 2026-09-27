@@ -167,3 +167,16 @@ Effort `high`, run `2026-09-27-contracts`. Scope was `contracts/` only (D16). Th
 - **Not applied:** the coordinator's defence-in-depth deployer check (refuse artifacts that differ from HEAD). No concrete path remains, and it would be an extra layer.
 - **Also fixed:** the `claim_secret` separator comment now names both keystone tripwires (Noir: FPC fuel; TS: protocol secret hash).
 - **Validation:** shellcheck clean; `noir-deps.sh --self-test` passed; `compile.sh --check` passed, printing "5 entries fetched + verified" first, with both class ids unchanged, so no contract bytes moved and the redeploy chain does not apply. Lint clean.
+
+**Re-review.** The final-pass codex session was resumed with the `fbf1337` diff and answered: "No new material findings." `/harden` is remediated and re-reviewed.
+
+**Final gates on `fbf1337`:**
+- `bun run test && bun run test:evm && bun run test:evm:formal && bun run test:evm:gas && bun run test:noir` exits 0:
+  - unit: bridge-core 121, web 93 + 1 skipped, deployer 29, local-network 14;
+  - forge 64/64;
+  - halmos: exactly the 8 proofs;
+  - gas snapshot within tolerance;
+  - TXE: token_bridge 48, keystone 8.
+- `bun run lint && bun run lint:actions && bun run typecheck` exits 0.
+
+**Still blocked:** Phase 7. The throwaway L1 key `0xFcc2…F6F5` holds 0 Circle Sepolia USDC; re-read on 2026-09-27 with an `eth_call` of `balanceOf` against the public RPC. Delivery waits on Phase 7, because the plan requires `verify:testnet` to pass against the final artifacts before any PR opens, and arc 2 must carry `deployments/testnet.json`.
