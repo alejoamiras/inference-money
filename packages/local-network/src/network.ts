@@ -29,13 +29,14 @@ interface Toolchain {
 }
 
 /**
- * The node version the testnet runs, from `toolchain.json`. Only a complete install is accepted: `@aztec/ethereum`
- * resolves forge/anvil from `~/.aztec/current` before PATH, so a partial one would deploy L1 with whatever version
- * another agent last pointed that symlink at.
+ * The node version the testnet runs, from `toolchain.json`, installed at `AZTEC_NODE_HOME` (`install-node.sh`) or else
+ * by aztec-up. Only a complete install of exactly that version is accepted: `@aztec/ethereum` resolves forge/anvil
+ * from `~/.aztec/current` before PATH, so a partial one would deploy L1 with whatever version another agent last
+ * pointed that symlink at.
  */
-export function resolveToolchain(root = REPO_ROOT): Toolchain {
+export function resolveToolchain(root = REPO_ROOT, env = process.env): Toolchain {
 	const version = (JSON.parse(readFileSync(join(root, "toolchain.json"), "utf8")) as { aztecNode: string }).aztecNode
-	const base = join(homedir(), ".aztec", "versions", version)
+	const base = env.AZTEC_NODE_HOME || join(homedir(), ".aztec", "versions", version)
 	const t = {
 		version,
 		anvil: join(base, "internal-bin", "anvil"),
@@ -51,7 +52,13 @@ export function resolveToolchain(root = REPO_ROOT): Toolchain {
 		}
 	})
 	if (missing.length > 0)
-		throw new Error(`aztec ${version} toolchain is incomplete (missing ${missing.join(", ")}); run: aztec-up install ${version}`)
+		throw new Error(
+			`aztec ${version} toolchain is incomplete (missing ${missing.join(", ")}); run: aztec-up install ${version}, or packages/local-network/scripts/install-node.sh <dir> with AZTEC_NODE_HOME=<dir>`,
+		)
+	const installed = (
+		JSON.parse(readFileSync(join(base, "node_modules", "@aztec", "aztec", "package.json"), "utf8")) as { version: string }
+	).version
+	if (installed !== version) throw new Error(`${base} holds aztec ${installed}, not toolchain.json's ${version}`)
 	return t
 }
 

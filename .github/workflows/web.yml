@@ -3,6 +3,8 @@ name: Web
 on:
   workflow_dispatch:
   pull_request:
+    # `labeled`: adding the `e2e` label runs the browser suite without a new push.
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: web-${{ github.head_ref || github.ref }}
@@ -40,6 +42,9 @@ jobs:
               - 'biome.json'
               - 'tsconfig.base.json'
               - '.github/workflows/web.yml'
+              - '.github/workflows/_e2e.yml'
+              - 'packages/local-network/**'
+              - 'packages/deployer/**'
               - '.github/actions/setup-toolchains/**'
       - if: github.event_name == 'workflow_dispatch'
         id: override
@@ -61,10 +66,18 @@ jobs:
       - run: bun run --cwd apps/web build:testnet
       - run: test -s apps/web/dist/_headers
 
+  # The browser suite runs only on request: it boots a local network and waits out proven epochs.
+  e2e:
+    needs: [changes, web]
+    if: >-
+      needs.changes.outputs.relevant == 'true' &&
+      (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e'))
+    uses: ./.github/workflows/_e2e.yml
+
   status:
     name: web-status
     if: always()
-    needs: [changes, web]
+    needs: [changes, web, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -73,6 +86,7 @@ jobs:
           CHANGES: ${{ needs.changes.result }}
           RELEVANT: ${{ needs.changes.outputs.relevant }}
           WEB: ${{ needs.web.result }}
+          E2E: ${{ needs.e2e.result }}
         run: |
           [ "$CHANGES" = success ] || { echo "::error::change detection: $CHANGES"; exit 1; }
           if [ "$RELEVANT" = true ]; then
@@ -80,3 +94,5 @@ jobs:
           else
             case "$WEB" in success|skipped) ;; *) echo "::error::web ended $WEB"; exit 1 ;; esac
           fi
+          # Unrequested, e2e is skipped; requested, it must pass.
+          case "$E2E" in success|skipped) ;; *) echo "::error::e2e ended $E2E"; exit 1 ;; esac

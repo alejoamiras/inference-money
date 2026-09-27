@@ -8,8 +8,9 @@ export interface Actor {
 	address: string
 }
 
-export async function newActors(sidecarUrl: string, count: number): Promise<Actor[]> {
-	const res = await fetch(`${sidecarUrl}/actors`, { method: "POST", body: JSON.stringify({ count }) })
+/** `feeJuice` funds each actor's own public txs, which its wallet pays when the app asks for no sponsor. */
+export async function newActors(sidecarUrl: string, count: number, feeJuice = false): Promise<Actor[]> {
+	const res = await fetch(`${sidecarUrl}/actors`, { method: "POST", body: JSON.stringify({ count, feeJuice }) })
 	if (!res.ok) throw new Error(`sidecar refused ${count} actors: ${res.status} ${await res.text()}`)
 	const { actors } = (await res.json()) as { actors: { secret: Hex; signingKey: Hex; address: string }[] }
 	return actors.map((a) => ({ seed: { secret: a.secret, signingKey: a.signingKey }, address: a.address }))

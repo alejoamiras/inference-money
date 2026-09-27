@@ -30,6 +30,7 @@ RUN_ID=a bun run net:up        # anvil + aztec 5.0.0 local network, detached; ne
 RUN_ID=a bun run deploy:local  # deploy, verify every read-back, then write deployments/local/<run>/manifest.json
 RUN_ID=a bun run verify:local  # re-verify the manifest against a fresh forge build --force
 bun run test:integration      # own network + deploy (or NET_L1_RPC + NET_NODE_URL to attach), every spec, teardown
+bash packages/local-network/scripts/install-node.sh <dir>  # CI's node: frozen lock + sha-pinned Foundry; AZTEC_NODE_HOME=<dir> selects it
 
 bun run --cwd apps/web test:components           # vitest: session store, grant, build target, test-wallet guard
 BRIDGE_MANIFEST=<file> bun run --cwd apps/web build   # any deployed manifest; build:testnet pins deployments/testnet.json

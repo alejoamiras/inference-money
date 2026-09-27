@@ -22,11 +22,11 @@ jobs:
       - uses: ./.github/actions/setup-toolchains
       # Advisory: every current finding is transitive through the exact-pinned @aztec/* stack, which is bumped only as a
       # whole (toolchain.json). The step summary keeps them visible on every dependency PR.
-      - name: Audit the workspace and the Aztec toolchain lockfiles
+      - name: Audit the workspace and the Aztec toolchain and node lockfiles
         continue-on-error: true
         run: |
           status=0
-          for dir in . contracts/aztec/toolchain; do
+          for dir in . contracts/aztec/toolchain packages/local-network/toolchain; do
             {
               echo "### bun audit: \`$dir\`"
               echo '```'

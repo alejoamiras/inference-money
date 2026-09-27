@@ -37,7 +37,7 @@ const resume = (hash: TxHash, recipient: `0x${string}`, amount: bigint) =>
 	exitTicketFromTx(hash, recipient, amount, harness().node, harness().outbox, harness().manifest)
 
 describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
-	it("public exit → proven → L1 withdraw: the Outbox reads unconsumed before and consumed after", async () => {
+	it("[A4] public exit → proven → L1 withdraw: the Outbox reads unconsumed before and consumed after", async () => {
 		const { manifest: m, node, outbox } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		await funded(l1, "public", bob, 10n * USDC)
@@ -51,7 +51,7 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 		expect(await consumedOnL1(t)).toBe(true)
 	})
 
-	it("private exit, paid by the sponsor (the submitted tx names it), then withdrawn", async () => {
+	it("[A5][A15] private exit, paid by the sponsor (the submitted tx names it), then withdrawn", async () => {
 		const { manifest: m } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		await funded(l1, "private", bob, 5n * USDC)
@@ -67,7 +67,7 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 		expect(await usdcOf(l1.account)).toBe(before + 5n * USDC)
 	})
 
-	it("with app memory gone, a private exit to another recipient resumes from (tx hash, recipient, amount)", async () => {
+	it("[A14] with app memory gone, a private exit to another recipient resumes from (tx hash, recipient, amount)", async () => {
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		await funded(l1, "private", bob, 3n * USDC)
 		const recipient = privateKeyToAccount(generatePrivateKey()).address
@@ -82,7 +82,7 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 		expect(await usdcOf(recipient)).toBe(3n * USDC)
 	})
 
-	it("replaying a completed L1 withdraw is refused as already withdrawn and pays nothing", async () => {
+	it("[A13] replaying a completed L1 withdraw is refused as already withdrawn and pays nothing", async () => {
 		const { manifest: m, node, outbox } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		await funded(l1, "public", bob, 2n * USDC)
@@ -95,7 +95,7 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 		expect(await resume(t.l2TxHash, l1.account, 2n * USDC)).toBe("all-consumed")
 	})
 
-	it("two identical exits in one tx are withdrawn one at a time from the tx alone, then all-consumed", async () => {
+	it("[A13] two identical exits in one tx are withdrawn one at a time from the tx alone, then all-consumed", async () => {
 		const { manifest: m, wallet } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		await funded(l1, "public", bob, 4n * USDC)

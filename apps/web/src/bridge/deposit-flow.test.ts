@@ -3,7 +3,7 @@ import { SponsorUnavailableError } from "@inference-money/bridge-core"
 import { pad } from "viem"
 import { describe, expect, it, vi } from "vitest"
 import { DepositFlow } from "./deposit-flow"
-import { fakeEnv, stepsOf } from "./test/fake-env"
+import { fakeEnv, stepsOf, ticketFor } from "./test/fake-env"
 
 const ZERO_WORD = pad("0x0")
 const AMOUNT = 25_000_000n
@@ -81,6 +81,20 @@ describe("DepositFlow", () => {
 		expect(flow.store.get().step).toBe("idle")
 		expect(f.env.inFlight.size).toBe(0)
 		expect(f.l1.sends).toHaveLength(1)
+	})
+
+	it("a send the wallet never answers is looked for on Ethereum instead, and claimed once", async () => {
+		const claim = vi.fn(async () => "claimed" as const)
+		const f = await fakeEnv({ reconcileDeposit: async (d) => ticketFor(d), claim })
+		f.l1.hangNextSend = true
+		const flow = new DepositFlow(f.env)
+		void flow.confirm({ amount: AMOUNT, kind: "private" })
+		await vi.waitFor(() => expect(flow.store.get().step).toBe("sending"))
+
+		await flow.recheck()
+		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "claimed" })
+		expect(claim).toHaveBeenCalledTimes(1)
+		expect(f.l1.sends.filter((s) => s.functionName === "deposit")).toHaveLength(1)
 	})
 
 	it("pays the claim fee from the wallet only after the user accepts the fallback", async () => {

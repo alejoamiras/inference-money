@@ -10,6 +10,8 @@ export interface BuildTarget {
 }
 
 export const TESTNET_MANIFEST = "deployments/testnet.json"
+/** Written beside the bundle: the exact string `__BRIDGE_MANIFEST__` was defined as. */
+export const EMBEDDED_MANIFEST = "bridge-manifest.json"
 
 type Env = Readonly<Record<string, string | undefined>>
 

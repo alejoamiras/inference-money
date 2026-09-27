@@ -57,10 +57,12 @@ export function WithdrawProgress({ flow, s }: { flow: WithdrawFlow; s: WithdrawS
 	return (
 		<div className="grid gap-4" data-step={s.step}>
 			<Stepper steps={STEPS} current={STEP_INDEX[s.step]} failed={BLOCKED.has(s.step)} />
-			{s.l2TxHash && s.step !== "done" ? (
+			{s.l2TxHash ? (
 				<div className="grid gap-1 text-sm">
 					<span className="text-muted-foreground">
-						Save these to finish later: the Aztec transaction hash, {formatUsdc(s.amount ?? 0n)} USDC and the recipient.
+						{s.step === "done"
+							? "Aztec transaction"
+							: `Save these to finish later: the Aztec transaction hash, ${formatUsdc(s.amount ?? 0n)} USDC and the recipient.`}
 					</span>
 					<span className="font-mono break-all" data-testid={TESTIDS.withdrawTxHash}>
 						{s.l2TxHash}

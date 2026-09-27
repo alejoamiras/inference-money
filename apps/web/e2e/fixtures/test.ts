@@ -11,6 +11,7 @@ import type { Hex } from "viem"
 import { type RunEnv, runEnv } from "../env"
 import type { Seed } from "../test-wallet/profile"
 import { type Actor, newActors, newL1Key } from "./actors"
+import { mintUsdc, type RunManifest, readRunManifest } from "./chain"
 import { confineEgress, type Egress } from "./egress"
 import { installL1Wallet, type L1WalletControl } from "./l1-wallet"
 import { parkWalletPanel } from "./wallet-panel"
@@ -18,6 +19,8 @@ import { parkWalletPanel } from "./wallet-panel"
 /** The app lists at most 16 granted accounts; a file whose tests need more is split. */
 export const MAX_POOL = 16
 const SPARES = 1
+/** Every worker's Ethereum account starts with this much USDC. */
+export const L1_USDC = 1_000n * 10n ** 6n
 
 export interface ActorPool {
 	readonly all: readonly Actor[]
@@ -34,22 +37,29 @@ interface Fixtures {
 interface WorkerFixtures {
 	/** Actors the file's tests consume, declared with `test.use({ cells: n })`. */
 	cells: number
+	/** The file's actors can pay their own public txs (Fee Juice), as a wallet does when the app names no sponsor. */
+	feeJuice: boolean
 	run: RunEnv
+	manifest: RunManifest
 	pool: ActorPool
+	/** A fresh Ethereum key with gas money and {@link L1_USDC}. */
 	l1Key: Hex
 }
 
 export const test = base.extend<Fixtures, WorkerFixtures>({
 	cells: [1, { option: true, scope: "worker" }],
+	feeJuice: [false, { option: true, scope: "worker" }],
 
 	// biome-ignore lint/correctness/noEmptyPattern: Playwright requires the destructuring form even with no dependencies.
 	run: [async ({}, use) => use(runEnv()), { scope: "worker" }],
 
+	manifest: [async ({ run }, use) => use(readRunManifest(run.manifestPath)), { scope: "worker" }],
+
 	pool: [
-		async ({ run, cells }, use) => {
+		async ({ run, cells, feeJuice }, use) => {
 			const n = cells + SPARES
 			if (n > MAX_POOL) throw new Error(`${cells} cells need ${n} actors, above the grant cap of ${MAX_POOL}: split the file`)
-			const all = await newActors(run.sidecarUrl, n)
+			const all = await newActors(run.sidecarUrl, n, feeJuice)
 			let next = 0
 			await use({
 				all,
@@ -63,7 +73,14 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 		{ scope: "worker" },
 	],
 
-	l1Key: [async ({ run }, use) => use(await newL1Key(run.anvilUrl)), { scope: "worker" }],
+	l1Key: [
+		async ({ run, manifest }, use) => {
+			const key = await newL1Key(run.anvilUrl)
+			await mintUsdc(run.anvilUrl, manifest, key, L1_USDC)
+			await use(key)
+		},
+		{ scope: "worker" },
+	],
 
 	context: async ({ context, run, pool, l1Key }, use) => {
 		const walletOrigins = Object.values(run.walletOrigins)

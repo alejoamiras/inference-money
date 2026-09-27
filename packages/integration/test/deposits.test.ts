@@ -15,7 +15,7 @@ import { claimable, claimFor, deposit, depositsBy, l1Actor, l1Now, l2Actor, l2Ba
 import { harness, INTEGRATION } from "./harness"
 
 describe.skipIf(!INTEGRATION)("deposits and claims", () => {
-	it("public deposit → claim_public: L1 escrows into the portal, L2 mints the public balance", async () => {
+	it("[A1][A9] public deposit → claim_public: L1 escrows into the portal, L2 mints the public balance", async () => {
 		const { manifest: m } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const [portalBefore, actorBefore, l2Before] = await Promise.all([usdcOf(m.l1.portal), usdcOf(l1.account), l2Balances(bob)])
@@ -27,7 +27,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect(await l2Balances(bob)).toEqual({ public: l2Before.public + 5n * USDC, private: l2Before.private })
 	})
 
-	it("private deposit → claim_private, paid by the sponsor: the submitted tx names it as fee payer", async () => {
+	it("[A2][A15] private deposit → claim_private, paid by the sponsor: the submitted tx names it as fee payer", async () => {
 		const { manifest: m } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const t = await deposit(l1, "private", bob, 7n * USDC)
@@ -37,7 +37,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect((await l2Balances(bob)).private).toBe(7n * USDC)
 	})
 
-	it("a relayer's private claim for the wrong recipient fails to consume; the same relayer then lands the right one", async () => {
+	it("[A2] a relayer's private claim for the wrong recipient fails to consume; the same relayer then lands the right one", async () => {
 		const [l1, bob, relayer] = await Promise.all([l1Actor(), l2Actor(), l2Actor()])
 		const t = await deposit(l1, "private", bob, 3n * USDC)
 		await claimable(t, relayer)
@@ -48,7 +48,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect((await l2Balances(relayer)).private).toBe(0n)
 	})
 
-	it("a second claim of the same deposit reports already-consumed, public and private, on its nullifier alone", async () => {
+	it("[A3] a second claim of the same deposit reports already-consumed, public and private, on its nullifier alone", async () => {
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const { node, manifest: m } = harness()
 		for (const kind of ["public", "private"] as const) {
@@ -62,7 +62,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect(await l2Balances(bob)).toEqual({ public: USDC, private: USDC })
 	})
 
-	it("a receipt wait that times out is recovered by reconcileDeposit, and the claim lands with exactly one deposit", async () => {
+	it("[A11] a receipt wait that times out is recovered by reconcileDeposit, and the claim lands with exactly one deposit", async () => {
 		const { manifest: m } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const d = await prepareDeposit({ amount: 2n * USDC, recipient: bob, kind: "public" }, m, await l1Now())
@@ -84,7 +84,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect(await depositsBy(l1.account)).toBe(1)
 	})
 
-	it("a wallet that broadcasts and then loses the response: the log scan finds the deposit, one deposit, claimed", async () => {
+	it("[A11] a wallet that broadcasts and then loses the response: the log scan finds the deposit, one deposit, claimed", async () => {
 		const { manifest: m } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const lossy = {
@@ -105,7 +105,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect((await l2Balances(bob)).private).toBe(4n * USDC)
 	})
 
-	it("a network that is not the manifest's is refused before anything is signed", async () => {
+	it("[A12] a network that is not the manifest's is refused before anything is signed", async () => {
 		const { manifest: m, node, l1: chain } = harness()
 		await assertNetworkIdentity(node, chain.publicClient, m)
 		for (const wrong of [

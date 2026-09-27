@@ -49,6 +49,19 @@ function useNow(everyMs: number, on: boolean): number {
 }
 
 function Actions({ flow, s }: { flow: DepositFlow; s: DepositSnapshot }) {
+	if (s.step === "sending") {
+		return (
+			<div className="grid gap-1">
+				<p className="text-xs text-muted-foreground">
+					If your wallet already sent the deposit but this page never heard back, look for it on Ethereum instead. It is never
+					sent twice.
+				</p>
+				<Button variant="ghost" onClick={flow.recheck} data-testid={TESTIDS.depositRecheck}>
+					Look for it on Ethereum
+				</Button>
+			</div>
+		)
+	}
 	if (s.step === "stuck") {
 		return (
 			<div className="flex flex-wrap gap-2">

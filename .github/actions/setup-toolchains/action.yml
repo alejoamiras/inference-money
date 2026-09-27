@@ -1,7 +1,7 @@
 name: Setup toolchains
 description: >
-  Bun (+ frozen install) always; Foundry, halmos and the Aztec CLI on request. Every version is read
-  from toolchain.json. Callers check out the repo first.
+  Bun (+ frozen install) always; Foundry, halmos, the Aztec CLI and the Aztec node on request. Every
+  version is read from toolchain.json. Callers check out the repo first.
 
 inputs:
   foundry:
@@ -14,6 +14,10 @@ inputs:
     default: "false"
   aztec:
     description: Node, the pinned nargo release and contracts/aztec/toolchain (compile, TXE).
+    required: false
+    default: "false"
+  aztec-node:
+    description: Node and the pinned Aztec node + its Foundry for the local network (exports AZTEC_NODE_HOME).
     required: false
     default: "false"
 
@@ -35,7 +39,7 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.bun/install/cache
-        key: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-${{ hashFiles('bun.lock', 'contracts/aztec/toolchain/bun.lock') }}
+        key: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-${{ hashFiles('bun.lock', 'contracts/aztec/toolchain/bun.lock', 'packages/local-network/toolchain/bun.lock') }}
         restore-keys: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-
 
     - shell: bash
@@ -56,8 +60,8 @@ runs:
         pipx install "halmos==$HALMOS"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-    # The aztec CLI and the TXE server run on node.
-    - if: inputs.aztec == 'true'
+    # The aztec CLI, the TXE server and the node run on node.
+    - if: inputs.aztec == 'true' || inputs.aztec-node == 'true'
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ steps.pins.outputs.node }}
@@ -84,3 +88,11 @@ runs:
       shell: bash
       working-directory: contracts/aztec/toolchain
       run: bun install --frozen-lockfile
+
+    # Same reasoning as above: no aztec-up. The script installs the node from a frozen lockfile and the Foundry
+    # release it ships with against a pinned digest; the local network resolves both through AZTEC_NODE_HOME.
+    - if: inputs.aztec-node == 'true'
+      shell: bash
+      run: |
+        bash packages/local-network/scripts/install-node.sh "$RUNNER_TEMP/aztec-node"
+        echo "AZTEC_NODE_HOME=$RUNNER_TEMP/aztec-node" >> "$GITHUB_ENV"

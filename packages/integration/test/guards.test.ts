@@ -21,7 +21,7 @@ import { claimable, claimFor, deposit, depositsBy, l1Actor, l1Now, l2Actor, l2Ba
 import { harness, INTEGRATION } from "./harness"
 
 describe.skipIf(!INTEGRATION)("guards", () => {
-	it("a deployer-bound proxy or bridge can be neither published nor initialized first by anyone else", async () => {
+	it("[A7] a deployer-bound proxy or bridge can be neither published nor initialized first by anyone else", async () => {
 		const { manifest: m, wallet, owner, node } = harness()
 		const attacker = await l2Actor()
 		const fee = { paymentMethod: sponsoredPayment(m) }
@@ -49,7 +49,7 @@ describe.skipIf(!INTEGRATION)("guards", () => {
 		}
 	})
 
-	it("a sponsor that cannot pay is a SponsorUnavailableError and the ticket survives to be claimed", async () => {
+	it("[A15] a sponsor that cannot pay is a SponsorUnavailableError and the ticket survives to be claimed", async () => {
 		const { manifest: m, wallet, node } = harness()
 		const unfunded = await getContractInstanceFromInstantiationParams(sponsoredFpcArtifact, { salt: new Fr(1) })
 		await wallet.registerContract(unfunded, sponsoredFpcArtifact)
@@ -62,7 +62,7 @@ describe.skipIf(!INTEGRATION)("guards", () => {
 		expect((await l2Balances(bob)).private).toBe(USDC)
 	})
 
-	it("while paused a new deposit is refused before signing and an in-flight claim fails; after unpausing it lands", async () => {
+	it("[A6] while paused a new deposit is refused before signing and an in-flight claim fails; after unpausing it lands", async () => {
 		const { manifest: m, wallet, owner, node } = harness()
 		const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
 		const setPaused = (paused: boolean) =>

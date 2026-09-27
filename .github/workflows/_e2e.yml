@@ -1,0 +1,35 @@
+name: E2E (reusable)
+
+# The browser suite against its own local network: net:up, deploy:local, the app and test-wallet builds, the sidecar
+# and Playwright, all torn down by apps/web/e2e/agent.sh. Called from web.yml on PRs labelled `e2e`, or run by hand.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: browser e2e (local network)
+    runs-on: ubuntu-latest
+    # Withdrawals wait for their epoch to be proven on L1.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Foundry builds our contracts for deploy:local; the node deploys its own L1 with the Foundry it ships with.
+      - uses: ./.github/actions/setup-toolchains
+        with:
+          foundry: "true"
+          aztec-node: "true"
+      - name: Chromium (the pinned Playwright's build)
+        run: apps/web/node_modules/.bin/playwright install --with-deps chromium
+      - run: bun run test:e2e
+      # A failed run keeps its logs, builds and traces under its state dir; a passing one leaves nothing to upload.
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-state
+          path: ~/.cache/inference-money/e2e/
+          retention-days: 7
+          if-no-files-found: ignore
