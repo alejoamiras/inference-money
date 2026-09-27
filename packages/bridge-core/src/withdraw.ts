@@ -173,7 +173,7 @@ export async function withdrawOnL1(
 	p: OutboxProof,
 	l1: L1Ctx,
 	m: BridgeManifest,
-	opts: { receipt?: AwaitL1ReceiptOptions } = {},
+	opts: WithdrawWaitOptions = {},
 ): Promise<Hex> {
 	const t: ExitTicket = { ...ticket }
 	await assertProofFor(t, p, m)
@@ -196,11 +196,18 @@ export async function withdrawOnL1(
 	}
 	await assertSigningContext(l1, null, m, expected)
 	const hash = await l1.walletClient.writeContract({ ...call, chain: sendChain(l1, m.l1.chainId) })
-	return assertConsumedIn(await awaitWithdrawReceipt(l1.publicClient, hash, opts.receipt), t, p, m)
+	return assertConsumedIn(await awaitWithdrawReceipt(l1.publicClient, hash, opts), t, p, m)
 }
 
-/** Consecutive "not found" answers, each after a full round of receipt waits, before a withdraw counts as gone. */
+export interface WithdrawWaitOptions {
+	receipt?: AwaitL1ReceiptOptions
+	now?: () => number
+}
+
+/** A withdraw counts as gone only after this many consecutive "not found" answers, a receipt round apart… */
 const GONE_AFTER_MISSES = 2
+/** …and this long after the send: immediate RPC failures run the rounds far faster than their timeouts. */
+const GONE_AFTER_MS = 30 * 60_000
 
 /**
  * A withdraw is never given up on while the node still holds it: a caller that stopped waiting would release its lock
@@ -209,18 +216,22 @@ const GONE_AFTER_MISSES = 2
  * longer; a resend then fails the Outbox's nullifier check in simulation or on-chain, costing gas but never paying
  * twice.
  */
-async function awaitWithdrawReceipt(pub: PublicClient, hash: Hex, opts?: AwaitL1ReceiptOptions): Promise<TransactionReceipt> {
+async function awaitWithdrawReceipt(pub: PublicClient, hash: Hex, opts: WithdrawWaitOptions): Promise<TransactionReceipt> {
+	const now = opts.now ?? Date.now
+	const sent = now()
 	let misses = 0
 	for (;;) {
 		try {
-			return await awaitL1Receipt(pub, hash, opts)
+			return await awaitL1Receipt(pub, hash, opts.receipt)
 		} catch (e) {
 			if (e instanceof Error && /reverted on-chain/.test(e.message)) throw e
 			misses = (await stillKnown(pub, hash)) ? 0 : misses + 1
-			if (misses >= GONE_AFTER_MISSES) {
-				throw new Error(`The withdrawal ${hash} left the network without confirming. Nothing was paid; send it again.`, {
-					cause: e,
-				})
+			if (misses >= GONE_AFTER_MISSES && now() - sent >= GONE_AFTER_MS) {
+				throw new Error(
+					`The withdrawal ${hash} has not confirmed in 30 minutes and the network no longer lists it, so it was most likely ` +
+						"dropped. Send it again: if the first one still lands, the second fails and costs only gas.",
+					{ cause: e },
+				)
 			}
 		}
 	}

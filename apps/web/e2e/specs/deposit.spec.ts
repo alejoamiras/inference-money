@@ -77,9 +77,9 @@ test.describe("at 390 px", () => {
 		const submitted = await walletFrame(page, run, "main").evaluate(() => window.__testWallet?.submitted() ?? [])
 		expect(submitted, "the claim is the only tx this wallet sent").toHaveLength(1)
 		expect(lower(submitted[0]?.feePayer)).toBe(lower(manifest.l2.sponsoredFpc))
-		// The node's own record, not the wallet's: "done" waits for the claim to be proven, and it did not revert.
+		// The node's own record, not the wallet's: "done" waits for the claim to be final, and it did not revert.
 		expect(await l2Receipt(manifest.l2.nodeUrl, submitted[0]?.hash ?? "")).toMatchObject({
-			status: expect.stringMatching(/^(proven|finalized)$/),
+			status: "finalized",
 			executionResult: "success",
 		})
 

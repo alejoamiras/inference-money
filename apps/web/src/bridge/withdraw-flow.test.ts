@@ -137,20 +137,19 @@ describe("WithdrawFlow", () => {
 	it.each([
 		["a lost wallet connection", new Error("No provider: wallet connection lost")],
 		["text that only mentions a revert", new Error("Transaction reverted")],
+		["a refused permission, as untyped wallet text", new Error("Capability rejected: permission denied")],
+		["an assertion, as untyped wallet text", new Error("Assertion failed: recording submitted transaction")],
 		["an error nothing recognizes", new Error("boom")],
 	])("keeps %s during the send as possibly sent", async (_, err) => {
 		const f = await fakeEnv({ exitToL1: vi.fn().mockRejectedValue(err) })
 		const flow = new WithdrawFlow(f.env)
 		await flow.exit({ ...REQ, from: f.account.toString() })
-		expect(flow.store.get()).toMatchObject({ step: "unconfirmed", l2TxHash: null, notice: expect.stringContaining("balance") })
+		expect(flow.store.get()).toMatchObject({ step: "unconfirmed", l2TxHash: null, notice: expect.stringContaining("two withdrawals") })
 		expect(f.env.inFlight.size).toBe(1)
 	})
 
-	it.each([
-		["a declined prompt", Object.assign(new Error("User rejected the request."), { code: 4001 })],
-		["a refused permission", new Error("Capability rejected: permission denied")],
-		["a failed private execution", new Error("Assertion failed: Balance too low")],
-	])("returns %s to the form: nothing was broadcast", async (_, err) => {
+	it("returns a declined prompt to the form: nothing was broadcast", async () => {
+		const err = Object.assign(new Error("User rejected the request."), { code: 4001 })
 		const f = await fakeEnv({ exitToL1: vi.fn().mockRejectedValue(err) })
 		const flow = new WithdrawFlow(f.env)
 		await flow.exit({ ...REQ, from: f.account.toString() })

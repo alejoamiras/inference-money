@@ -18,7 +18,6 @@ import {
 	StaleProofError,
 } from "@inference-money/bridge-core"
 import type { Address, Hex } from "viem"
-import { normalizeError } from "@/wallet/errors"
 import type { L2BalanceKind } from "./balances"
 import type { BridgeEnv, L2Ctx } from "./env"
 import { explain } from "./explain"
@@ -81,19 +80,17 @@ export interface WithdrawRequest {
 }
 
 const MAYBE_SENT =
-	"Your wallet reported an error, but it may still have sent this withdrawal. Wait a few minutes, then check your " +
-	"Aztec wallet's activity and your balance: if the withdrawal is listed or your balance dropped by this amount, " +
-	"finish it below with its hash. Close this and withdraw again only if neither happened."
+	"Your wallet reported an error, but it may still have sent this withdrawal. Look for it in your Aztec wallet's " +
+	"activity and finish it below with its hash. If you withdraw again instead and the first one also lands, you will " +
+	"have two withdrawals: both are yours, but the first can only be finished with its own hash."
 
 /**
- * Whether a failed exit send certainly broadcast nothing: an explicit refusal, a refused permission, a private
- * execution failure (it aborts before anything is proven) or a revert that burned nothing. Every other failure, a
- * lost connection included, may have come after the broadcast and is never answered with a fresh exit.
+ * Whether a failed exit send certainly broadcast nothing: the user's rejection in the wallet (a wallet that lies about
+ * that already holds the keys) or a revert that burned nothing. Wallet errors reach the app as untyped text, so any
+ * other failure may have come after the broadcast and is never answered with a fresh exit.
  */
 function surelyUnsent(e: unknown): boolean {
-	if (e instanceof ExitRevertedError || isUserRejection(e)) return true
-	if (normalizeError(e).category === "capability-rejected") return true
-	return /assertion failed/i.test(e instanceof Error ? e.message : String(e))
+	return e instanceof ExitRevertedError || isUserRejection(e)
 }
 
 export const NOT_FOUND =

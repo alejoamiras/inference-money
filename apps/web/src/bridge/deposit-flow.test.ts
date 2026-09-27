@@ -34,19 +34,19 @@ describe("DepositFlow", () => {
 		expect(json([f.l1.signs, deposit])).not.toContain(f.account.toString().slice(2))
 	})
 
-	it("keeps the deposit guarded until its claim is proven, and claims again when a prune drops it", async () => {
-		const proven = deferred<"proven" | "dropped">()
-		const waitClaimProven = vi.fn().mockResolvedValueOnce("dropped").mockReturnValueOnce(proven.promise)
+	it("keeps the deposit guarded until its claim is finalized, and claims again when a prune drops it", async () => {
+		const final = deferred<"finalized" | "dropped">()
+		const waitClaimFinalized = vi.fn().mockResolvedValueOnce("dropped").mockReturnValueOnce(final.promise)
 		const claim = vi.fn().mockResolvedValue("claimed")
-		const f = await fakeEnv({ waitClaimProven, claim })
+		const f = await fakeEnv({ waitClaimFinalized, claim })
 		const flow = new DepositFlow(f.env)
 		const done = flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
 
-		await until(() => waitClaimProven.mock.calls.length === 2)
+		await until(() => waitClaimFinalized.mock.calls.length === 2)
 		expect(claim, "a pruned claim is sent again from the kept ticket").toHaveBeenCalledTimes(2)
 		expect(flow.store.get().step).toBe("finalizing")
-		expect(f.env.inFlight.size, "the secret stays guarded while the claim is unproven").toBe(1)
-		proven.resolve("proven")
+		expect(f.env.inFlight.size, "the secret stays guarded until the claim is final").toBe(1)
+		final.resolve("finalized")
 		await done
 		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "claimed" })
 		expect(f.env.inFlight.size).toBe(0)

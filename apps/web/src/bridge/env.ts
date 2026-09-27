@@ -6,7 +6,7 @@ import type {
 	L1Ctx,
 	RetrySession,
 	WaitClaimableOptions,
-	WaitClaimProvenOptions,
+	WaitClaimFinalizedOptions,
 	WaitWithdrawableOptions,
 } from "@inference-money/bridge-core"
 import * as core from "@inference-money/bridge-core"
@@ -29,7 +29,7 @@ export const bridgeOps = {
 	reconcileDeposit: core.reconcileDeposit,
 	waitClaimable: core.waitClaimable,
 	claim: core.claim,
-	waitClaimProven: core.waitClaimProven,
+	waitClaimFinalized: core.waitClaimFinalized,
 	isBridgePaused: core.isBridgePaused,
 	predictedWorstMinFees: core.predictedWorstMinFees,
 	exitToL1: core.exitToL1,
@@ -74,7 +74,7 @@ export interface BridgeEnv {
 	readonly gate: SwitchGate
 	readonly timing?: {
 		readonly claim?: WaitClaimableOptions
-		readonly proven?: WaitClaimProvenOptions
+		readonly finalized?: WaitClaimFinalizedOptions
 		readonly proof?: WaitWithdrawableOptions
 	}
 }

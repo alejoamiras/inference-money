@@ -261,8 +261,10 @@ describe("withdrawOnL1", () => {
 			},
 			known: () => Promise.reject(new TransactionNotFoundError({ hash: TX })),
 		})
-		await expect(withdrawOnL1(ticket, proof, gone.ctx, M, quick)).rejects.toThrow("left the network without confirming")
-		expect(goneRounds, "missing on two lookups a round apart").toBe(2)
+		let clock = 0
+		const minutes = { ...quick, now: () => clock++ * 60_000 }
+		await expect(withdrawOnL1(ticket, proof, gone.ctx, M, minutes)).rejects.toThrow("most likely dropped")
+		expect(goneRounds, "two misses alone are not enough: 30 minutes must pass too").toBeGreaterThan(29)
 		expect(gone.s.writes).toHaveLength(1)
 	})
 

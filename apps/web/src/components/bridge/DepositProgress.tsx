@@ -8,7 +8,7 @@ import { TESTIDS } from "@/lib/testids"
 import { FeeFallbackDialog, Notice, Progress } from "./parts"
 import { Stepper } from "./Stepper"
 
-const STEPS = ["Approve", "Sign", "Sent on Ethereum", "Ready on Aztec", "Claim", "Proven"] as const
+const STEPS = ["Approve", "Sign", "Sent on Ethereum", "Ready on Aztec", "Claim", "Final"] as const
 
 const STEP_INDEX: Record<DepositStep, number> = {
 	idle: 0,
@@ -38,7 +38,7 @@ const WORKING: Partial<Record<DepositStep, string>> = {
 	waiting: "Waiting for Aztec to pick up the deposit. This usually takes a few minutes.",
 	claiming: "Claiming on Aztec. Approve it in your Aztec wallet if asked.",
 	finalizing:
-		"Claimed. Keep this tab open while Aztec proves it: until then the claim can still be rolled back, and this tab holds what claims it again.",
+		"Claimed. Keep this tab open until the claim is final (proven and settled on Ethereum): until then it can still be rolled back, and this tab holds what claims it again.",
 }
 
 function useNow(everyMs: number, on: boolean): number {
