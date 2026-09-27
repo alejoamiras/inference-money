@@ -12,6 +12,7 @@ import {
 	type Log,
 	type PublicClient,
 	pad,
+	TransactionNotFoundError,
 	type WalletClient,
 } from "viem"
 import { OUTBOX_ABI, TOKEN_PORTAL_ABI } from "./abi"
@@ -222,6 +223,32 @@ describe("withdrawOnL1", () => {
 		const { ctx } = l1()
 		await expect(withdrawOnL1(ticket, proof, ctx, M)).rejects.toThrow("not built for this withdrawal")
 		expect(await withdrawOnL1({ ...ticket, messageIndexInTx: 0 }, proof, ctx, M)).toBe(TX)
+	})
+
+	it("keeps waiting on a sent withdraw while L1 still has it, and fails only once it is gone", async () => {
+		const { ticket, proof } = await proven()
+		const quick = { receipt: { attempts: 1, attemptTimeoutMs: 1, waitMs: async () => {} } }
+		const script = (ctx: L1Ctx, o: { rounds: () => Promise<unknown>; known: () => Promise<unknown> }) => {
+			Object.assign(ctx.publicClient, {
+				waitForTransactionReceipt: o.rounds,
+				getTransactionReceipt: () => Promise.reject(new Error("not yet")),
+				getTransaction: o.known,
+			})
+		}
+		const slow = l1()
+		const mined = slow.ctx.publicClient.waitForTransactionReceipt as () => Promise<unknown>
+		let rounds = 0
+		script(slow.ctx, { rounds: async () => (++rounds < 3 ? Promise.reject(new Error("timeout")) : mined()), known: async () => ({}) })
+		expect(await withdrawOnL1(ticket, proof, slow.ctx, M, quick)).toBe(TX)
+		expect(rounds).toBe(3)
+
+		const gone = l1()
+		script(gone.ctx, {
+			rounds: () => Promise.reject(new Error("timeout")),
+			known: () => Promise.reject(new TransactionNotFoundError({ hash: TX })),
+		})
+		await expect(withdrawOnL1(ticket, proof, gone.ctx, M, quick)).rejects.toThrow("left the network without confirming")
+		expect(gone.s.writes).toHaveLength(1)
 	})
 
 	it.each([

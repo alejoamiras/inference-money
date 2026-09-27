@@ -1,6 +1,7 @@
 import {
 	AlreadyWithdrawnError,
 	BridgePausedError,
+	ExitRevertedError,
 	ExitUnconfirmedError,
 	isUserRejection,
 	NetworkMismatchError,
@@ -16,6 +17,7 @@ const OWN_WORDS = [
 	NetworkMismatchError,
 	SponsorUnavailableError,
 	ExitUnconfirmedError,
+	ExitRevertedError,
 	AlreadyWithdrawnError,
 	StaleProofError,
 ] as const

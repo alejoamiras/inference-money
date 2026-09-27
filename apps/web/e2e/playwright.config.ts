@@ -26,6 +26,8 @@ export default defineConfig({
 		baseURL: env.webOrigin,
 		viewport: { width: 1280, height: 900 },
 		trace: "retain-on-failure",
+		// Routing does not see a service worker's requests, so none may run.
+		serviceWorkers: "block",
 		actionTimeout: 60_000,
 		navigationTimeout: 60_000,
 	},

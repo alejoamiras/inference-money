@@ -2,6 +2,7 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
+import { TxStatus } from "@aztec/aztec.js/tx"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
 import { siloNullifier } from "@aztec/stdlib/hash"
@@ -35,6 +36,13 @@ export class SponsorUnavailableError extends Error {
 		this.name = "SponsorUnavailableError"
 	}
 }
+
+/**
+ * How far an L2 tx must get before the bridge treats it as done: published to L1 in a checkpoint. Wallets may return
+ * at a proposed block, which is dropped if its proposer never publishes it, and a caller discards a claim's secret
+ * on "claimed" and keeps nothing of a burned exit but its hash.
+ */
+export const L2_DONE = { waitForStatus: TxStatus.CHECKPOINTED, timeout: 600 } as const
 
 // aztec-nr's consume asserts (public, private) and the sequencer's duplicate-nullifier rejection.
 const ALREADY_CONSUMED = /already nullified|No non-nullified L1 to L2 message|existing nullifier|duplicate nullifier/i
@@ -146,7 +154,7 @@ export async function isClaimConsumed(t: ClaimTicket, node: NullifierNode, m: Br
 	const secret = kind === "private" ? deriveClaimSecret(t.draft.secretOrSalt, recipient) : t.draft.secretOrSalt
 	const inner = await computeFeeJuiceMessageNullifier(Fr.fromHexString(t.messageHash), secret)
 	const siloed = await siloNullifier(AztecAddress.fromStringUnsafe(m.l2.bridge.address), inner)
-	const [hit] = await node.findLeavesIndexes("latest", MerkleTreeId.NULLIFIER_TREE, [siloed])
+	const [hit] = await node.findLeavesIndexes("checkpointed", MerkleTreeId.NULLIFIER_TREE, [siloed])
 	return hit !== undefined
 }
 
@@ -165,7 +173,7 @@ export async function claim(
 	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
 	const sponsored = fee !== undefined
 	try {
-		await claimCall(t, wallet, m).send({ from: opts.from, fee })
+		await claimCall(t, wallet, m).send({ from: opts.from, fee, wait: L2_DONE })
 		return "claimed"
 	} catch (e) {
 		if (ALREADY_CONSUMED.test(message(e)) && (await isClaimConsumed(t, node, m).catch(() => false))) return "already-consumed"

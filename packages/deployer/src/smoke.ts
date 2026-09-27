@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract } from "@aztec/aztec.js/contracts"
 import type { FeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -23,13 +22,13 @@ import {
 	exitToL1,
 	finishWithdrawal,
 	type L1Ctx,
+	l2UsdcBalance,
 	type OutboxReader,
 	outboxReader,
 	prepareDeposit,
 	registerBridgeContracts,
 	registerSponsor,
 	submitDeposit,
-	tokenArtifact,
 	waitClaimable,
 } from "@inference-money/bridge-core"
 import { type Address, erc20Abi, maxUint256 } from "viem"
@@ -131,11 +130,7 @@ function assertSponsoredPayer(s: Smoke, txs: SentTx[], what: string): void {
 	}
 }
 
-async function l2Balance(s: Smoke, kind: DepositKind): Promise<bigint> {
-	const token = Contract.at(AztecAddress.fromStringUnsafe(s.m.l2.token.address), tokenArtifact, s.wallet)
-	const read = kind === "private" ? token.methods.balance_of_private! : token.methods.balance_of_public!
-	return BigInt((await read(s.owner).simulate({ from: s.owner })).result)
-}
+const l2Balance = (s: Smoke, kind: DepositKind) => l2UsdcBalance(s.wallet, s.m, s.owner, kind)
 
 const usdcOf = (s: Smoke, who: Address) =>
 	s.l1.publicClient.readContract({ address: s.m.l1.usdc, abi: erc20Abi, functionName: "balanceOf", args: [who] })

@@ -87,6 +87,18 @@ export async function mineL1Past(anvilUrl: string, deadline: bigint): Promise<vo
 	throw new Error(`L1's finalized block is still not past ${deadline}`)
 }
 
+/** The Aztec node's own receipt for `hash`, read here rather than through any wallet or the app. */
+export async function l2Receipt(nodeUrl: string, hash: string): Promise<{ status: string; executionResult?: string }> {
+	const res = await fetch(nodeUrl, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getTxReceipt", params: [hash] }),
+	})
+	const body = (await res.json()) as { result?: { status: string; executionResult?: string }; error?: unknown }
+	if (!body.result) throw new Error(`node_getTxReceipt ${hash}: ${JSON.stringify(body.error)}`)
+	return body.result
+}
+
 async function sidecar<T>(url: string, path: string, body: unknown): Promise<T> {
 	const res = await fetch(`${url}${path}`, { method: "POST", body: JSON.stringify(body) })
 	if (!res.ok) throw new Error(`sidecar ${path} failed: ${res.status} ${await res.text()}`)
@@ -96,6 +108,10 @@ async function sidecar<T>(url: string, path: string, body: unknown): Promise<T> 
 /** A public USDC balance of `amount` for `address`, deposited and claimed by the sidecar. */
 export const fundPublic = (sidecarUrl: string, address: string, amount: bigint) =>
 	sidecar<{ ok: true }>(sidecarUrl, "/fund", { address, amount: amount.toString() })
+
+/** An actor's USDC on Aztec, read by the sidecar's own wallet: independent of the app and of the page's wallet. */
+export const l2BalanceOf = async (sidecarUrl: string, address: string, kind: "public" | "private") =>
+	BigInt((await sidecar<{ balance: string }>(sidecarUrl, "/balance", { address, kind })).balance)
 
 /** A public exit from `from` to `recipient`, made by the sidecar; its L2 tx hash. */
 export const exitPublic = async (sidecarUrl: string, from: string, amount: bigint, recipient: Address) =>

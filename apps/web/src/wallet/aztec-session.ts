@@ -817,6 +817,9 @@ async function requestCapabilities(s: SessionState, flowEpoch: number, quiet = f
 		// Published BEFORE the account step: an approval replaces the stored grant wholesale, so the answer is
 		// authoritative even when the flow then pauses for a choice.
 		s.grantedContracts.value = parseGrantedContracts(manifest, result)
+		// A partial grant would let an L1 deposit through that its Aztec claim is then refused.
+		const missing = missingGrants(manifest, result)
+		if (missing.length > 0) throw new Error(`Capability rejected: the wallet withheld ${missing.length} of the contracts this app uses`)
 		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch, quiet) === "paused") return
 	} catch (err) {
 		if (isStale(s, flowEpoch)) return
@@ -1181,4 +1184,14 @@ export function parseGrantedContracts(request: unknown, result: unknown): string
 	if (requested.wildcard || answered.wildcard) return []
 	const granted = new Set(answered.contracts)
 	return requested.contracts.filter((address) => granted.has(address) && scopesSatisfied(address, requested, answered))
+}
+
+/**
+ * The requested contracts the answer does not fully grant: the contract itself, or any scope the request named for it.
+ * A `"*"` anywhere in the answer cannot be checked against the request, so, as in {@link parseGrantedContracts}, it
+ * grants nothing.
+ */
+export function missingGrants(request: unknown, result: unknown): string[] {
+	const granted = new Set(parseGrantedContracts(request, result))
+	return collectCapabilityScopes(capabilityListOf(request, "capabilities")).contracts.filter((address) => !granted.has(address))
 }

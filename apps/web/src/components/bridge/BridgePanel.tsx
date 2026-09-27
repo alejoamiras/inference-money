@@ -5,6 +5,7 @@ import { useReadContract } from "wagmi"
 import { formatUsdc } from "@/bridge/amount"
 import { useBridge } from "@/bridge/context"
 import { useFlow } from "@/bridge/flow-store"
+import { Button } from "@/components/ui/button"
 import { L1_CHAIN } from "@/config/network"
 import { TESTIDS } from "@/lib/testids"
 import { useL1 } from "@/wallet/l1"
@@ -145,6 +146,12 @@ function WithdrawPanel({ accounts, balances }: { accounts: Accounts; balances: B
 			<div className="grid gap-4">
 				<Notice tone="warning">{s.notice}</Notice>
 				<FinishForm flow={withdraw} notice={null} l1Account={accounts.l1 ?? ""} prefill={s.recovery} />
+				{/* A known hash is a burned exit: only finishing it leaves. Without one, the wallet's activity decides. */}
+				{s.recovery?.l2TxHash ? null : (
+					<Button variant="ghost" onClick={withdraw.reset} data-testid={TESTIDS.withdrawReset}>
+						Close
+					</Button>
+				)}
 			</div>
 		)
 	}

@@ -136,7 +136,7 @@ function WithdrawReview(p: WithdrawFormProps & { draft: Draft; onBack: () => voi
 				<Button variant="outline" onClick={p.onBack} data-testid={TESTIDS.withdrawBack}>
 					Back
 				</Button>
-				<Button onClick={() => p.flow.exit(p.draft)} data-testid={TESTIDS.withdrawConfirm}>
+				<Button onClick={() => p.flow.exit({ ...p.draft, from: p.l2Account })} data-testid={TESTIDS.withdrawConfirm}>
 					Confirm withdrawal
 				</Button>
 			</div>

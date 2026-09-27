@@ -6,12 +6,14 @@ import {
 	ContractFunctionRevertedError,
 	type Hex,
 	isAddressEqual,
+	type PublicClient,
 	parseEventLogs,
+	TransactionNotFoundError,
 	type TransactionReceipt,
 } from "viem"
 import { OUTBOX_ABI, TOKEN_PORTAL_ABI } from "./abi"
 import { type ExitNode, type ExitTicket, expectedExitMessage } from "./exit"
-import { awaitL1Receipt } from "./l1-receipt"
+import { type AwaitL1ReceiptOptions, awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
 import { assertSigningContext } from "./network"
 import type { OutboxReader } from "./outbox"
@@ -166,7 +168,13 @@ async function assertProofFor(t: ExitTicket, p: OutboxProof, m: BridgeManifest):
  * Returns the hash of the transaction that mined the withdrawal, which differs from the sent one after a speed-up.
  * The ticket is copied on entry: what is checked is what is sent, whatever the caller changes meanwhile.
  */
-export async function withdrawOnL1(ticket: ExitTicket, p: OutboxProof, l1: L1Ctx, m: BridgeManifest): Promise<Hex> {
+export async function withdrawOnL1(
+	ticket: ExitTicket,
+	p: OutboxProof,
+	l1: L1Ctx,
+	m: BridgeManifest,
+	opts: { receipt?: AwaitL1ReceiptOptions } = {},
+): Promise<Hex> {
 	const t: ExitTicket = { ...ticket }
 	await assertProofFor(t, p, m)
 	const expected = { l1Account: l1.account }
@@ -188,7 +196,36 @@ export async function withdrawOnL1(ticket: ExitTicket, p: OutboxProof, l1: L1Ctx
 	}
 	await assertSigningContext(l1, null, m, expected)
 	const hash = await l1.walletClient.writeContract({ ...call, chain: sendChain(l1, m.l1.chainId) })
-	return assertConsumedIn(await awaitL1Receipt(l1.publicClient, hash), t, p, m)
+	return assertConsumedIn(await awaitWithdrawReceipt(l1.publicClient, hash, opts.receipt), t, p, m)
+}
+
+/**
+ * A withdraw is never given up on while the node still holds it: a caller that stopped waiting would release its lock
+ * and let a second withdraw go out beside the first. Only a tx the node no longer knows (dropped or replaced) throws.
+ */
+async function awaitWithdrawReceipt(pub: PublicClient, hash: Hex, opts?: AwaitL1ReceiptOptions): Promise<TransactionReceipt> {
+	for (;;) {
+		try {
+			return await awaitL1Receipt(pub, hash, opts)
+		} catch (e) {
+			if (e instanceof Error && /reverted on-chain/.test(e.message)) throw e
+			if (!(await stillKnown(pub, hash))) {
+				throw new Error(`The withdrawal ${hash} left the network without confirming. Nothing was paid; send it again.`, {
+					cause: e,
+				})
+			}
+		}
+	}
+}
+
+/** An unreadable answer counts as known: giving up is the step that can double-send. */
+async function stillKnown(pub: PublicClient, hash: Hex): Promise<boolean> {
+	try {
+		await pub.getTransaction({ hash })
+		return true
+	} catch (e) {
+		return !(e instanceof TransactionNotFoundError)
+	}
 }
 
 /** Waits for the proof and withdraws, rebuilding a proof the Outbox rejects as stale at most {@link MAX_PROOF_REBUILDS} times. */

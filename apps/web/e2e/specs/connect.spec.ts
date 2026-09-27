@@ -49,6 +49,24 @@ test("both frames are cross-origin isolated", async ({ page, run }) => {
 	expect(await walletFrame(page, run, "main").evaluate(() => crossOriginIsolated)).toBe(true)
 })
 
+test("the egress fence refuses every origin outside the run, another run's loopback port and WebSockets included", async ({
+	page,
+	egress,
+}) => {
+	// A blank page, not the app: the app's CSP would stop these before the fence ever saw them.
+	await page.goto("about:blank")
+	await page.evaluate(async () => {
+		await fetch("http://127.0.0.1:9/probe").catch(() => undefined)
+		const ws = new WebSocket("ws://127.0.0.1:9/probe")
+		await new Promise((done) => {
+			ws.onclose = done
+			ws.onerror = done
+		})
+	})
+	expect(egress.blocked).toEqual(["http://127.0.0.1:9/probe", "ws://127.0.0.1:9/probe"])
+	egress.blocked.length = 0
+})
+
 test("[A12] the L1 wallet connects through wagmi and the chain guard holds writes until it switches", async ({ page, l1 }) => {
 	await page.goto("/")
 	await page.locator(tid(TESTIDS.l1Connect)).click()

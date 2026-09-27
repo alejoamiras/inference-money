@@ -1,6 +1,6 @@
 import { pad } from "viem"
 import { TESTIDS } from "../../src/lib/testids"
-import { depositsBy, usdcOf } from "../fixtures/chain"
+import { depositsBy, l2BalanceOf, l2Receipt, usdcOf } from "../fixtures/chain"
 import { expect, test } from "../fixtures/test"
 import { byId, openBridge, reviewDeposit, shownBalance, stepperAt, USDC, unloadGuarded } from "../pages/bridge"
 import { walletFrame } from "../pages/connect"
@@ -52,7 +52,7 @@ test.describe("at 1024 px", () => {
 test.describe("at 390 px", () => {
 	test.use({ viewport: { width: 390, height: 844 } })
 
-	test("[A2][A15] private deposit → claim: nothing names the recipient on Ethereum, and the sponsor pays the claim", async ({
+	test("[A2][A15][A19] private deposit → claim: nothing names the recipient on Ethereum, and the sponsor pays the claim", async ({
 		page,
 		pool,
 		l1,
@@ -62,6 +62,7 @@ test.describe("at 390 px", () => {
 		const actor = pool.take()
 		await openBridge(page, actor)
 		const before = await shownBalance(page, TESTIDS.balanceL2Private)
+		const heldBefore = await l2BalanceOf(run.sidecarUrl, actor.address, "private")
 
 		await reviewDeposit(page, { amount: "3", kind: "private" })
 		await byId(page, TESTIDS.depositConfirm).click()
@@ -70,10 +71,17 @@ test.describe("at 390 px", () => {
 		await stepperAt(page, "done")
 		expect(await unloadGuarded(page)).toBe(false)
 		await expect.poll(() => shownBalance(page, TESTIDS.balanceL2Private), { timeout: 120_000 }).toBe(before + 3n * USDC)
+		// Read by a wallet the app never touched: the notes are the actor's, not only what the page shows.
+		await expect.poll(() => l2BalanceOf(run.sidecarUrl, actor.address, "private"), { timeout: 120_000 }).toBe(heldBefore + 3n * USDC)
 
 		const submitted = await walletFrame(page, run, "main").evaluate(() => window.__testWallet?.submitted() ?? [])
 		expect(submitted, "the claim is the only tx this wallet sent").toHaveLength(1)
 		expect(lower(submitted[0]?.feePayer)).toBe(lower(manifest.l2.sponsoredFpc))
+		// The node's own record, not the wallet's: the claim is in a checkpoint and did not revert.
+		expect(await l2Receipt(manifest.l2.nodeUrl, submitted[0]?.hash ?? "")).toMatchObject({
+			status: expect.stringMatching(/^(checkpointed|proven|finalized)$/),
+			executionResult: "success",
+		})
 
 		const [permit] = l1.permits()
 		const [d] = (await depositsBy(run.anvilUrl, manifest, l1.address)).filter((x) => x.nonce === permit?.nonce)

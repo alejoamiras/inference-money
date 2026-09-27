@@ -2,7 +2,7 @@ import { TESTIDS } from "../../src/lib/testids"
 import { depositsBy } from "../fixtures/chain"
 import { expect, test } from "../fixtures/test"
 import { byId, connectL1, openBridge, reviewDeposit, stepperAt, unloadGuarded } from "../pages/bridge"
-import { chooseAccountIfAsked, openPickerWith, pickerRow, tid, walletFrame } from "../pages/connect"
+import { openPickerWith, pickerRow, tid, walletFrame } from "../pages/connect"
 
 test.use({ cells: 4 })
 
@@ -93,8 +93,11 @@ test("[A17] CONTRACT_NOT_REGISTERED from the wallet re-registers once and retrie
 	expect(after - registered, "every app contract registered exactly once more").toBe(registered)
 })
 
-test("[A16] a call outside the grant is refused by the wallet, and the app says why in plain words", async ({ page, pool, l1, run }) => {
-	const actor = pool.take()
+test("[A16] a grant that withholds the bridge's contracts is refused by the app before any call, and it says why", async ({
+	page,
+	l1,
+	run,
+}) => {
 	await page.goto("/")
 	await connectL1(page)
 	const row = pickerRow(page, "main")
@@ -104,17 +107,14 @@ test("[A16] a call outside the grant is refused by the wallet, and the app says 
 	// The session frame exists once the channel is up; the grant comes after the emoji check.
 	await walletFrame(page, run, "main").evaluate(() => window.__testWallet?.declineNextGrant())
 	await page.locator(tid(TESTIDS.btnVerifyConfirm)).click()
-	await chooseAccountIfAsked(page, { profile: "main", account: actor.address })
 
 	await expect(byId(page, TESTIDS.aztecError)).toContainText("Your wallet declined the permissions USDC Bridge needs", {
 		timeout: 120_000,
 	})
-	const denied = await walletFrame(page, run, "main").evaluate(() => window.__testWallet?.denied() ?? [])
-	expect(denied.length, "the wallet refused the ungranted registration").toBeGreaterThan(0)
-	expect(
-		denied.every((d) => d.startsWith("registration of ")),
-		denied.join("; "),
-	).toBe(true)
+	await expect(page.locator(tid(TESTIDS.accountChoice)), "refused before an account is even offered").toHaveCount(0)
+	const wallet = walletFrame(page, run, "main")
+	expect(await wallet.evaluate(() => window.__testWallet?.denied() ?? []), "nothing outside the grant was attempted").toEqual([])
+	expect(await wallet.evaluate(() => window.__testWallet?.calls().registerContract ?? 0)).toBe(0)
 	await expect(byId(page, TESTIDS.bridgeGate)).toBeVisible()
 	expect(l1.signatures).toBe(0)
 })

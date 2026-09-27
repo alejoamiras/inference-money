@@ -1,4 +1,4 @@
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import {
 	awaitL1Receipt,
 	BridgePausedError,
@@ -13,8 +13,9 @@ import {
 	signerOf,
 } from "@inference-money/bridge-core"
 import { erc20Abi, type Hex, maxUint256 } from "viem"
+import { shortHex } from "@/lib/cn"
 import { l1UsdcBalance, permit2Allowance } from "./balances"
-import type { BridgeEnv } from "./env"
+import type { BridgeEnv, L2Ctx } from "./env"
 import { explain } from "./explain"
 import { createFlowStore } from "./flow-store"
 
@@ -68,6 +69,8 @@ const KEPT = "Your deposit is kept in this tab; keep it open."
 export interface DepositRequest {
 	readonly amount: bigint
 	readonly kind: DepositKind
+	/** The Aztec account the user reviewed as the recipient; the deposit refuses to name any other. */
+	readonly recipient: string
 }
 
 /** Fail-closed reads right before anything is signed: any failure, shortfall or pause stops the flow. */
@@ -185,6 +188,9 @@ export class DepositFlow {
 		try {
 			l1 = await env.l1()
 			recipient = env.l2().account
+			if (!recipient.equals(AztecAddress.fromStringUnsafe(req.recipient))) {
+				throw new Error("The Aztec account changed since you reviewed this deposit. Review it again.")
+			}
 			reads = await confirmReads(env, l1, req.amount)
 		} catch (e) {
 			return this.#back(e)
@@ -291,7 +297,7 @@ export class DepositFlow {
 		})
 		try {
 			if (await env.ops.isBridgePaused(env.node, env.manifest)) return this.#paused()
-			const l2 = env.l2()
+			const l2 = this.#claimant(t)
 			await env.ops.retryOnUnregistered(env.session, l2.wallet, () =>
 				env.ops.waitClaimable(t, env.node, l2.wallet, env.manifest, l2.account, undefined, env.timing?.claim),
 			)
@@ -300,6 +306,16 @@ export class DepositFlow {
 			return this.store.set({ step: "claim-failed", notice: `${explain(e)} ${KEPT}` })
 		}
 		await this.#claimNow()
+	}
+
+	/** A claim leaves only from the account the deposit names: from any other it would be a relayer's claim. */
+	#claimant(t: ClaimTicket): L2Ctx {
+		const l2 = this.#env.l2()
+		const recipient = t.draft.intent.recipient
+		if (!l2.account.equals(recipient)) {
+			throw new Error(`Switch your Aztec wallet back to ${shortHex(recipient.toString())} to claim this deposit.`)
+		}
+		return l2
 	}
 
 	#paused(): void {
@@ -316,12 +332,12 @@ export class DepositFlow {
 		this.store.set({ step: "claiming", notice: null })
 		let result: "claimed" | "already-consumed"
 		try {
-			const l2 = env.l2()
-			result = await env.gate.hold(() =>
-				env.ops.retryOnUnregistered(env.session, l2.wallet, () =>
+			result = await env.gate.hold(() => {
+				const l2 = this.#claimant(t)
+				return env.ops.retryOnUnregistered(env.session, l2.wallet, () =>
 					env.ops.claim(t, env.node, l2.wallet, env.manifest, { from: l2.account, fee }),
-				),
-			)
+				)
+			})
 		} catch (e) {
 			if (e instanceof SponsorUnavailableError) return this.store.set({ step: "fee-fallback", notice: e.message })
 			return this.store.set({ step: "claim-failed", notice: `${explain(e)} ${KEPT}` })

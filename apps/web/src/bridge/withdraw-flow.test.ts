@@ -1,6 +1,7 @@
 // @vitest-environment node
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { TxHash } from "@aztec/aztec.js/tx"
-import { ExitUnconfirmedError, SponsorUnavailableError, StaleProofError } from "@inference-money/bridge-core"
+import { ExitRevertedError, ExitUnconfirmedError, SponsorUnavailableError, StaleProofError } from "@inference-money/bridge-core"
 import { zeroAddress } from "viem"
 import { describe, expect, it, vi } from "vitest"
 import { MANIFEST } from "@/config/network"
@@ -23,7 +24,7 @@ describe("WithdrawFlow", () => {
 		const exitToL1 = vi.fn()
 		const f = await fakeEnv({ l2Balance, exitToL1 })
 		const flow = new WithdrawFlow(f.env)
-		await flow.exit({ ...REQ, recipient })
+		await flow.exit({ ...REQ, recipient, from: f.account.toString() })
 		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.stringContaining("could never be paid out") })
 		expect(l2Balance).not.toHaveBeenCalled()
 		expect(exitToL1).not.toHaveBeenCalled()
@@ -35,7 +36,7 @@ describe("WithdrawFlow", () => {
 		const f = await fakeEnv({ withdrawOnL1 })
 		const first = new WithdrawFlow(f.env)
 		const steps = stepsOf(first.store)
-		const running = first.exit(REQ)
+		const running = first.exit({ ...REQ, from: f.account.toString() })
 		await until(() => first.store.get().step === "withdrawing")
 
 		// Hash returned, receipt not yet: the lock is still held.
@@ -58,7 +59,7 @@ describe("WithdrawFlow", () => {
 		const withdrawOnL1 = vi.fn()
 		const f = await fakeEnv({ withdrawOnL1, isExitWithdrawn: async () => true })
 		const flow = new WithdrawFlow(f.env)
-		await flow.exit(REQ)
+		await flow.exit({ ...REQ, from: f.account.toString() })
 		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "already-withdrawn" })
 		expect(withdrawOnL1).not.toHaveBeenCalled()
 	})
@@ -68,7 +69,7 @@ describe("WithdrawFlow", () => {
 		const waitWithdrawable = vi.fn(async () => ({}) as never)
 		const f = await fakeEnv({ withdrawOnL1, waitWithdrawable })
 		const flow = new WithdrawFlow(f.env)
-		await flow.exit(REQ)
+		await flow.exit({ ...REQ, from: f.account.toString() })
 		expect(flow.store.get()).toMatchObject({ step: "failed", notice: expect.stringContaining("kept") })
 		expect(waitWithdrawable).toHaveBeenCalledTimes(3)
 
@@ -85,7 +86,7 @@ describe("WithdrawFlow", () => {
 			exitTicketFromTx,
 		})
 		const flow = new WithdrawFlow(f.env)
-		await flow.exit(REQ)
+		await flow.exit({ ...REQ, from: f.account.toString() })
 		const { recovery } = flow.store.get()
 		expect(recovery).toEqual({ l2TxHash: hash.toString(), recipient: L1_ACCOUNT, amount: REQ.amount })
 		if (!recovery) return
@@ -97,6 +98,51 @@ describe("WithdrawFlow", () => {
 		expect(exitTicketFromTx.mock.calls[1]?.slice(0, 3)).toEqual([hash, L1_ACCOUNT, REQ.amount])
 	})
 
+	it("keeps an exit whose send may have gone out for finishing from its hash, and never answers it with a fresh one", async () => {
+		const declined = Object.assign(new Error("User rejected the request."), { code: 4001 })
+		const exitToL1 = vi.fn().mockRejectedValueOnce(new Error("fetch failed")).mockRejectedValueOnce(declined)
+		const f = await fakeEnv({ exitToL1 })
+		const flow = new WithdrawFlow(f.env)
+		const req = { ...REQ, from: f.account.toString() }
+		await flow.exit(req)
+		expect(flow.store.get()).toMatchObject({
+			step: "unconfirmed",
+			l2TxHash: null,
+			recovery: { l2TxHash: "", recipient: L1_ACCOUNT, amount: REQ.amount },
+			notice: expect.stringContaining("may still have sent"),
+		})
+		expect(f.env.inFlight.size, "the details stay guarded until the user closes them").toBe(1)
+		await flow.exit(req)
+		expect(exitToL1, "no fresh exit from the unconfirmed screen").toHaveBeenCalledTimes(1)
+
+		await flow.reset()
+		expect(f.env.inFlight.size).toBe(0)
+		await flow.exit(req)
+		expect(flow.store.get(), "a refusal sent nothing: back to the form").toMatchObject({
+			step: "idle",
+			notice: expect.stringContaining("declined"),
+		})
+		expect(f.env.inFlight.size).toBe(0)
+	})
+
+	it("returns a reverted exit to the form: it burned nothing, so there is nothing to finish", async () => {
+		const exitToL1 = vi.fn().mockRejectedValue(new ExitRevertedError(TxHash.random()))
+		const f = await fakeEnv({ exitToL1 })
+		const flow = new WithdrawFlow(f.env)
+		await flow.exit({ ...REQ, from: f.account.toString() })
+		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.stringContaining("nothing was burned") })
+		expect(f.env.inFlight.size).toBe(0)
+	})
+
+	it("exits only from the reviewed account", async () => {
+		const exitToL1 = vi.fn()
+		const f = await fakeEnv({ exitToL1 })
+		const flow = new WithdrawFlow(f.env)
+		await flow.exit({ ...REQ, from: (await AztecAddress.random()).toString() })
+		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.stringContaining("account changed") })
+		expect(exitToL1).not.toHaveBeenCalled()
+	})
+
 	it("burns with the wallet paying only after the user accepts the fee fallback", async () => {
 		const exitToL1 = vi
 			.fn()
@@ -104,7 +150,7 @@ describe("WithdrawFlow", () => {
 			.mockResolvedValue(exitTicket())
 		const f = await fakeEnv({ exitToL1 })
 		const flow = new WithdrawFlow(f.env)
-		await flow.exit(REQ)
+		await flow.exit({ ...REQ, from: f.account.toString() })
 		expect(flow.store.get().step).toBe("fee-fallback")
 		expect(exitToL1).toHaveBeenCalledTimes(1)
 		await flow.acceptFeeFallback()
