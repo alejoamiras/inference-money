@@ -33,7 +33,7 @@ export type DepositStep =
 	| "claiming"
 	| "fee-fallback"
 	| "claim-failed"
-	/** Claimed in a checkpoint; the secret is kept until the claim is proven. */
+	/** Claimed in a checkpoint; the secret is kept until the claim is finalized. */
 	| "finalizing"
 	| "done"
 
@@ -347,14 +347,14 @@ export class DepositFlow {
 			if (e instanceof SponsorUnavailableError) return this.store.set({ step: "fee-fallback", notice: e.message })
 			return this.store.set({ step: "claim-failed", notice: `${explain(e)} ${KEPT}` })
 		}
-		await this.#awaitProven(t, outcome)
+		await this.#awaitFinalized(t, outcome)
 	}
 
-	/** An unproven epoch can be pruned, claim and all: the secret goes only once the claim is proven. */
-	async #awaitProven(t: ClaimTicket, outcome: ClaimOutcome): Promise<void> {
+	/** A claim can still be pruned until final: the secret goes only once the claim is finalized. */
+	async #awaitFinalized(t: ClaimTicket, outcome: ClaimOutcome): Promise<void> {
 		const env = this.#env
 		this.store.set({ step: "finalizing", notice: null })
-		if ((await env.ops.waitClaimProven(t, env.node, env.manifest, env.timing?.proven)) === "dropped") {
+		if ((await env.ops.waitClaimFinalized(t, env.node, env.manifest, env.timing?.finalized)) === "dropped") {
 			return this.#claimWhenReady(t)
 		}
 		this.#drop()

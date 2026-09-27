@@ -40,7 +40,7 @@ export class SponsorUnavailableError extends Error {
 /**
  * How far an L2 tx must get before the bridge reads its outcome: published to L1 in a checkpoint. Wallets may return
  * at a proposed block, which is dropped if its proposer never publishes it. A checkpoint is still not permanent (an
- * unproven epoch can be pruned), so a claim's secret is kept until {@link waitClaimProven}.
+ * unproven epoch can be pruned), so a claim's secret is kept until {@link waitClaimFinalized}.
  */
 export const L2_DONE = { waitForStatus: TxStatus.CHECKPOINTED, timeout: 600 } as const
 
@@ -153,7 +153,7 @@ export async function isClaimConsumed(
 	t: ClaimTicket,
 	node: NullifierNode,
 	m: BridgeManifest,
-	at: "checkpointed" | "proven" = "checkpointed",
+	at: "checkpointed" | "finalized" = "checkpointed",
 ): Promise<boolean> {
 	const { kind, recipient } = t.draft.intent
 	const secret = kind === "private" ? deriveClaimSecret(t.draft.secretOrSalt, recipient) : t.draft.secretOrSalt
@@ -163,23 +163,24 @@ export async function isClaimConsumed(
 	return hit !== undefined
 }
 
-export interface WaitClaimProvenOptions {
-	/** Default 15 s. There is no attempt cap: until the claim is proven, forgetting the secret can lose the deposit. */
+export interface WaitClaimFinalizedOptions {
+	/** Default 15 s. There is no attempt cap: until the claim is final, forgetting the secret can lose the deposit. */
 	pollMs?: number
 	sleep?: (ms: number) => Promise<void>
 }
 
 /**
- * Waits until this ticket's claim is in a proven block, the first point at which its secret may be forgotten: an epoch
- * that misses its proof window is pruned, checkpointed claims included. "dropped" once the nullifier is not even
- * checkpointed any more, so the caller claims again; a failed read counts as not proven yet.
+ * Waits until this ticket's claim is in a finalized block, the first point at which its secret may be forgotten: an
+ * epoch that misses its proof window is pruned, and an L1 reorg can remove a proof that landed near its deadline.
+ * "dropped" once the nullifier is not even checkpointed any more, so the caller claims again; a failed read counts as
+ * not final yet.
  */
-export async function waitClaimProven(
+export async function waitClaimFinalized(
 	t: ClaimTicket,
 	node: NullifierNode,
 	m: BridgeManifest,
-	opts: WaitClaimProvenOptions = {},
-): Promise<"proven" | "dropped"> {
+	opts: WaitClaimFinalizedOptions = {},
+): Promise<"finalized" | "dropped"> {
 	const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
 	for (;;) {
 		const state = await claimFinality(t, node, m).catch(() => "checkpointed" as const)
@@ -188,8 +189,8 @@ export async function waitClaimProven(
 	}
 }
 
-async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"proven" | "checkpointed" | "dropped"> {
-	if (await isClaimConsumed(t, node, m, "proven")) return "proven"
+async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"finalized" | "checkpointed" | "dropped"> {
+	if (await isClaimConsumed(t, node, m, "finalized")) return "finalized"
 	return (await isClaimConsumed(t, node, m)) ? "checkpointed" : "dropped"
 }
 

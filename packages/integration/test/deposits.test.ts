@@ -9,7 +9,7 @@ import {
 	prepareDeposit,
 	reconcileDeposit,
 	submitDeposit,
-	waitClaimProven,
+	waitClaimFinalized,
 } from "@inference-money/bridge-core"
 import { type PublicClient, WaitForTransactionReceiptTimeoutError, type WalletClient } from "viem"
 import { claimable, claimFor, deposit, depositsBy, l1Actor, l1Now, l2Actor, l2Balances, sentDuring, USDC, usdcOf } from "./actors"
@@ -28,7 +28,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect(await l2Balances(bob)).toEqual({ public: l2Before.public + 5n * USDC, private: l2Before.private })
 	})
 
-	it("[A2][A15][A19] private deposit → claim_private, paid by the sponsor, then proven: the submitted tx names it as fee payer", async () => {
+	it("[A2][A15][A19] private deposit → claim_private, paid by the sponsor, then final: the submitted tx names it as fee payer", async () => {
 		const { manifest: m } = harness()
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const t = await deposit(l1, "private", bob, 7n * USDC)
@@ -36,7 +36,7 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		const txs = await sentDuring(async () => expect(await claimFor(t)).toBe("claimed"))
 		expect(txs.map((x) => x.feePayer)).toEqual([m.l2.sponsoredFpc as string])
 		expect((await l2Balances(bob)).private).toBe(7n * USDC)
-		expect(await waitClaimProven(t, harness().node, m, { pollMs: 2_000 }), "the node answers at the proven tag").toBe("proven")
+		expect(await waitClaimFinalized(t, harness().node, m, { pollMs: 2_000 }), "the node answers at the finalized tag").toBe("finalized")
 	})
 
 	it("[A2] a relayer's private claim for the wrong recipient fails to consume; the same relayer then lands the right one", async () => {
