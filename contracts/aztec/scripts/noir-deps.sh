@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Fetches, then verifies, every Noir git dependency the crates resolve (transitive ones included) in nargo's cache.
-# nargo fetches a missing entry on demand but never checks what an existing entry contains, so a tampered or stale
-# ~/nargo tree would compile silently. This script never compiles.
+# nargo fetches a missing entry on demand but never checks what an existing entry contains, so a retargeted tag or a
+# stale or edited ~/nargo tree would compile silently. It relies on the entry's own git data, so it does not stand
+# against a local attacker who can write the user's home (who could as well replace the toolchain binary). This
+# script never compiles; compile.sh runs it first.
 #
 #   noir-deps.sh                    fetch missing entries, then verify every entry
 #   noir-deps.sh --verify [--exact] verify only (no network); --exact also fails on any unpinned cache entry, which
