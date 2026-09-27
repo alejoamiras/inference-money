@@ -125,6 +125,10 @@ describe("exitToL1", () => {
 		).catch((e: unknown) => e)
 		expect(err).toBeInstanceOf(ExitRevertedError)
 		expect((err as ExitRevertedError).message).toMatch(/nothing was burned/)
+
+		const noEffect = { getTxEffect: async () => undefined, getTxReceipt: async () => REVERTED } as unknown as ExitNode
+		const unread = await exitToL1(intent(), fakeWallet().wallet, noEffect, M).catch((e: unknown) => e)
+		expect(unread, "a revert without a readable effect proves nothing").toBeInstanceOf(ExitUnconfirmedError)
 	})
 })
 

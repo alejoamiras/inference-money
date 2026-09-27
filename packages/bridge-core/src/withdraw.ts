@@ -199,17 +199,25 @@ export async function withdrawOnL1(
 	return assertConsumedIn(await awaitWithdrawReceipt(l1.publicClient, hash, opts.receipt), t, p, m)
 }
 
+/** Consecutive "not found" answers, each after a full round of receipt waits, before a withdraw counts as gone. */
+const GONE_AFTER_MISSES = 2
+
 /**
  * A withdraw is never given up on while the node still holds it: a caller that stopped waiting would release its lock
- * and let a second withdraw go out beside the first. Only a tx the node no longer knows (dropped or replaced) throws.
+ * and let a second withdraw go out beside the first. It counts as gone only when missing on consecutive lookups a
+ * full round apart, since one backend of a load-balanced RPC can miss a live tx. A private-relay tx can stay invisible
+ * longer; a resend then fails the Outbox's nullifier check in simulation or on-chain, costing gas but never paying
+ * twice.
  */
 async function awaitWithdrawReceipt(pub: PublicClient, hash: Hex, opts?: AwaitL1ReceiptOptions): Promise<TransactionReceipt> {
+	let misses = 0
 	for (;;) {
 		try {
 			return await awaitL1Receipt(pub, hash, opts)
 		} catch (e) {
 			if (e instanceof Error && /reverted on-chain/.test(e.message)) throw e
-			if (!(await stillKnown(pub, hash))) {
+			misses = (await stillKnown(pub, hash)) ? 0 : misses + 1
+			if (misses >= GONE_AFTER_MISSES) {
 				throw new Error(`The withdrawal ${hash} left the network without confirming. Nothing was paid; send it again.`, {
 					cause: e,
 				})

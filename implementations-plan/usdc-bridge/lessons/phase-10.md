@@ -84,3 +84,25 @@ Three High, four Medium and one Low finding, each verified against the code befo
   - `[A16]` failed in the spec, not the app: the page showed "Your wallet declined the permissions…", but the spec still called `chooseAccountIfAsked`, which waits for a chooser that the refusal now prevents. The spec now asserts that the chooser never appears.
 - Run 10f (final code): 18/18 passed in 10.0 min; teardown clean.
 - Run 10g: 18/18 passed in 9.8 min; teardown clean. Two consecutive green runs on the round 1 code.
+
+### Round 2 — same session, resumed with the `bf9f238` diff
+
+Codex: "Not converged: two high-severity gaps remain; four additional issues need targeted fixes." Each finding was verified against the code:
+
+| # | Sev | Finding | Verdict and fix |
+|---|---|---|---|
+| R2-1 | H | A checkpoint is not permanent: an epoch that misses its proof window is pruned, and the flow had already dropped the claim's secret. | **Accepted**, verified in the pinned archiver (`handleEpochPrune` unwinds unproven checkpoints once the rollup's `canPruneAtTime` allows). New bridge-core `waitClaimProven` polls the nullifier at `proven`. It returns `"dropped"` when the nullifier is not even checkpointed any more, and a failed read counts as not proven yet. The deposit flow gets a `finalizing` step: the draft and the unload guard stay until the claim is proven, and a dropped claim is claimed again from the kept ticket. The stepper gains "Proven". The integration spec pins the `proven` tag on the real node; the e2e receipt must now be proven or finalized. |
+| R2-2 | H | `mayHaveSent` was a denylist over presentation categories: "No provider: wallet connection lost" (`no-wallet`) and any `/revert/` text reopened the form after a possible broadcast. | **Accepted.** It is inverted into an allowlist, `surelyUnsent`, covering only an explicit rejection (typed), a refused permission, an ACVM `Assertion failed` (private execution aborts before proving) and `ExitRevertedError`. Everything else stays unconfirmed. The copy now also sends the user to their balance after a few minutes, since an empty wallet-activity list is not proof. |
+| R2-3 | M | A missing tx effect became `[]`, so a reverted receipt plus no effect read as "nothing burned". | **Accepted.** A missing effect throws inside `locateExit`, so the exit stays `ExitUnconfirmedError`. |
+| R2-4 | M | One `TransactionNotFoundError` released the withdraw lock; one backend of a load-balanced RPC can miss a live tx. | **Accepted in part.** The lookup already came only after 8 × 90 s receipt waits plus a mined-receipt probe. The withdraw now needs two consecutive misses one full round apart; a found tx resets the count. Waiting forever, as codex proposed, was rejected: it pins a tab on a truly dropped tx. The residual (a private-relay tx invisible for about 25 min) costs gas at most, since a resend fails the Outbox nullifier in simulation or on-chain. |
+| R2-5 | M | The switch gate spanned proving and the L1 settlement, which blocks an account switch for up to an hour and can deadlock against a deposit's `#claimant`. | **Accepted.** `#burn` runs under the hold (check, preflight, send); `#finishTicket` runs after it is released. Fee fallback is changed the same way. |
+| R2-6 | M | `missingGrants` checked only the registered contracts: a dropped `AuthRegistry.set_authorized` scope or `canCreateAuthWit: false` passed. | **Accepted.** It now checks scopes on contracts the app never registers and every `true` flag of the accounts and contracts capabilities (`GrantedAccountsCapability` extends the request, so the flags are echoed). The fake provider now echoes them, as a real wallet does. |
+
+**Found while checking R2-6 against A16.** The app requested `canGetMetadata` but never calls `getContractMetadata` or `getContractClassMetadata`, and the test wallet did not gate those calls, so the suite could not have caught one. Under the stricter flag check, a wallet that withheld the flag would have been refused for a permission the app does not use. The flag is gone from the request, and the test wallet now refuses both metadata calls without it; a later e2e run is the proof that nothing needs them.
+
+**Validating round 2.**
+- Unit: bridge-core 121, web 90 + 1 skipped. Lint and typecheck are clean.
+- Integration run 10 (`0beccc70-it-909640`): 16 pass, 0 fail, 64 expect(), 477 s, clean teardown. The new `proven` read passed on the real 5.0.0 node.
+- Run 10h (before the `canGetMetadata` change): 18/18 in 10.0 min; teardown clean. The deposit specs now wait for the proven claim.
+- Run 10i (final code, `canGetMetadata` dropped and metadata calls gated): 18/18 in 9.8 min; no denial recorded; teardown clean.
+- Run 10j: 18/18 in 10.4 min; teardown clean. Two consecutive green runs on the round 2 code.

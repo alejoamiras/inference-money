@@ -242,12 +242,27 @@ describe("withdrawOnL1", () => {
 		expect(await withdrawOnL1(ticket, proof, slow.ctx, M, quick)).toBe(TX)
 		expect(rounds).toBe(3)
 
+		const flaky = l1()
+		const flakyMined = flaky.ctx.publicClient.waitForTransactionReceipt as () => Promise<unknown>
+		let flakyRounds = 0
+		let lookups = 0
+		script(flaky.ctx, {
+			rounds: async () => (++flakyRounds < 4 ? Promise.reject(new Error("timeout")) : flakyMined()),
+			known: async () => (++lookups % 2 === 1 ? Promise.reject(new TransactionNotFoundError({ hash: TX })) : {}),
+		})
+		expect(await withdrawOnL1(ticket, proof, flaky.ctx, M, quick), "one lookup missing it is not gone").toBe(TX)
+
 		const gone = l1()
+		let goneRounds = 0
 		script(gone.ctx, {
-			rounds: () => Promise.reject(new Error("timeout")),
+			rounds: () => {
+				goneRounds++
+				return Promise.reject(new Error("timeout"))
+			},
 			known: () => Promise.reject(new TransactionNotFoundError({ hash: TX })),
 		})
 		await expect(withdrawOnL1(ticket, proof, gone.ctx, M, quick)).rejects.toThrow("left the network without confirming")
+		expect(goneRounds, "missing on two lookups a round apart").toBe(2)
 		expect(gone.s.writes).toHaveLength(1)
 	})
 

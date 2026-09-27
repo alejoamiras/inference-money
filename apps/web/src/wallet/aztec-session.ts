@@ -819,7 +819,8 @@ async function requestCapabilities(s: SessionState, flowEpoch: number, quiet = f
 		s.grantedContracts.value = parseGrantedContracts(manifest, result)
 		// A partial grant would let an L1 deposit through that its Aztec claim is then refused.
 		const missing = missingGrants(manifest, result)
-		if (missing.length > 0) throw new Error(`Capability rejected: the wallet withheld ${missing.length} of the contracts this app uses`)
+		if (missing.length > 0)
+			throw new Error(`Capability rejected: the wallet withheld ${missing.length} of the permissions this app uses`)
 		if (chooseGrantedAccount(s, granted, hiddenCount, flowWallet, flowProvider, flowEpoch, quiet) === "paused") return
 	} catch (err) {
 		if (isStale(s, flowEpoch)) return
@@ -1186,12 +1187,35 @@ export function parseGrantedContracts(request: unknown, result: unknown): string
 	return requested.contracts.filter((address) => granted.has(address) && scopesSatisfied(address, requested, answered))
 }
 
+/** The `true` flags of the account and contract capabilities (`canCreateAuthWit`, `canRegister`, …), as `<type>.<flag>`. */
+function grantFlags(list: unknown): Set<string> {
+	const out = new Set<string>()
+	if (!Array.isArray(list)) return out
+	for (const cap of list) {
+		const entry = cap as Record<string, unknown> | null
+		if (entry?.type !== "accounts" && entry?.type !== "contracts") continue
+		for (const [key, value] of Object.entries(entry)) if (value === true) out.add(`${entry.type}.${key}`)
+	}
+	return out
+}
+
 /**
- * The requested contracts the answer does not fully grant: the contract itself, or any scope the request named for it.
- * A `"*"` anywhere in the answer cannot be checked against the request, so, as in {@link parseGrantedContracts}, it
- * grants nothing.
+ * Everything the request asked for that the answer does not grant: a requested contract with all its scopes, the
+ * scopes on contracts the app never registers (the auth registry's `set_authorized`), and every requested flag. A
+ * `"*"` anywhere cannot be checked against the request, so, as in {@link parseGrantedContracts}, it grants nothing.
  */
 export function missingGrants(request: unknown, result: unknown): string[] {
+	const asked = capabilityListOf(request, "capabilities")
+	const answer = capabilityListOf(result, "granted")
+	const requested = collectCapabilityScopes(asked)
+	const answered = collectCapabilityScopes(answer)
+	if (requested.wildcard || answered.wildcard) return [WILDCARD]
 	const granted = new Set(parseGrantedContracts(request, result))
-	return collectCapabilityScopes(capabilityListOf(request, "capabilities")).contracts.filter((address) => !granted.has(address))
+	const scopedOnly = [...requested.scopes.keys()].filter((a) => !requested.contracts.includes(a))
+	const given = grantFlags(answer)
+	return [
+		...requested.contracts.filter((address) => !granted.has(address)),
+		...scopedOnly.filter((address) => !scopesSatisfied(address, requested, answered)),
+		...[...grantFlags(asked)].filter((flag) => !given.has(flag)),
+	]
 }

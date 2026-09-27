@@ -31,6 +31,12 @@ describe("capability enforcement", () => {
 		expect(await violation(undefined, "getChainInfo", [])).toBeUndefined()
 	})
 
+	it("serves contract metadata only when the grant carries canGetMetadata", async () => {
+		expect(await violation(grant, "getContractMetadata", [bridge])).toBe("contract metadata")
+		const withMetadata = grantFrom([{ type: "contracts", contracts: [bridge], canGetMetadata: true }])
+		expect(await violation(withMetadata, "getContractClassMetadata", [bridge])).toBeUndefined()
+	})
+
 	it("checks every call of a send, and keeps simulation and send scopes apart", async () => {
 		expect(await violation(grant, "sendTx", [exec([bridge, "claim_public"])])).toBeUndefined()
 		expect(await violation(grant, "sendTx", [exec([bridge, "claim_public"], [stranger, "sponsor_unconditionally"])])).toBe(

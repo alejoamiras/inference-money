@@ -12,7 +12,7 @@ export interface AppManifest {
 	readonly metadata: { name: string; version: string; description: string; url: string }
 	readonly capabilities: readonly [
 		{ type: "accounts"; canGet: true; canCreateAuthWit: true },
-		{ type: "contracts"; contracts: readonly AztecAddress[]; canRegister: true; canGetMetadata: true },
+		{ type: "contracts"; contracts: readonly AztecAddress[]; canRegister: true },
 		{
 			type: "simulation"
 			utilities: { scope: readonly ScopedFunction[] }
@@ -53,7 +53,6 @@ export function buildBridgeManifest(m: BridgeManifest, appUrl: string): AppManif
 				type: "contracts",
 				contracts: [bridge, proxy, token, ...(sponsor ? [sponsor] : [])],
 				canRegister: true,
-				canGetMetadata: true,
 			},
 			{
 				type: "simulation",
