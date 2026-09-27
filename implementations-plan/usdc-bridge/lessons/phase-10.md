@@ -144,3 +144,7 @@ Session `01a0e2ec-938c-7231-9c9e-3e3f27f49209`, GPT-6 Astra at `high`, both plan
 Validation: sole-consumer check and self-test (15 mutants) green; `compile.sh --check` and `test:noir` green; unit (bridge-core 121, web 93 + 1 skipped, deployer 27, local-network 14), lint and typecheck clean. Run 10m: e2e 18/18 in 11.4 min, clean teardown; the deposit specs pass the new browser identity check against the real node and anvil.
 
 Round 2 (resumed, `151a3a5`): "Not converged: one material gap remains in smoke finalization." After a prune, `reconcileDeposit` reads an RPC failure as "pending", and the smoke threw on it, losing the only ticket; a failed re-claim did the same. Valid. `keepUntilFinal` (injected steps, so it is unit-tested) retries "pending" and a failed re-claim a minute apart and gives the secret up only on a proven "not-deposited". Codex agreed the browser reconciliation and doc fixes resolve their findings. Deployer 29 pass, lint and typecheck clean.
+
+Run 10n (the `151a3a5` web code; `30b948f` touched only the deployer): e2e 18/18 in 11.4 min, clean teardown, the second consecutive green run.
+
+Round 3 (resumed, `30b948f`): "No new material findings." The final cross-arc loop has converged.
