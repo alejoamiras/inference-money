@@ -124,3 +124,7 @@ Codex: "Not converged: three high-severity safety gaps remain, plus one medium-s
 - R3-3: the copy no longer implies a safe retry. It points at the wallet's activity and says plainly that withdrawing again can make two withdrawals, both the user's, the first finishable only by its own hash.
 - R3-4: "gone" also needs 30 minutes since the send, and the verdict says "most likely dropped… if the first still lands, the second fails and costs only gas".
 - Validation: unit (bridge-core 121, web 90 + 1 skipped), lint and typecheck clean; integration run 11 (`0beccc70-it-978138`) 16/16, where the `finalized` read passed on the real node; runs 10k (11.5 min) and 10l (11.3 min) 18/18 each, clean teardown.
+
+### Round 4 — same session, resumed with the `ffccfa6` diff (plan's no-over-engineering rule restated verbatim)
+
+Codex: "No new material findings." The Arc 3 loop has converged, one round past the plan's cap, as the user authorized.
