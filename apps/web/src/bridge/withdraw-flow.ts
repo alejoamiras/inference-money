@@ -203,6 +203,7 @@ export class WithdrawFlow {
 		const [balance, paused] = await Promise.all([
 			env.ops.l2Balance(l2, env.manifest, req.kind),
 			env.ops.isBridgePaused(env.node, env.manifest),
+			env.l1().then((l1) => env.ops.assertNetwork(env.node, l1, l2, env.manifest)),
 		])
 		if (paused) throw new Error("The bridge is paused. Withdrawals resume when it does.")
 		if (balance < req.amount) throw new Error(`Your ${req.kind} USDC balance on Aztec is lower than this amount.`)

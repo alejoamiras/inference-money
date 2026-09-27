@@ -196,8 +196,9 @@ async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManif
 
 /**
  * Mints the deposit on L2 from `from` (the recipient or a relayer; a private claim cannot be redirected either way),
- * paid per {@link FeeChoice}. "already-consumed" needs this ticket's nullifier on L2: a nullifier error can come from
- * any part of the tx, and a caller may discard the secret on that verdict.
+ * paid per {@link FeeChoice}. Both outcomes hold only at a checkpoint: keep the secret until {@link waitClaimFinalized}
+ * says "finalized". "already-consumed" needs this ticket's nullifier on L2: a nullifier error can come from any part of
+ * the tx.
  */
 export async function claim(
 	t: ClaimTicket,

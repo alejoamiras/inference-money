@@ -12,6 +12,7 @@ import type { EmbeddedWallet } from "@aztec/wallets/embedded"
 import {
 	assertNetworkIdentity,
 	type BridgeManifest,
+	type ClaimTicket,
 	claim,
 	confirmDeposit,
 	type DepositKind,
@@ -26,10 +27,12 @@ import {
 	type OutboxReader,
 	outboxReader,
 	prepareDeposit,
+	reconcileDeposit,
 	registerBridgeContracts,
 	registerSponsor,
 	submitDeposit,
 	waitClaimable,
+	waitClaimFinalized,
 } from "@inference-money/bridge-core"
 import { type Address, erc20Abi, maxUint256 } from "viem"
 import { signingKeyFor } from "./deploy-l2"
@@ -201,7 +204,21 @@ async function depositAndClaim(s: Smoke, kind: DepositKind): Promise<void> {
 	if (kind === "private") assertSponsoredPayer(s, txs, "private claim")
 	const delta = (await l2Balance(s, kind)) - before
 	if (delta !== LEG_AMOUNT) throw new Error(`${kind} claim moved ${delta}, expected ${LEG_AMOUNT}`)
-	s.log(`leg ${kind} deposit → claim: +${delta} on L2 (${txs[0]?.hash}, payer ${txs[0]?.feePayer})`)
+	s.log(`leg ${kind} deposit → claim: +${delta} on L2 (${txs[0]?.hash}, payer ${txs[0]?.feePayer}); waiting until final`)
+	await finalizeClaim(s, t)
+}
+
+/** A checkpointed claim can still be pruned, so its ticket, the only copy of the secret, is kept until it is final. */
+async function finalizeClaim(s: Smoke, first: ClaimTicket): Promise<void> {
+	let t = first
+	while ((await waitClaimFinalized(t, s.node, s.m)) === "dropped") {
+		const r = await reconcileDeposit(t.draft, s.l1, s.m)
+		if (typeof r === "string") throw new Error(`the claim was pruned and its deposit is now ${r} on L1`)
+		s.log("  the claim was pruned before it was final; claiming again")
+		t = r
+		await waitClaimable(t, s.node, s.wallet, s.m, s.owner, (w) => s.log(`  ${w}`), CLAIMABLE)
+		await claim(t, s.node, s.wallet, s.m, { from: s.owner })
+	}
 }
 
 /** The burn is stored before any check, so a failed check still leaves its withdrawal resumable. */

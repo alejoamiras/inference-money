@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { SponsorUnavailableError } from "@inference-money/bridge-core"
+import { type DepositDraft, SponsorUnavailableError } from "@inference-money/bridge-core"
 import { pad } from "viem"
 import { describe, expect, it, vi } from "vitest"
 import { DepositFlow } from "./deposit-flow"
@@ -43,7 +43,7 @@ describe("DepositFlow", () => {
 		const done = flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
 
 		await until(() => waitClaimFinalized.mock.calls.length === 2)
-		expect(claim, "a pruned claim is sent again from the kept ticket").toHaveBeenCalledTimes(2)
+		expect(claim, "a pruned claim is sent again from the deposit as Ethereum records it").toHaveBeenCalledTimes(2)
 		expect(flow.store.get().step).toBe("finalizing")
 		expect(f.env.inFlight.size, "the secret stays guarded until the claim is final").toBe(1)
 		final.resolve("finalized")
@@ -59,6 +59,10 @@ describe("DepositFlow", () => {
 			(f: Awaited<ReturnType<typeof fakeEnv>>) => (f.env.ops.predictedWorstMinFees = () => Promise.reject(new Error("503"))),
 		],
 		["the pause flag", (f: Awaited<ReturnType<typeof fakeEnv>>) => (f.env.ops.isBridgePaused = () => Promise.reject(new Error("503")))],
+		[
+			"the network identity",
+			(f: Awaited<ReturnType<typeof fakeEnv>>) => (f.env.ops.assertNetwork = () => Promise.reject(new Error("another rollup"))),
+		],
 		["a paused bridge", (f: Awaited<ReturnType<typeof fakeEnv>>) => (f.node.paused = true)],
 		["a short balance", (f: Awaited<ReturnType<typeof fakeEnv>>) => (f.l1.balance = AMOUNT - 1n)],
 	])("signs nothing when a confirm-time read fails: %s", async (_, breakIt) => {
@@ -70,6 +74,19 @@ describe("DepositFlow", () => {
 		expect(f.l1.signs).toHaveLength(0)
 		expect(f.l1.sends).toHaveLength(0)
 		expect(f.env.inFlight.size).toBe(0)
+	})
+
+	it("retries a claim from the deposit as Ethereum records it now, since a reorg can move its Inbox index", async () => {
+		const claim = vi.fn().mockRejectedValueOnce(new Error("No L1 to L2 message found")).mockResolvedValue("claimed")
+		const reconcileDeposit = vi.fn(async (d: DepositDraft) => ({ ...ticketFor(d), leafIndex: 9n }))
+		const f = await fakeEnv({ claim, reconcileDeposit })
+		const flow = new DepositFlow(f.env)
+		await flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
+		expect(flow.store.get().step).toBe("claim-failed")
+
+		await flow.retryClaim()
+		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "claimed" })
+		expect(claim.mock.calls.map((c) => c[0].leafIndex)).toEqual([7n, 9n])
 	})
 
 	it("refuses the send when the bridge pauses while the wallet prompt is open", async () => {

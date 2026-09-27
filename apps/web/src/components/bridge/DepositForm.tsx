@@ -12,7 +12,8 @@ const KINDS = [
 ] as const
 
 export const PRIVACY_COPY: Record<DepositKind, string> = {
-	private: "Private hides who receives the USDC on Aztec. It does not hide how much you bridge or when: both are public on Ethereum.",
+	private:
+		"Private hides who receives the USDC on Aztec. It does not hide how much you bridge or when: both are public on Ethereum. The claim asks your Aztec wallet to pay its fee through a shared sponsor; a wallet that pays from your own account instead links it to this deposit.",
 	public: "Public names your Aztec account on Ethereum, and the USDC lands in your public Aztec balance.",
 }
 
@@ -96,11 +97,11 @@ function DepositReview(p: DepositFormProps & { amount: bigint; kind: DepositKind
 			<p className="text-xs text-muted-foreground">{PRIVACY_COPY[p.kind]}</p>
 			<p className="text-xs text-muted-foreground">
 				The first time, your wallet asks you to let Permit2 (Uniswap's approval contract) move your USDC, with no limit. Each
-				deposit still needs your signature, but the approval lasts until you revoke it, and a flaw in Permit2 could put that USDC at
-				risk.
+				deposit still needs your signature, but the approval lasts until you revoke it: a Permit2 signature you give any other site,
+				or a flaw in Permit2, could move that USDC.
 			</p>
 			<p className="text-xs font-medium">
-				Keep this tab open until the deposit is claimed. The key that claims it lives only in this tab; closing it early leaves the
+				Keep this tab open until the claim is final. The key that claims it lives only in this tab; closing it early can leave the
 				USDC unclaimable.
 			</p>
 			<div className="flex gap-2">

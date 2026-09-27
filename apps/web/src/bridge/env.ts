@@ -20,6 +20,14 @@ export interface L2Ctx {
 	readonly account: AztecAddress
 }
 
+/** The node, both wallets and the selected accounts against the embedded manifest, before anything is signed. */
+async function assertNetwork(node: AztecNode, l1: L1Ctx, l2: L2Ctx, m: BridgeManifest): Promise<void> {
+	await Promise.all([
+		core.assertNetworkIdentity(node, l1.publicClient, m),
+		core.assertSigningContext(l1, l2.wallet, m, { l1Account: l1.account, l2Account: l2.account }),
+	])
+}
+
 /** The steps a bridge flow runs; tests replace the ones that need a live network. */
 export const bridgeOps = {
 	ensurePermit2Allowance: core.ensurePermit2Allowance,
@@ -38,6 +46,7 @@ export const bridgeOps = {
 	isExitWithdrawn: core.isExitWithdrawn,
 	withdrawOnL1: core.withdrawOnL1,
 	retryOnUnregistered: core.retryOnUnregistered,
+	assertNetwork,
 	l2Balance,
 }
 

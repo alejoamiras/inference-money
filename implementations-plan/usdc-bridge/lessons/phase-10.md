@@ -128,3 +128,17 @@ Codex: "Not converged: three high-severity safety gaps remain, plus one medium-s
 ### Round 4 — same session, resumed with the `ffccfa6` diff (plan's no-over-engineering rule restated verbatim)
 
 Codex: "No new material findings." The Arc 3 loop has converged, one round past the plan's cap, as the user authorized.
+
+## Final cross-arc pass (codex, fresh session over `a44f425..HEAD`)
+
+Session `01a0e2ec-938c-7231-9c9e-3e3f27f49209`, GPT-6 Astra at `high`, both plan rules verbatim. Round 1: "Not converged: three cross-arc correctness gaps remain, plus two targeted documentation fixes."
+
+| # | Sev | Finding | Verdict and fix |
+|---|---|---|---|
+| X1 | H | After the first receipt, `retryClaim` and the prune path reuse the ticket. An L1 reorg that re-mines the deposit at another Inbox index leaves the UI claiming a stale leaf forever. | Confirmed: both paths called `#claimWhenReady` with the kept ticket. Both now go through `#recheck()`, which reconciles the draft on Ethereum for a fresh ticket and keeps the pending and not-deposited handling. |
+| X2 | M | The browser never calls `assertNetworkIdentity`, and every production `assertSigningContext` passes `null` for the Aztec wallet, contradicting the plan's Network identity row and A12. | Confirmed (the only callers were deployer `verify`/`smoke`). A web `assertNetwork` op runs both, the latter with the Aztec wallet and the selected accounts, inside the deposit's confirm-time reads and the withdrawal's preflight. Claims need no L1 and stay unchanged. |
+| X3 | M | The testnet smoke dropped the claim ticket at a checkpoint, the arc 2 consumer the arc 3 finality fix never reached. | Confirmed. `finalizeClaim` keeps the ticket until `waitClaimFinalized` says "finalized", and on "dropped" reconciles and claims again. |
+| X4 | L | The approval copy named only a Permit2 flaw, not a signature given to a malicious site; the private copy did not say a wallet may ignore the sponsor; "until … claimed" undersold finality. | One sentence each, and "until the claim is final". |
+| X5 | L | The `claim` doc said a caller may discard the secret on "already-consumed"; `claim_secret/lib.nr` cited a nonexistent `private-fuel.ts` and a separator assertion the test does not make; `main.nr` narrated its entrypoints. | Doc now requires `waitClaimFinalized` for both outcomes; the Noir comments keep only the invariants. `check-sole-consumer.sh`'s self-test anchored on a deleted narration comment, so it anchors on `exit_to_l1_public`'s attribute instead. `compile.sh --check`: class id and ABI unchanged. |
+
+Validation: sole-consumer check and self-test (15 mutants) green; `compile.sh --check` and `test:noir` green; unit (bridge-core 121, web 93 + 1 skipped, deployer 27, local-network 14), lint and typecheck clean. Run 10m: e2e 18/18 in 11.4 min, clean teardown; the deposit specs pass the new browser identity check against the real node and anvil.
