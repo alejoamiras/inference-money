@@ -106,3 +106,14 @@ Codex: "Not converged: two high-severity gaps remain; four additional issues nee
 - Run 10h (before the `canGetMetadata` change): 18/18 in 10.0 min; teardown clean. The deposit specs now wait for the proven claim.
 - Run 10i (final code, `canGetMetadata` dropped and metadata calls gated): 18/18 in 9.8 min; no denial recorded; teardown clean.
 - Run 10j: 18/18 in 10.4 min; teardown clean. Two consecutive green runs on the round 2 code.
+
+### Round 3 — same session, resumed with the `464d32c` diff
+
+Codex: "Not converged: three high-severity safety gaps remain, plus one medium-severity timing defect." This is the third round with material findings, so per plan.md's Post-implementation rule ("Still material after 3 rounds → stop and surface to the user") the loop is **held for the user**. Assessment of each finding:
+
+| # | Sev | Finding | Assessment |
+|---|---|---|---|
+| R3-1 | H | `proven` is not final either: an L1 reorg can remove a proof that landed near its deadline, and the epoch becomes prunable after the secret is gone. | Valid, and the fix is cheap: wait for `finalized` (L1 finality, roughly 13 more minutes with the tab open) and keep the checkpointed "dropped" check. |
+| R3-2 | H | The unsent allowlist still trusts wallet text. The wallet-sdk wraps every wallet error as `new Error(jsonStringify(error))` (verified, `extension_wallet.ts:211`), so an "Assertion failed" or capability text after a broadcast reopens the form. `isUserRejection` also matches wording. | Valid. This is a UX trade-off, so it goes to the user: the strict fix also shows "may have been sent" after a plain wallet "Reject". |
+| R3-3 | H | The "unchanged balance and empty activity → withdraw again" copy is unsafe while the first exit is still pending; two distinct burns are two withdrawals. | Valid. Both exits pay the same recipient, so nothing is lost, but the first needs its hash. The copy must disclose the duplicate risk rather than imply a safe retry. |
+| R3-4 | M | Two receipt rounds are not about 25 minutes: immediate RPC failures skip the 90 s timeouts (reproduced as 32 s), and "Nothing was paid" overstates. | Valid: enforce a minimum elapsed time since the send, and use an uncertain verdict. Codex agrees the duplicate L1 send is gas-only. |
