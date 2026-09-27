@@ -66,12 +66,10 @@ jobs:
       - run: bun run --cwd apps/web build:testnet
       - run: test -s apps/web/dist/_headers
 
-  # The browser suite runs only on request: it boots a local network and waits out proven epochs.
+  # The browser suite runs only on request, and then whatever the PR touches: it deploys the contracts too, so no
+  # path filter could say it is irrelevant.
   e2e:
-    needs: [changes, web]
-    if: >-
-      needs.changes.outputs.relevant == 'true' &&
-      (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e'))
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e')
     uses: ./.github/workflows/_e2e.yml
 
   status:
@@ -87,6 +85,7 @@ jobs:
           RELEVANT: ${{ needs.changes.outputs.relevant }}
           WEB: ${{ needs.web.result }}
           E2E: ${{ needs.e2e.result }}
+          E2E_REQUESTED: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e') }}
         run: |
           [ "$CHANGES" = success ] || { echo "::error::change detection: $CHANGES"; exit 1; }
           if [ "$RELEVANT" = true ]; then
@@ -94,5 +93,9 @@ jobs:
           else
             case "$WEB" in success|skipped) ;; *) echo "::error::web ended $WEB"; exit 1 ;; esac
           fi
-          # Unrequested, e2e is skipped; requested, it must pass.
-          case "$E2E" in success|skipped) ;; *) echo "::error::e2e ended $E2E"; exit 1 ;; esac
+          # Requested, e2e must pass; unrequested, it must not have run.
+          if [ "$E2E_REQUESTED" = true ]; then
+            [ "$E2E" = success ] || { echo "::error::e2e was requested and ended $E2E"; exit 1; }
+          else
+            [ "$E2E" = skipped ] || { echo "::error::e2e ended $E2E"; exit 1; }
+          fi

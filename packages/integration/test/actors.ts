@@ -1,5 +1,4 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract } from "@aztec/aztec.js/contracts"
+import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import {
 	type ClaimTicket,
 	claim,
@@ -10,10 +9,10 @@ import {
 	type FeeChoice,
 	finishWithdrawal,
 	type L1Ctx,
+	l2UsdcBalance,
 	PERMIT2_DEPOSIT_ROUTER_ABI,
 	prepareDeposit,
 	submitDeposit,
-	tokenArtifact,
 	waitClaimable,
 } from "@inference-money/bridge-core"
 import { l1Signer } from "@inference-money/deployer"
@@ -72,12 +71,8 @@ export async function usdcOf(who: Address): Promise<bigint> {
 
 export async function l2Balances(who: AztecAddress): Promise<{ public: bigint; private: bigint }> {
 	const { manifest: m, wallet } = harness()
-	const token = Contract.at(AztecAddress.fromStringUnsafe(m.l2.token.address), tokenArtifact, wallet)
-	const [pub, priv] = await Promise.all([
-		token.methods.balance_of_public!(who).simulate({ from: who }),
-		token.methods.balance_of_private!(who).simulate({ from: who }),
-	])
-	return { public: BigInt(pub.result), private: BigInt(priv.result) }
+	const [pub, priv] = await Promise.all([l2UsdcBalance(wallet, m, who, "public"), l2UsdcBalance(wallet, m, who, "private")])
+	return { public: pub, private: priv }
 }
 
 /** The permit deadline counts from L1 time, not the test machine's clock. */

@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { NO_WAIT } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
+import { TxStatus } from "@aztec/aztec.js/tx"
 import { getAddress, zeroAddress } from "viem"
 import { SponsorUnavailableError } from "./claim"
 import {
 	type ExitIntent,
 	type ExitNode,
+	ExitRevertedError,
 	ExitUnconfirmedError,
 	exitTicketFromTx,
 	exitToL1,
@@ -27,7 +30,17 @@ beforeAll(async () => {
 })
 
 const intent = (o: Partial<ExitIntent> = {}): ExitIntent => ({ kind: "private", from, recipientL1: RECIPIENT, amount: AMOUNT, ...o })
-const effectNode = (l2ToL1Msgs: Fr[]) => ({ getTxEffect: async () => ({ data: { l2ToL1Msgs } }) }) as unknown as ExitNode
+const CHECKPOINTED = {
+	status: TxStatus.CHECKPOINTED,
+	isPending: () => false,
+	isDropped: () => false,
+	isMined: () => true,
+	hasExecutionSucceeded: () => true,
+	hasExecutionReverted: () => false,
+}
+const REVERTED = { ...CHECKPOINTED, executionResult: "reverted", hasExecutionSucceeded: () => false, hasExecutionReverted: () => true }
+const effectNode = (l2ToL1Msgs: Fr[], receipt: () => Promise<unknown> = async () => CHECKPOINTED) =>
+	({ getTxEffect: async () => ({ data: { l2ToL1Msgs } }), getTxReceipt: receipt }) as unknown as ExitNode
 
 describe("exitToL1", () => {
 	it.each([
@@ -48,6 +61,7 @@ describe("exitToL1", () => {
 			calls: ["sponsor_unconditionally", "exit_to_l1_private"],
 			feePayer: M.l2.sponsoredFpc,
 			authWitnesses: 1,
+			wait: NO_WAIT,
 		})
 		expect(t).toMatchObject({
 			l2TxHash: w.txHash,
@@ -88,13 +102,29 @@ describe("exitToL1", () => {
 	it.each([
 		["no matching messages", () => effectNode([new Fr(1)]), /without exactly one matching/],
 		["two matching messages", () => effectNode([message, message]), /without exactly one matching/],
-		["a node read that fails", () => ({ getTxEffect: () => Promise.reject(new Error("503")) }) as unknown as ExitNode, /503/],
+		[
+			"a node read that fails",
+			() => ({ getTxReceipt: async () => CHECKPOINTED, getTxEffect: () => Promise.reject(new Error("503")) }) as unknown as ExitNode,
+			/503/,
+		],
+		["a checkpoint wait that fails", () => effectNode([message], () => Promise.reject(new Error("receipt 503"))), /receipt 503/],
 	])("after the burn, %s still yields its hash for recovery", async (_, node, cause) => {
 		const w = fakeWallet()
 		const err = await exitToL1(intent(), w.wallet, node(), M).catch((e: unknown) => e)
 		expect(err).toBeInstanceOf(ExitUnconfirmedError)
 		expect(err).toMatchObject({ l2TxHash: w.txHash, recipient: RECIPIENT, amount: AMOUNT })
 		expect(((err as Error).cause as Error).message).toMatch(cause)
+	})
+
+	it("reads a revert whose effect carries no withdraw message as nothing burned", async () => {
+		const err = await exitToL1(
+			intent(),
+			fakeWallet().wallet,
+			effectNode([], async () => REVERTED),
+			M,
+		).catch((e: unknown) => e)
+		expect(err).toBeInstanceOf(ExitRevertedError)
+		expect((err as ExitRevertedError).message).toMatch(/nothing was burned/)
 	})
 })
 

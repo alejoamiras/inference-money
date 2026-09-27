@@ -1,7 +1,8 @@
 import { AztecAddress, EthAddress } from "@aztec/aztec.js/addresses"
 import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
-import { BatchCall, Contract } from "@aztec/aztec.js/contracts"
+import { BatchCall, Contract, NO_WAIT } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
+import { waitForTx } from "@aztec/aztec.js/node"
 import type { TxHash } from "@aztec/aztec.js/tx"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { computeL2ToL1MessageHash } from "@aztec/stdlib/hash"
@@ -9,7 +10,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec/stdlib/messaging"
 import { type Address, type Hex, isAddressEqual, zeroAddress } from "viem"
 import { tokenArtifact, tokenBridgeArtifact } from "./artifacts"
-import { type FeeChoice, feeFor, type SponsorUnavailableError, sponsorFailure } from "./claim"
+import { type FeeChoice, feeFor, L2_DONE, type SponsorUnavailableError, sponsorFailure } from "./claim"
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
 import type { OutboxReader } from "./outbox"
@@ -96,22 +97,37 @@ export class ExitUnconfirmedError extends Error {
 	}
 }
 
+/**
+ * The exit tx reverted, so its burn and withdraw message were discarded with the rest of its app logic: there is
+ * nothing to finish, and exiting again is safe.
+ */
+export class ExitRevertedError extends Error {
+	constructor(readonly l2TxHash: TxHash) {
+		super(
+			`The withdrawal ${l2TxHash} was rejected on Aztec, so nothing was burned. If the bridge is paused, wait for it to resume; otherwise try again.`,
+		)
+		this.name = "ExitRevertedError"
+	}
+}
+
 async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: ReturnType<typeof feeFor>): Promise<TxHash> {
 	const proxy = AztecAddress.fromStringUnsafe(m.l2.proxy.address)
 	const { exit, burn } = exitCall(e, wallet, m, Fr.random())
 	if (e.kind === "private") {
 		const witness = await wallet.createAuthWit(e.from, { caller: proxy, call: await burn.getFunctionCall() })
-		return (await exit.send({ from: e.from, authWitnesses: [witness], fee })).receipt.txHash
+		return (await exit.send({ from: e.from, authWitnesses: [witness], fee, wait: NO_WAIT })).txHash
 	}
 	const allow = await SetPublicAuthwitContractInteraction.create(wallet, e.from, { caller: proxy, action: burn }, true)
-	return (await new BatchCall(wallet, [allow, exit]).send({ from: e.from, fee })).receipt.txHash
+	return (await new BatchCall(wallet, [allow, exit]).send({ from: e.from, fee, wait: NO_WAIT })).txHash
 }
 
 /**
  * Burns on L2 and emits the withdraw message, paid per {@link FeeChoice}. The burn is authorized for the proxy (the
  * bridge's only path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry
  * entry batched into the same tx for a public one. A sponsor that cannot pay is a {@link SponsorUnavailableError} with
- * nothing burned; any failure after the send is an {@link ExitUnconfirmedError}.
+ * nothing burned. The send returns its hash before any wait, so every failure after it, the wait for the checkpoint
+ * included, is an {@link ExitUnconfirmedError} carrying that hash; only a checkpointed revert with no withdraw message
+ * in its effect, which burned nothing, is an {@link ExitRevertedError}.
  */
 export async function exitToL1(
 	e: ExitIntent,
@@ -128,19 +144,26 @@ export async function exitToL1(
 	} catch (err) {
 		throw (fee && sponsorFailure(err, "withdrawal")) || err
 	}
-	try {
-		const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
-		const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []
-		if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
-		return {
-			l2TxHash: txHash,
-			recipient: e.recipientL1,
-			amount: e.amount,
-			messageHash: expected.toString() as Hex,
-			messageIndexInTx: index,
-		}
-	} catch (cause) {
+	const located = await locateExit(e, txHash, node, m).catch((cause: unknown) => {
 		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
+	})
+	if (located === "reverted") throw new ExitRevertedError(txHash)
+	return located
+}
+
+async function locateExit(e: ExitIntent, txHash: TxHash, node: ExitNode, m: BridgeManifest): Promise<ExitTicket | "reverted"> {
+	// Only `getTxReceipt` is read.
+	const receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
+	const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
+	const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []
+	if (index === undefined && receipt.hasExecutionReverted()) return "reverted"
+	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
+	return {
+		l2TxHash: txHash,
+		recipient: e.recipientL1,
+		amount: e.amount,
+		messageHash: expected.toString() as Hex,
+		messageIndexInTx: index,
 	}
 }
 

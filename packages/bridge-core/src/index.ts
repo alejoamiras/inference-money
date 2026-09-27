@@ -1,5 +1,6 @@
 export * from "./abi"
 export * from "./artifacts"
+export * from "./balance"
 export * from "./claim"
 export * from "./claim-secret"
 export * from "./compat"

@@ -101,10 +101,10 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 	},
 
 	egress: [
-		async ({ context }, use) => {
-			const egress = await confineEgress(context)
+		async ({ context, run, manifest }, use) => {
+			const egress = await confineEgress(context, [run.webOrigin, ...Object.values(run.walletOrigins), manifest.l2.nodeUrl])
 			await use(egress)
-			expect(egress.blocked, "every request stayed on loopback").toEqual([])
+			expect(egress.blocked, "every request stayed inside the run").toEqual([])
 		},
 		{ auto: true },
 	],

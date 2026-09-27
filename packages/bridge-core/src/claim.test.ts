@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { Fr } from "@aztec/aztec.js/fields"
 import { MerkleTreeId } from "@aztec/stdlib/trees"
-import { claim, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable } from "./claim"
+import { claim, L2_DONE, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { fakeWallet } from "./test/fake-wallet"
 import { f, MANIFEST as M } from "./test/fixtures"
@@ -40,6 +40,7 @@ describe("claim", () => {
 		const priv = fakeWallet()
 		expect(await claim(await ticket("private"), NO_NULLIFIER, priv.wallet, M, { from: recipient })).toBe("claimed")
 		expect(priv.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_private"], feePayer: M.l2.sponsoredFpc })
+		expect(priv.sent[0]?.wait, "answered only once checkpointed, never at a proposed block").toEqual(L2_DONE)
 
 		const pub = fakeWallet()
 		await claim(await ticket("public"), NO_NULLIFIER, pub.wallet, M, { from: recipient })
@@ -60,7 +61,8 @@ describe("claim", () => {
 			const { wallet } = fakeWallet({ send: fail("Assertion failed: L1-to-L2 message is already nullified") })
 			const queried: Fr[] = []
 			const nullified: NullifierNode = {
-				findLeavesIndexes: async (_block, tree, leaves) => {
+				findLeavesIndexes: async (block, tree, leaves) => {
+					expect(block, "a proposed nullifier can still be re-orged out").toBe("checkpointed")
 					expect(tree).toBe(MerkleTreeId.NULLIFIER_TREE)
 					queried.push(...leaves)
 					return leaves.map(() => ({ data: 7n }) as never)

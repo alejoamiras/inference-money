@@ -1,3 +1,4 @@
+import { NO_WAIT } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash } from "@aztec/aztec.js/tx"
 import type { Wallet } from "@aztec/aztec.js/wallet"
@@ -9,12 +10,15 @@ export interface SentTx {
 	calls: string[]
 	feePayer?: string
 	authWitnesses: number
+	/** The interaction's `wait` option: what the wallet was told to wait for before answering. */
+	wait?: unknown
 }
 
-const record = (p: ExecutionPayload): SentTx => ({
+const record = (p: ExecutionPayload, wait?: unknown): SentTx => ({
 	calls: p.calls.map((c) => c.name),
 	feePayer: p.feePayer?.toString(),
 	authWitnesses: p.authWitnesses.length,
+	...(wait === undefined ? {} : { wait }),
 })
 
 // The fields `ContractFunctionInteraction.simulate` decodes from a successful simulation.
@@ -37,11 +41,11 @@ export function fakeWallet(hooks: { send?: (tx: SentTx) => void; simulate?: (tx:
 			authWits.push({ from: from.toString(), caller: intent.caller.toString() })
 			return { requestHash: Fr.random(), witness: [] }
 		},
-		sendTx: async (p: ExecutionPayload) => {
-			const tx = record(p)
+		sendTx: async (p: ExecutionPayload, opts?: { wait?: unknown }) => {
+			const tx = record(p, opts?.wait)
 			sent.push(tx)
 			hooks.send?.(tx)
-			return { receipt: { txHash } }
+			return opts?.wait === NO_WAIT ? { txHash } : { receipt: { txHash } }
 		},
 		simulateTx: async (p: ExecutionPayload) => {
 			const tx = record(p)

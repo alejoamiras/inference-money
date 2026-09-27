@@ -9,11 +9,13 @@
  *   actor's own wallet pay its public txs.
  * POST /fund {"address", "amount"} → a public USDC balance of `amount` (base units, decimal string), claimed.
  * POST /exit {"from", "amount", "recipient"} → {"l2TxHash"}: a public exit for the page to finish.
+ * POST /balance {"address", "kind"} → {"balance"}: an actor's USDC on Aztec, read through this process's own wallet,
+ *   which holds every actor's keys, so neither the app nor the page's wallet takes part.
  */
 import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { type BridgeManifest, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
+import { type BridgeManifest, l2UsdcBalance, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
 import {
 	enterOwnedTmpDir,
 	localManifestPath,
@@ -81,6 +83,10 @@ function routes(wallet: EmbeddedWallet, m: BridgeManifest, funder: Funder, queue
 		"/exit": async ({ from, amount, recipient }) => ({
 			l2TxHash: await queue(() => funder.exitPublic(aztecAddress(from), amountOf(amount), getAddress(String(recipient)))),
 		}),
+		"/balance": async ({ address, kind }) => {
+			if (kind !== "public" && kind !== "private") throw new Error(`kind must be public or private, got ${String(kind)}`)
+			return { balance: (await queue(() => l2UsdcBalance(wallet, m, aztecAddress(address), kind))).toString() }
+		},
 	}
 }
 

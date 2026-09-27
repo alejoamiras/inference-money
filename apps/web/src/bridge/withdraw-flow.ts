@@ -1,8 +1,10 @@
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { TxHash } from "@aztec/aztec.js/tx"
 import {
 	AlreadyWithdrawnError,
 	assertExitIntent,
 	type ExitIntent,
+	ExitRevertedError,
 	type ExitTicket,
 	ExitUnconfirmedError,
 	type FeeChoice,
@@ -15,6 +17,7 @@ import {
 	StaleProofError,
 } from "@inference-money/bridge-core"
 import type { Address, Hex } from "viem"
+import { normalizeError } from "@/wallet/errors"
 import type { L2BalanceKind } from "./balances"
 import type { BridgeEnv, L2Ctx } from "./env"
 import { explain } from "./explain"
@@ -72,6 +75,24 @@ export interface WithdrawRequest {
 	readonly kind: L2BalanceKind
 	readonly amount: bigint
 	readonly recipient: Address
+	/** The Aztec account the user reviewed; the exit refuses to leave from any other. */
+	readonly from: string
+}
+
+const MAYBE_SENT =
+	"Your wallet reported an error, but it may still have sent this withdrawal. Check your Aztec wallet's activity: " +
+	"if it lists the transaction, finish it below with its hash. If it does not, close this and withdraw again."
+
+/**
+ * Whether a failed exit send may still have reached the network. A refusal, a refused permission, a failed
+ * simulation or a tx the node rejected all mean nothing was broadcast; a transport failure or an error nothing
+ * recognizes may have come after the broadcast, so it is never answered with a fresh exit.
+ */
+function mayHaveSent(e: unknown): boolean {
+	if (e instanceof ExitRevertedError) return false
+	const { category } = normalizeError(e)
+	if (category !== "network" && category !== "unknown") return false
+	return !/assertion failed|simulation/i.test(e instanceof Error ? e.message : String(e))
 }
 
 export const NOT_FOUND =
@@ -92,6 +113,8 @@ export class WithdrawFlow {
 	readonly #env: BridgeEnv
 	#ticket: ExitTicket | null = null
 	#exit: ExitIntent | null = null
+	/** What keeps the tab from closing unwarned: the located ticket, or the details an unlocated exit resumes from. */
+	#guarded: object | null = null
 	#busy = false
 
 	constructor(env: BridgeEnv) {
@@ -107,12 +130,14 @@ export class WithdrawFlow {
 
 	/** The only path to a wallet-paid exit: the user accepted it may link their account to this withdrawal. */
 	readonly acceptFeeFallback = () =>
-		this.#act(["fee-fallback"], async () => {
-			const intent = this.#exit
-			const l2 = this.#env.l2()
-			if (!intent || !l2.account.equals(intent.from)) throw new Error("The Aztec account changed. Start the withdrawal again.")
-			await this.#send(intent, l2, "wallet-default")
-		})
+		this.#act(["fee-fallback"], () =>
+			this.#env.gate.hold(async () => {
+				const intent = this.#exit
+				const l2 = this.#env.l2()
+				if (!intent || !l2.account.equals(intent.from)) throw new Error("The Aztec account changed. Start the withdrawal again.")
+				await this.#send(intent, l2, "wallet-default")
+			}),
+		)
 
 	readonly declineFeeFallback = () =>
 		this.#act(["fee-fallback"], async () => this.store.set({ ...IDLE, notice: "Nothing was sent. Try again later." }))
@@ -120,7 +145,7 @@ export class WithdrawFlow {
 	/** Closes the screen; an unfinished withdrawal stays finishable from its tx hash, recipient and amount. */
 	readonly reset = () =>
 		this.#act(["idle", "done", "unconfirmed", "failed", "other-tab"], async () => {
-			if (this.#ticket) this.#env.inFlight.remove(this.#ticket)
+			this.#guard(null)
 			this.#ticket = null
 			this.store.set(IDLE)
 		})
@@ -141,25 +166,42 @@ export class WithdrawFlow {
 		this.store.set({ ...IDLE, notice: typeof e === "string" ? e : explain(e) })
 	}
 
-	async #startExit(req: WithdrawRequest): Promise<void> {
+	#guard(key: object | null): void {
+		if (this.#guarded) this.#env.inFlight.remove(this.#guarded)
+		this.#guarded = key
+		if (key) this.#env.inFlight.add(key)
+	}
+
+	// The account is read, checked and sent from under one hold: a switch in between would burn from another account.
+	#startExit(req: WithdrawRequest): Promise<void> {
 		const env = this.#env
-		this.store.set({ ...IDLE, step: "checking", ...req })
-		let l2: L2Ctx
-		let intent: ExitIntent
-		try {
-			l2 = env.l2()
-			intent = { kind: req.kind, from: l2.account, recipientL1: req.recipient, amount: req.amount }
-			assertExitIntent(intent, env.manifest)
-			const [balance, paused] = await Promise.all([
-				env.ops.l2Balance(l2, env.manifest, req.kind),
-				env.ops.isBridgePaused(env.node, env.manifest),
-			])
-			if (paused) throw new Error("The bridge is paused. Withdrawals resume when it does.")
-			if (balance < req.amount) throw new Error(`Your ${req.kind} USDC balance on Aztec is lower than this amount.`)
-		} catch (e) {
-			return this.#back(e)
-		}
-		await this.#send(intent, l2)
+		this.store.set({ ...IDLE, step: "checking", kind: req.kind, amount: req.amount, recipient: req.recipient })
+		return env.gate.hold(async () => {
+			let l2: L2Ctx
+			let intent: ExitIntent
+			try {
+				l2 = env.l2()
+				if (!l2.account.equals(AztecAddress.fromStringUnsafe(req.from))) {
+					throw new Error("The Aztec account changed since you reviewed this withdrawal. Review it again.")
+				}
+				intent = { kind: req.kind, from: l2.account, recipientL1: req.recipient, amount: req.amount }
+				assertExitIntent(intent, env.manifest)
+				await this.#preflight(l2, req)
+			} catch (e) {
+				return this.#back(e)
+			}
+			await this.#send(intent, l2)
+		})
+	}
+
+	async #preflight(l2: L2Ctx, req: WithdrawRequest): Promise<void> {
+		const env = this.#env
+		const [balance, paused] = await Promise.all([
+			env.ops.l2Balance(l2, env.manifest, req.kind),
+			env.ops.isBridgePaused(env.node, env.manifest),
+		])
+		if (paused) throw new Error("The bridge is paused. Withdrawals resume when it does.")
+		if (balance < req.amount) throw new Error(`Your ${req.kind} USDC balance on Aztec is lower than this amount.`)
 	}
 
 	async #send(intent: ExitIntent, l2: L2Ctx, fee?: FeeChoice): Promise<void> {
@@ -175,17 +217,21 @@ export class WithdrawFlow {
 			)
 		} catch (e) {
 			if (e instanceof SponsorUnavailableError) return this.store.set({ step: "fee-fallback", notice: e.message })
-			if (e instanceof ExitUnconfirmedError) return this.#unconfirmed(e)
+			if (e instanceof ExitUnconfirmedError) {
+				return this.#unconfirmed({ l2TxHash: e.l2TxHash.toString(), recipient: e.recipient, amount: e.amount }, e.message)
+			}
+			if (mayHaveSent(e)) return this.#unconfirmed({ l2TxHash: "", recipient: intent.recipientL1, amount: intent.amount }, MAYBE_SENT)
 			return this.#back(e)
 		}
 		this.#exit = null
 		await this.#finishTicket(t)
 	}
 
-	#unconfirmed(e: ExitUnconfirmedError): void {
-		const recovery = { l2TxHash: e.l2TxHash.toString(), recipient: e.recipient, amount: e.amount }
+	/** An exit that may have burned: only finishing it from its hash, or closing after checking the wallet, leaves here. */
+	#unconfirmed(recovery: ExitDetails, notice: string): void {
 		this.#exit = null
-		this.store.set({ step: "unconfirmed", notice: e.message, recovery, l2TxHash: recovery.l2TxHash })
+		this.#guard(recovery)
+		this.store.set({ step: "unconfirmed", notice, recovery, l2TxHash: recovery.l2TxHash || null })
 	}
 
 	async #locate(d: ExitDetails): Promise<void> {
@@ -198,7 +244,7 @@ export class WithdrawFlow {
 						...IDLE,
 						step: "unconfirmed",
 						recovery,
-						l2TxHash: recovery.l2TxHash,
+						l2TxHash: recovery.l2TxHash || null,
 						notice: typeof why === "string" ? why : explain(why),
 					})
 				: this.#back(why)
@@ -212,14 +258,17 @@ export class WithdrawFlow {
 			return fail(e)
 		}
 		if (found === "not-found") return fail(NOT_FOUND)
-		if (found === "all-consumed") return this.store.set({ step: "done", outcome: "already-withdrawn" })
+		if (found === "all-consumed") {
+			this.#guard(null)
+			return this.store.set({ step: "done", outcome: "already-withdrawn" })
+		}
 		await this.#finishTicket(found)
 	}
 
 	async #finishTicket(t: ExitTicket | null = this.#ticket): Promise<void> {
 		if (!t) return
 		this.#ticket = t
-		this.#env.inFlight.add(t)
+		this.#guard(t)
 		this.store.set({ step: "proving", notice: null, l2TxHash: t.l2TxHash.toString(), recipient: t.recipient, amount: t.amount })
 		let outcome: Submitted = "stale"
 		try {
@@ -276,7 +325,7 @@ export class WithdrawFlow {
 				notice: "Ethereum did not accept the proof yet. The withdrawal is kept; try again in a few minutes.",
 			})
 		} else {
-			if (this.#ticket) this.#env.inFlight.remove(this.#ticket)
+			this.#guard(null)
 			this.#ticket = null
 			const withdrawn = outcome !== "already"
 			this.store.set({

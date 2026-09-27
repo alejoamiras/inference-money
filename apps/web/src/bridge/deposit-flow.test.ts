@@ -1,12 +1,17 @@
 // @vitest-environment node
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { SponsorUnavailableError } from "@inference-money/bridge-core"
 import { pad } from "viem"
 import { describe, expect, it, vi } from "vitest"
 import { DepositFlow } from "./deposit-flow"
-import { fakeEnv, stepsOf, ticketFor } from "./test/fake-env"
+import { deferred, fakeEnv, stepsOf, ticketFor } from "./test/fake-env"
 
 const ZERO_WORD = pad("0x0")
 const AMOUNT = 25_000_000n
+const until = async (cond: () => boolean) => {
+	for (let i = 0; i < 100 && !cond(); i++) await new Promise((r) => setTimeout(r, 0))
+	expect(cond()).toBe(true)
+}
 const json = (v: unknown) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x)).toLowerCase()
 
 describe("DepositFlow", () => {
@@ -17,7 +22,7 @@ describe("DepositFlow", () => {
 		f.l1.allowance = 0n
 		f.l1.onSign = () => expect(f.env.inFlight.size).toBe(1)
 
-		await flow.confirm({ amount: AMOUNT, kind: "private" })
+		await flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
 
 		expect(steps).toEqual(["checking", "approving", "signing", "sending", "confirming", "waiting", "claiming", "done"])
 		expect(flow.store.get()).toMatchObject({ outcome: "claimed", recipient: f.account.toString() })
@@ -42,7 +47,7 @@ describe("DepositFlow", () => {
 		const f = await fakeEnv()
 		breakIt(f)
 		const flow = new DepositFlow(f.env)
-		await flow.confirm({ amount: AMOUNT, kind: "public" })
+		await flow.confirm({ amount: AMOUNT, kind: "public", recipient: f.account.toString() })
 		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.any(String) })
 		expect(f.l1.signs).toHaveLength(0)
 		expect(f.l1.sends).toHaveLength(0)
@@ -55,7 +60,7 @@ describe("DepositFlow", () => {
 			f.node.paused = true
 		}
 		const flow = new DepositFlow(f.env)
-		await flow.confirm({ amount: AMOUNT, kind: "public" })
+		await flow.confirm({ amount: AMOUNT, kind: "public", recipient: f.account.toString() })
 		expect(f.l1.signs).toHaveLength(1)
 		expect(f.l1.sends).toHaveLength(0)
 		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.stringContaining("paused") })
@@ -66,7 +71,7 @@ describe("DepositFlow", () => {
 		const reconcile = vi.fn().mockResolvedValueOnce("pending").mockResolvedValueOnce("not-deposited")
 		const f = await fakeEnv({ confirmDeposit: () => Promise.reject(new Error("timed out")), reconcileDeposit: reconcile })
 		const flow = new DepositFlow(f.env)
-		await flow.confirm({ amount: AMOUNT, kind: "public" })
+		await flow.confirm({ amount: AMOUNT, kind: "public", recipient: f.account.toString() })
 		expect(flow.store.get()).toMatchObject({ step: "stuck", canDiscard: false })
 
 		await flow.discard()
@@ -88,7 +93,7 @@ describe("DepositFlow", () => {
 		const f = await fakeEnv({ reconcileDeposit: async (d) => ticketFor(d), claim })
 		f.l1.hangNextSend = true
 		const flow = new DepositFlow(f.env)
-		void flow.confirm({ amount: AMOUNT, kind: "private" })
+		void flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
 		await vi.waitFor(() => expect(flow.store.get().step).toBe("sending"))
 
 		await flow.recheck()
@@ -101,7 +106,7 @@ describe("DepositFlow", () => {
 		const claim = vi.fn().mockRejectedValue(new SponsorUnavailableError("The fee sponsor could not pay."))
 		const f = await fakeEnv({ claim })
 		const flow = new DepositFlow(f.env)
-		await flow.confirm({ amount: AMOUNT, kind: "private" })
+		await flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
 		expect(flow.store.get().step).toBe("fee-fallback")
 
 		await flow.declineFeeFallback()
@@ -116,13 +121,44 @@ describe("DepositFlow", () => {
 		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "claimed" })
 	})
 
+	it("names only the reviewed recipient: a wallet switched since the review signs nothing", async () => {
+		const f = await fakeEnv()
+		const flow = new DepositFlow(f.env)
+		await flow.confirm({ amount: AMOUNT, kind: "private", recipient: (await AztecAddress.random()).toString() })
+		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.stringContaining("account changed") })
+		expect(f.l1.signs).toHaveLength(0)
+		expect(f.env.inFlight.size).toBe(0)
+	})
+
+	it("claims only from the account the deposit names: a switched wallet is asked to switch back, and nothing is lost", async () => {
+		const claimable = deferred<void>()
+		const claim = vi.fn().mockResolvedValue("claimed")
+		const f = await fakeEnv({ waitClaimable: () => claimable.promise, claim })
+		const flow = new DepositFlow(f.env)
+		const running = flow.confirm({ amount: AMOUNT, kind: "private", recipient: f.account.toString() })
+		await until(() => flow.store.get().step === "waiting")
+		const own = f.env.l2
+		const other = await AztecAddress.random()
+		Object.assign(f.env, { l2: () => ({ ...own(), account: other }) })
+		claimable.resolve()
+		await running
+		expect(flow.store.get()).toMatchObject({ step: "claim-failed", notice: expect.stringContaining("Switch your Aztec wallet back") })
+		expect(claim).not.toHaveBeenCalled()
+		expect(f.env.inFlight.size).toBe(1)
+
+		Object.assign(f.env, { l2: own })
+		await flow.retryClaim()
+		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "claimed" })
+		expect(claim.mock.calls[0]?.[4].from.equals(f.account)).toBe(true)
+	})
+
 	it("holds an unclaimed deposit at the paused screen, then claims once the bridge resumes", async () => {
 		const f = await fakeEnv()
 		f.env.ops.waitClaimable = async () => {
 			f.node.paused = true
 		}
 		const flow = new DepositFlow(f.env)
-		await flow.confirm({ amount: AMOUNT, kind: "public" })
+		await flow.confirm({ amount: AMOUNT, kind: "public", recipient: f.account.toString() })
 		expect(flow.store.get()).toMatchObject({ step: "paused", notice: expect.stringContaining("paused") })
 		expect(f.env.inFlight.size).toBe(1)
 

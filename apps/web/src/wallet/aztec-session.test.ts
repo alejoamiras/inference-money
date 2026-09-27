@@ -55,10 +55,10 @@ function makeStream() {
 	return { wallets, push, end, cancel: vi.fn() }
 }
 
-function makeProvider(opts: { id?: string; name?: string; accounts?: GrantEntry[] } = {}) {
+function makeProvider(opts: { id?: string; name?: string; accounts?: GrantEntry[]; granted?: unknown[] } = {}) {
 	const accounts = opts.accounts ?? [{ alias: "Main", item: A }]
 	const walletHandle = {
-		requestCapabilities: vi.fn(async () => ({ granted: [{ type: "accounts", accounts }] })),
+		requestCapabilities: vi.fn(async () => ({ granted: [{ type: "accounts", accounts }, ...(opts.granted ?? [])] })),
 		getAccounts: vi.fn(async () => accounts),
 	}
 	const pending = { verificationHash: "deadbeef", confirm: vi.fn(async () => walletHandle), cancel: vi.fn(async () => {}) }
@@ -80,10 +80,12 @@ function makeProvider(opts: { id?: string; name?: string; accounts?: GrantEntry[
 	return { provider, pending, walletHandle, fireDisconnect: () => disconnectHandler?.() }
 }
 
-function makeSession(over: { registerContracts?: Mock<() => Promise<void>>; isSwitchBlocked?: () => boolean } = {}) {
+function makeSession(
+	over: { registerContracts?: Mock<() => Promise<void>>; isSwitchBlocked?: () => boolean; buildManifest?: () => Promise<unknown> } = {},
+) {
 	return createAztecWalletSession({
 		appId: "test-app",
-		buildManifest: async () => ({}),
+		buildManifest: (over.buildManifest ?? (async () => ({}))) as () => Promise<never>,
 		registerContracts: over.registerContracts ?? vi.fn(async () => {}),
 		chainInfo: {} as ChainInfo,
 		webWalletUrls: [],
@@ -263,6 +265,25 @@ describe("remembered path (bounded ambiguity window)", () => {
 		await flush()
 		await vi.advanceTimersByTimeAsync(1_500)
 		expect(s.getSnapshot().status).toBe("choosing")
+	})
+})
+
+describe("grant coverage", () => {
+	const contracts = { type: "contracts", contracts: [B], canRegister: true }
+	const claimScope = { type: "transaction", scope: [{ contract: B, function: "claim_private" }] }
+	const buildManifest = async () => ({ capabilities: [{ type: "accounts", canGet: true }, contracts, claimScope] })
+
+	it("a grant that registers the bridge but withholds its claim is refused before anything is set up", async () => {
+		const registerContracts = vi.fn(async () => {})
+		const s = makeSession({ registerContracts, buildManifest })
+		await driveThroughGrant(s, makeProvider({ granted: [contracts] }).provider)
+		expect(s.getSnapshot()).toMatchObject({ status: "error", contractsReady: false, error: { category: "capability-rejected" } })
+		expect(registerContracts).not.toHaveBeenCalled()
+
+		const full = makeSession({ registerContracts, buildManifest })
+		freshStream()
+		await driveThroughGrant(full, makeProvider({ granted: [contracts, claimScope] }).provider)
+		expect(full.getSnapshot()).toMatchObject({ status: "connected", contractsReady: true, grantedContracts: [B] })
 	})
 })
 

@@ -59,7 +59,7 @@ describe("DepositForm", () => {
 		expect(tid(TESTIDS.depositSummary)).toHaveTextContent(L2_ACCOUNT)
 		expect(screen.getByText(/Permit2/)).toHaveTextContent("no limit")
 		await user.click(tid(TESTIDS.depositConfirm))
-		expect(confirm).toHaveBeenCalledWith({ amount: 1_234_567n, kind: "private" })
+		expect(confirm).toHaveBeenCalledWith({ amount: 1_234_567n, kind: "private", recipient: L2_ACCOUNT })
 	})
 
 	it("offers no review while the bridge is paused", async () => {
@@ -101,7 +101,7 @@ describe("DepositProgress", () => {
 		const f = await offlineEnv({ waitClaimable: () => claimable.promise })
 		const flow = new DepositFlow(f.env)
 		render(<LiveDeposit flow={flow} />)
-		const running = act(() => flow.confirm({ amount: 1_000_000n, kind: "public" }))
+		const running = act(() => flow.confirm({ amount: 1_000_000n, kind: "public", recipient: f.account.toString() }))
 		await waitFor(() => expect(tid(TESTIDS.stepper)).toHaveAttribute("data-current", "Ready on Aztec"))
 		expect(screen.getByText(/Sent on Ethereum/).closest("li")).toHaveAttribute("data-state", "done")
 
@@ -117,7 +117,7 @@ describe("DepositProgress", () => {
 		const f = await offlineEnv({ claim })
 		const flow = new DepositFlow(f.env)
 		render(<LiveDeposit flow={flow} />)
-		await act(() => flow.confirm({ amount: 1_000_000n, kind: "private" }))
+		await act(() => flow.confirm({ amount: 1_000_000n, kind: "private", recipient: f.account.toString() }))
 
 		expect(tid(TESTIDS.feeFallback)).toHaveTextContent("link your account")
 		expect(claim).toHaveBeenCalledTimes(1)

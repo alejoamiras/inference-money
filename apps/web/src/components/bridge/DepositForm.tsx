@@ -107,7 +107,10 @@ function DepositReview(p: DepositFormProps & { amount: bigint; kind: DepositKind
 				<Button variant="outline" onClick={p.onBack} data-testid={TESTIDS.depositBack}>
 					Back
 				</Button>
-				<Button onClick={() => p.flow.confirm({ amount: p.amount, kind: p.kind })} data-testid={TESTIDS.depositConfirm}>
+				<Button
+					onClick={() => p.flow.confirm({ amount: p.amount, kind: p.kind, recipient: p.l2Account })}
+					data-testid={TESTIDS.depositConfirm}
+				>
 					Confirm deposit
 				</Button>
 			</div>

@@ -53,3 +53,34 @@ Status: **in progress.**
 
 Run 10a (first full run): 12 passed, 4 failed (attempts 1, 2, 6, 7), expiry skipped behind them; teardown left no registry rows or processes.
 Run 10b: 16 passed, 1 failed (attempt 8); teardown clean.
+Run 10c: 17/17 passed; teardown clean.
+Run 10d (the CI node tree via `AZTEC_NODE_HOME`, confirmed from the node's process paths): 17/17 passed; teardown clean.
+
+## Arc 3 codex loop
+
+### Round 1 — session `01a0e05c-65ea-70a1-9ffd-9c48784ab4ad` (GPT-6 Astra, high), on `2c90344`
+
+Three High, four Medium and one Low finding, each verified against the code before acting; codex reproduced most of them in memory.
+
+| # | Sev | Finding | Verdict and fix |
+|---|---|---|---|
+| F1 | H | `claim()` returned as soon as the wallet did. `EmbeddedWallet.sendTx` defaults to `TxStatus.PROPOSED`, and a proposed block can be dropped, so the flow discarded the draft and its secret too early. `already-consumed` read the nullifier at `latest`. | **Accepted.** Claims wait on `L2_DONE` (`CHECKPOINTED`, 600 s), and `isClaimConsumed` reads the nullifier tree at `checkpointed`. The unit tests pin both. The private-deposit e2e checks the node's own receipt: checkpointed or later, `success`. |
+| F2 | H | `sendExit` exposed the hash only after the receipt wait, so a failure after broadcast lost it and the form came back fresh: a retry burns again. | **Accepted.** The exit is sent with `NO_WAIT`, and `waitForTx(node, hash, L2_DONE)` runs inside the same try, so every post-send failure is an `ExitUnconfirmedError` carrying the hash. In the app, a send error that may have come after the broadcast (transport or unrecognised, not a simulation failure) opens the unconfirmed state with no hash: the tab stays guarded, the copy points at the wallet's activity, and only a Close (after checking) or a finish leaves. |
+| F3 | H | The parsed grant never gated anything: a wallet could withhold `claim_private` and the app still marked the contracts ready and took an L1 deposit. | **Accepted.** `requestCapabilities` refuses a grant that withholds any requested contract (`missingGrants`); a wildcard grants nothing. `[A16]` now asserts the refusal lands before any call: no denial recorded, no registration attempted. |
+| F4 | M | A receipt timeout released the withdraw lock while the L1 tx could still mine, letting another tab submit again (no double pay, but wasted gas). | **Accepted.** `withdrawOnL1` keeps waiting while L1 still has the tx and fails only once `getTransaction` reports it gone; any other read error counts as still known. The lock holds throughout. |
+| F5 | M | Pending work was not bound to the reviewed account: switching accounts mid-deposit claimed from B for recipient A (a silent relayer path), and an exit read its account before holding the switch gate. | **Accepted.** Deposit and withdraw requests carry the reviewed account. The start refuses a changed account, a claim leaves only from the deposit's recipient (checked under the gate), and an exit reads, checks and sends under one gate hold. |
+| F6 | M | The egress fence allowed every loopback port (other runs included) and could not see WebSockets or service-worker fetches. | **Accepted.** An exact-origin allowlist (the app, the wallet frames, the node), WebSockets refused and recorded, service workers blocked in the config, and a canary test proves the fence refuses another loopback port for both HTTP and WebSocket. |
+| F7 | M | A labelled EVM-only PR skipped e2e through the path filter, and the status job accepted `skipped` either way. | **Accepted.** The e2e job depends on the label or dispatch alone: it deploys the contracts, so no path filter can call it irrelevant. When requested it must succeed; otherwise it must be skipped. |
+| F8 | L | Both private-balance checks read the app's DOM, and `submitted()` records a tx before the node sees it. | **Accepted.** On top of the receipt check (F1), the sidecar's own wallet, which deployed every actor, reads the actor's private balance, so the app and the page's wallet take no part. The token-balance read moved into bridge-core (`l2UsdcBalance`), replacing the copies in the web app, the smoke and the integration actors. |
+
+**Found in my own F2 fix before re-review.** `waitForTx` throws on a reverted receipt, and F2 wrapped every post-send failure in `ExitUnconfirmedError`. A reverted exit (a pause landing between the preflight and inclusion reverts the bridge's public check) discards its burn and withdraw message with the rest of its app logic, so the app would have held the user in "unconfirmed" with a hash that can never be finished and no Close. The wait now passes `dontThrowOnRevert`. A revert whose effect carries no withdraw message becomes `ExitRevertedError` ("nothing was burned"), and the form comes back. Anything else after the send stays unconfirmed. A unit row for a dropped tx was tried and removed: `waitForTx` ignores DROPPED receipts for a grace period, so the row only timed out, and "a checkpoint wait that fails" already covers that path.
+
+**Validating round 1.**
+- Unit: bridge-core 120, deployer 27, web 80 + 1 skipped. Lint, typecheck and actionlint are clean.
+- Integration run 8 (`0beccc70-it-838707`): 16 pass, 0 fail, 63 expect(), 496 s, clean teardown. It ran on the round's first cut, before `ExitRevertedError` and `l2UsdcBalance`.
+- Integration run 9 (`0beccc70-it-858330`, final code): 16 pass, 0 fail, 63 expect(), 500 s, clean teardown.
+- Run 10e: 16 passed, 1 failed, 1 did not run (expiry waits on the bridge project); teardown clean.
+  - The egress canary, the private deposit's node receipt check and `[A5]`'s NO_WAIT exit all passed live.
+  - `[A16]` failed in the spec, not the app: the page showed "Your wallet declined the permissions…", but the spec still called `chooseAccountIfAsked`, which waits for a chooser that the refusal now prevents. The spec now asserts that the chooser never appears.
+- Run 10f (final code): 18/18 passed in 10.0 min; teardown clean.
+- Run 10g: 18/18 passed in 9.8 min; teardown clean. Two consecutive green runs on the round 1 code.
