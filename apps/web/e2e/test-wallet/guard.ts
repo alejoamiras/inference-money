@@ -15,6 +15,7 @@ export interface Grant {
 	readonly utilities: ReadonlySet<string>
 	readonly canGetAccounts: boolean
 	readonly canCreateAuthWit: boolean
+	readonly canGetMetadata: boolean
 }
 
 const key = (contract: Named | string | undefined, fn: string | undefined) => `${String(contract).toLowerCase()}:${fn}`
@@ -30,7 +31,8 @@ type Capability = { type?: string; [k: string]: unknown }
 export function grantFrom(granted: readonly Capability[]): Grant {
 	const find = (type: string) => granted.find((c) => c.type === type)
 	const accounts = find("accounts")
-	const contracts = find("contracts")?.contracts
+	const contractsCap = find("contracts")
+	const contracts = contractsCap?.contracts
 	const simulation = find("simulation") as { transactions?: { scope?: unknown }; utilities?: { scope?: unknown } } | undefined
 	return {
 		contracts: new Set(Array.isArray(contracts) ? contracts.map((c: Named) => String(c).toLowerCase()) : []),
@@ -39,6 +41,7 @@ export function grantFrom(granted: readonly Capability[]): Grant {
 		utilities: scopeSet(simulation?.utilities?.scope),
 		canGetAccounts: accounts?.canGet === true,
 		canCreateAuthWit: accounts?.canCreateAuthWit === true,
+		canGetMetadata: contractsCap?.canGetMetadata === true,
 	}
 }
 
@@ -80,12 +83,24 @@ export async function violation(g: Grant | undefined, method: string, args: read
 		}
 		case "createAuthWit":
 			return authWitOutside(g, args[1])
+		case "getContractMetadata":
+		case "getContractClassMetadata":
+			return g.canGetMetadata ? undefined : "contract metadata"
 		default:
 			return g.canGetAccounts ? undefined : "account listing"
 	}
 }
 
-const GATED = new Set(["sendTx", "simulateTx", "executeUtility", "registerContract", "createAuthWit", "getAccounts"])
+const GATED = new Set([
+	"sendTx",
+	"simulateTx",
+	"executeUtility",
+	"registerContract",
+	"createAuthWit",
+	"getAccounts",
+	"getContractMetadata",
+	"getContractClassMetadata",
+])
 
 async function batchViolation(g: Grant | undefined, methods: unknown): Promise<string | undefined> {
 	for (const m of (methods as { name: string; args: unknown[] }[]) ?? []) {

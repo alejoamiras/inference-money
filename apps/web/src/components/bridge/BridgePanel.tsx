@@ -99,7 +99,8 @@ const BOTH = "Connect your Ethereum wallet and your Aztec wallet to move USDC be
 function DepositPanel({ accounts, balances }: { accounts: Accounts; balances: Balances }) {
 	const { deposit } = useBridge()
 	const s = useFlow(deposit.store)
-	useRefreshOnDone(s.step === "done")
+	// A checkpointed claim is already in the balance; proving it changes nothing on screen.
+	useRefreshOnDone(s.step === "finalizing" || s.step === "done")
 	if (s.step !== "idle") return <DepositProgress flow={deposit} s={s} />
 	if (!accounts.l1 || !accounts.l2) return <Gate>{BOTH}</Gate>
 	return (

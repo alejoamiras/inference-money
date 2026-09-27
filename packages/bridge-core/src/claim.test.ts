@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { Fr } from "@aztec/aztec.js/fields"
 import { MerkleTreeId } from "@aztec/stdlib/trees"
-import { claim, L2_DONE, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable } from "./claim"
+import { claim, L2_DONE, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable, waitClaimProven } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { fakeWallet } from "./test/fake-wallet"
 import { f, MANIFEST as M } from "./test/fixtures"
@@ -91,6 +91,37 @@ describe("claim", () => {
 
 		const other = fakeWallet({ send: fail("boom") })
 		await expect(claim(await ticket("public"), NO_NULLIFIER, other.wallet, M, { from: recipient })).rejects.toThrow("boom")
+	})
+})
+
+describe("waitClaimProven", () => {
+	/** Answers each read from the next state; a state names which block tags hold the nullifier. */
+	const scripted = (states: ("checkpointed" | "proven" | "none" | "error")[]) => {
+		const tags: string[] = []
+		let round = -1
+		const node: NullifierNode = {
+			findLeavesIndexes: async (block, _tree, leaves) => {
+				tags.push(String(block))
+				if (block === "proven") round++
+				const state = states[Math.min(round, states.length - 1)]
+				if (state === "error") throw new Error("503")
+				const hit = state === "proven" || (state === "checkpointed" && block === "checkpointed")
+				return leaves.map(() => (hit ? ({ data: 1n } as never) : undefined))
+			},
+		}
+		return { node, tags }
+	}
+
+	it("keeps the secret until the claim is proven, through failed reads, and reports a pruned claim as dropped", async () => {
+		const t = await ticket("private")
+		let sleeps = 0
+		const opts = { sleep: async () => void sleeps++ }
+		const settling = scripted(["checkpointed", "error", "checkpointed", "proven"])
+		expect(await waitClaimProven(t, settling.node, M, opts)).toBe("proven")
+		expect(settling.tags.filter((b) => b === "proven").length, "one proven read per round").toBe(4)
+		expect(sleeps).toBe(3)
+
+		expect(await waitClaimProven(t, scripted(["checkpointed", "none"]).node, M, opts)).toBe("dropped")
 	})
 })
 

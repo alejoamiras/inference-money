@@ -155,7 +155,10 @@ async function locateExit(e: ExitIntent, txHash: TxHash, node: ExitNode, m: Brid
 	// Only `getTxReceipt` is read.
 	const receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
 	const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
-	const [index, ...rest] = (await occurrencesInTx(node, txHash, expected)) ?? []
+	const found = await occurrencesInTx(node, txHash, expected)
+	// A revert proves nothing burned only alongside an effect that lacks the message: setup effects survive a revert.
+	if (!found) throw new Error(`Exit ${txHash} is checkpointed, but the node returned no effect for it.`)
+	const [index, ...rest] = found
 	if (index === undefined && receipt.hasExecutionReverted()) return "reverted"
 	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
 	return {

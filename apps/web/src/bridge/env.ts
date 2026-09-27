@@ -1,7 +1,14 @@
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { AztecNode } from "@aztec/aztec.js/node"
 import type { Wallet } from "@aztec/aztec.js/wallet"
-import type { BridgeManifest, L1Ctx, RetrySession, WaitClaimableOptions, WaitWithdrawableOptions } from "@inference-money/bridge-core"
+import type {
+	BridgeManifest,
+	L1Ctx,
+	RetrySession,
+	WaitClaimableOptions,
+	WaitClaimProvenOptions,
+	WaitWithdrawableOptions,
+} from "@inference-money/bridge-core"
 import * as core from "@inference-money/bridge-core"
 import { l2Balance } from "./balances"
 import type { SwitchGate } from "./gate"
@@ -22,6 +29,7 @@ export const bridgeOps = {
 	reconcileDeposit: core.reconcileDeposit,
 	waitClaimable: core.waitClaimable,
 	claim: core.claim,
+	waitClaimProven: core.waitClaimProven,
 	isBridgePaused: core.isBridgePaused,
 	predictedWorstMinFees: core.predictedWorstMinFees,
 	exitToL1: core.exitToL1,
@@ -64,5 +72,9 @@ export interface BridgeEnv {
 	readonly locks: TabLocks
 	readonly inFlight: InFlight
 	readonly gate: SwitchGate
-	readonly timing?: { readonly claim?: WaitClaimableOptions; readonly proof?: WaitWithdrawableOptions }
+	readonly timing?: {
+		readonly claim?: WaitClaimableOptions
+		readonly proven?: WaitClaimProvenOptions
+		readonly proof?: WaitWithdrawableOptions
+	}
 }

@@ -33,6 +33,8 @@ export type DepositStep =
 	| "claiming"
 	| "fee-fallback"
 	| "claim-failed"
+	/** Claimed in a checkpoint; the secret is kept until the claim is proven. */
+	| "finalizing"
 	| "done"
 
 export interface DepositSnapshot {
@@ -44,7 +46,7 @@ export interface DepositSnapshot {
 	readonly l1TxHash: Hex | null
 	/** When the deposit was seen mined; the claim wait is estimated from it. */
 	readonly minedAt: number | null
-	readonly outcome: "claimed" | "already-claimed" | null
+	readonly outcome: ClaimOutcome | null
 	/** Why the flow stopped where it did; null while it runs. */
 	readonly notice: string | null
 	/** Only after a complete scan proved the deposit never reached Ethereum. */
@@ -65,6 +67,8 @@ const IDLE: DepositSnapshot = {
 }
 
 const KEPT = "Your deposit is kept in this tab; keep it open."
+
+type ClaimOutcome = "claimed" | "already-claimed"
 
 export interface DepositRequest {
 	readonly amount: bigint
@@ -330,19 +334,30 @@ export class DepositFlow {
 		const t = this.#ticket
 		if (!t) return
 		this.store.set({ step: "claiming", notice: null })
-		let result: "claimed" | "already-consumed"
+		let outcome: ClaimOutcome
 		try {
-			result = await env.gate.hold(() => {
+			const result = await env.gate.hold(() => {
 				const l2 = this.#claimant(t)
 				return env.ops.retryOnUnregistered(env.session, l2.wallet, () =>
 					env.ops.claim(t, env.node, l2.wallet, env.manifest, { from: l2.account, fee }),
 				)
 			})
+			outcome = result === "claimed" ? "claimed" : "already-claimed"
 		} catch (e) {
 			if (e instanceof SponsorUnavailableError) return this.store.set({ step: "fee-fallback", notice: e.message })
 			return this.store.set({ step: "claim-failed", notice: `${explain(e)} ${KEPT}` })
 		}
+		await this.#awaitProven(t, outcome)
+	}
+
+	/** An unproven epoch can be pruned, claim and all: the secret goes only once the claim is proven. */
+	async #awaitProven(t: ClaimTicket, outcome: ClaimOutcome): Promise<void> {
+		const env = this.#env
+		this.store.set({ step: "finalizing", notice: null })
+		if ((await env.ops.waitClaimProven(t, env.node, env.manifest, env.timing?.proven)) === "dropped") {
+			return this.#claimWhenReady(t)
+		}
 		this.#drop()
-		this.store.set({ step: "done", outcome: result === "claimed" ? "claimed" : "already-claimed", notice: null })
+		this.store.set({ step: "done", outcome, notice: null })
 	}
 }

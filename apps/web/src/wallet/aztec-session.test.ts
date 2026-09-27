@@ -14,7 +14,7 @@ vi.mock("@aztec/wallet-sdk/manager", () => ({
 	WalletManager: { configure: vi.fn(() => ({ getAvailableWallets: mockGetAvailableWallets })) },
 }))
 
-import { createAztecWalletSession, parseAccountList, parseGrantedAccounts, parseGrantedContracts } from "./aztec-session"
+import { createAztecWalletSession, missingGrants, parseAccountList, parseGrantedAccounts, parseGrantedContracts } from "./aztec-session"
 
 type AnyProvider = Record<string, unknown>
 type GrantEntry = { alias?: unknown; item?: unknown } | null
@@ -58,7 +58,9 @@ function makeStream() {
 function makeProvider(opts: { id?: string; name?: string; accounts?: GrantEntry[]; granted?: unknown[] } = {}) {
 	const accounts = opts.accounts ?? [{ alias: "Main", item: A }]
 	const walletHandle = {
-		requestCapabilities: vi.fn(async () => ({ granted: [{ type: "accounts", accounts }, ...(opts.granted ?? [])] })),
+		requestCapabilities: vi.fn(async () => ({
+			granted: [{ type: "accounts", canGet: true, canCreateAuthWit: true, accounts }, ...(opts.granted ?? [])],
+		})),
 		getAccounts: vi.fn(async () => accounts),
 	}
 	const pending = { verificationHash: "deadbeef", confirm: vi.fn(async () => walletHandle), cancel: vi.fn(async () => {}) }
@@ -284,6 +286,26 @@ describe("grant coverage", () => {
 		freshStream()
 		await driveThroughGrant(full, makeProvider({ granted: [contracts, claimScope] }).provider)
 		expect(full.getSnapshot()).toMatchObject({ status: "connected", contractsReady: true, grantedContracts: [B] })
+	})
+
+	it("counts a scope on a contract the app never registers, and every requested flag, as part of the grant", () => {
+		const accounts = { type: "accounts", canGet: true, canCreateAuthWit: true }
+		const authwit = {
+			type: "transaction",
+			scope: [
+				{ contract: B, function: "claim_private" },
+				{ contract: A, function: "set_authorized" },
+			],
+		}
+		const request = { capabilities: [accounts, contracts, authwit] }
+		expect(missingGrants(request, { granted: [accounts, contracts, authwit] })).toEqual([])
+		expect(missingGrants(request, { granted: [accounts, contracts, claimScope] }), "the auth registry's scope").toEqual([A])
+		expect(missingGrants(request, { granted: [{ ...accounts, canCreateAuthWit: false }, contracts, authwit] })).toEqual([
+			"accounts.canCreateAuthWit",
+		])
+		expect(missingGrants(request, { granted: [accounts, { ...contracts, canRegister: false }, authwit] })).toEqual([
+			"contracts.canRegister",
+		])
 	})
 })
 

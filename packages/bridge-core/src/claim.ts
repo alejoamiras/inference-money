@@ -38,9 +38,9 @@ export class SponsorUnavailableError extends Error {
 }
 
 /**
- * How far an L2 tx must get before the bridge treats it as done: published to L1 in a checkpoint. Wallets may return
- * at a proposed block, which is dropped if its proposer never publishes it, and a caller discards a claim's secret
- * on "claimed" and keeps nothing of a burned exit but its hash.
+ * How far an L2 tx must get before the bridge reads its outcome: published to L1 in a checkpoint. Wallets may return
+ * at a proposed block, which is dropped if its proposer never publishes it. A checkpoint is still not permanent (an
+ * unproven epoch can be pruned), so a claim's secret is kept until {@link waitClaimProven}.
  */
 export const L2_DONE = { waitForStatus: TxStatus.CHECKPOINTED, timeout: 600 } as const
 
@@ -149,13 +149,48 @@ export type NullifierNode = Pick<AztecNode, "findLeavesIndexes">
  * Whether the bridge has nullified this ticket's message on L2. The nullifier is aztec-nr's
  * `compute_l1_to_l2_message_nullifier`, which stdlib names after the fee-juice contract; the bridge siloes it.
  */
-export async function isClaimConsumed(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<boolean> {
+export async function isClaimConsumed(
+	t: ClaimTicket,
+	node: NullifierNode,
+	m: BridgeManifest,
+	at: "checkpointed" | "proven" = "checkpointed",
+): Promise<boolean> {
 	const { kind, recipient } = t.draft.intent
 	const secret = kind === "private" ? deriveClaimSecret(t.draft.secretOrSalt, recipient) : t.draft.secretOrSalt
 	const inner = await computeFeeJuiceMessageNullifier(Fr.fromHexString(t.messageHash), secret)
 	const siloed = await siloNullifier(AztecAddress.fromStringUnsafe(m.l2.bridge.address), inner)
-	const [hit] = await node.findLeavesIndexes("checkpointed", MerkleTreeId.NULLIFIER_TREE, [siloed])
+	const [hit] = await node.findLeavesIndexes(at, MerkleTreeId.NULLIFIER_TREE, [siloed])
 	return hit !== undefined
+}
+
+export interface WaitClaimProvenOptions {
+	/** Default 15 s. There is no attempt cap: until the claim is proven, forgetting the secret can lose the deposit. */
+	pollMs?: number
+	sleep?: (ms: number) => Promise<void>
+}
+
+/**
+ * Waits until this ticket's claim is in a proven block, the first point at which its secret may be forgotten: an epoch
+ * that misses its proof window is pruned, checkpointed claims included. "dropped" once the nullifier is not even
+ * checkpointed any more, so the caller claims again; a failed read counts as not proven yet.
+ */
+export async function waitClaimProven(
+	t: ClaimTicket,
+	node: NullifierNode,
+	m: BridgeManifest,
+	opts: WaitClaimProvenOptions = {},
+): Promise<"proven" | "dropped"> {
+	const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+	for (;;) {
+		const state = await claimFinality(t, node, m).catch(() => "checkpointed" as const)
+		if (state !== "checkpointed") return state
+		await sleep(opts.pollMs ?? 15_000)
+	}
+}
+
+async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"proven" | "checkpointed" | "dropped"> {
+	if (await isClaimConsumed(t, node, m, "proven")) return "proven"
+	return (await isClaimConsumed(t, node, m)) ? "checkpointed" : "dropped"
 }
 
 /**

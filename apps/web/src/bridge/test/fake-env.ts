@@ -122,6 +122,7 @@ export async function fakeEnv(ops: Partial<BridgeOps> = {}, o: { account?: Aztec
 			confirmDeposit: async (d) => ticketFor(d),
 			waitClaimable: async () => {},
 			claim: async () => "claimed",
+			waitClaimProven: async () => "proven",
 			l2Balance: async () => 50_000_000n,
 			exitToL1: async () => exitTicket(),
 			exitTicketFromTx: async () => exitTicket(),

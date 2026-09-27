@@ -8,6 +8,7 @@ import {
 	type ExitTicket,
 	ExitUnconfirmedError,
 	type FeeChoice,
+	isUserRejection,
 	type L1Ctx,
 	MAX_PROOF_REBUILDS,
 	type OutboxProof,
@@ -80,19 +81,19 @@ export interface WithdrawRequest {
 }
 
 const MAYBE_SENT =
-	"Your wallet reported an error, but it may still have sent this withdrawal. Check your Aztec wallet's activity: " +
-	"if it lists the transaction, finish it below with its hash. If it does not, close this and withdraw again."
+	"Your wallet reported an error, but it may still have sent this withdrawal. Wait a few minutes, then check your " +
+	"Aztec wallet's activity and your balance: if the withdrawal is listed or your balance dropped by this amount, " +
+	"finish it below with its hash. Close this and withdraw again only if neither happened."
 
 /**
- * Whether a failed exit send may still have reached the network. A refusal, a refused permission, a failed
- * simulation or a tx the node rejected all mean nothing was broadcast; a transport failure or an error nothing
- * recognizes may have come after the broadcast, so it is never answered with a fresh exit.
+ * Whether a failed exit send certainly broadcast nothing: an explicit refusal, a refused permission, a private
+ * execution failure (it aborts before anything is proven) or a revert that burned nothing. Every other failure, a
+ * lost connection included, may have come after the broadcast and is never answered with a fresh exit.
  */
-function mayHaveSent(e: unknown): boolean {
-	if (e instanceof ExitRevertedError) return false
-	const { category } = normalizeError(e)
-	if (category !== "network" && category !== "unknown") return false
-	return !/assertion failed|simulation/i.test(e instanceof Error ? e.message : String(e))
+function surelyUnsent(e: unknown): boolean {
+	if (e instanceof ExitRevertedError || isUserRejection(e)) return true
+	if (normalizeError(e).category === "capability-rejected") return true
+	return /assertion failed/i.test(e instanceof Error ? e.message : String(e))
 }
 
 export const NOT_FOUND =
@@ -130,14 +131,15 @@ export class WithdrawFlow {
 
 	/** The only path to a wallet-paid exit: the user accepted it may link their account to this withdrawal. */
 	readonly acceptFeeFallback = () =>
-		this.#act(["fee-fallback"], () =>
-			this.#env.gate.hold(async () => {
+		this.#act(["fee-fallback"], async () => {
+			const t = await this.#env.gate.hold(async () => {
 				const intent = this.#exit
 				const l2 = this.#env.l2()
 				if (!intent || !l2.account.equals(intent.from)) throw new Error("The Aztec account changed. Start the withdrawal again.")
-				await this.#send(intent, l2, "wallet-default")
-			}),
-		)
+				return this.#burn(intent, l2, "wallet-default")
+			})
+			if (t) await this.#finishTicket(t)
+		})
 
 	readonly declineFeeFallback = () =>
 		this.#act(["fee-fallback"], async () => this.store.set({ ...IDLE, notice: "Nothing was sent. Try again later." }))
@@ -172,11 +174,14 @@ export class WithdrawFlow {
 		if (key) this.#env.inFlight.add(key)
 	}
 
-	// The account is read, checked and sent from under one hold: a switch in between would burn from another account.
-	#startExit(req: WithdrawRequest): Promise<void> {
+	/**
+	 * The account is read, checked and burned from under one hold, since a switch in between would burn from another
+	 * account. Proving and the Ethereum side run after it: they no longer depend on the selected account.
+	 */
+	async #startExit(req: WithdrawRequest): Promise<void> {
 		const env = this.#env
 		this.store.set({ ...IDLE, step: "checking", kind: req.kind, amount: req.amount, recipient: req.recipient })
-		return env.gate.hold(async () => {
+		const t = await env.gate.hold(async () => {
 			let l2: L2Ctx
 			let intent: ExitIntent
 			try {
@@ -188,10 +193,12 @@ export class WithdrawFlow {
 				assertExitIntent(intent, env.manifest)
 				await this.#preflight(l2, req)
 			} catch (e) {
-				return this.#back(e)
+				this.#back(e)
+				return null
 			}
-			await this.#send(intent, l2)
+			return this.#burn(intent, l2)
 		})
+		if (t) await this.#finishTicket(t)
 	}
 
 	async #preflight(l2: L2Ctx, req: WithdrawRequest): Promise<void> {
@@ -204,27 +211,29 @@ export class WithdrawFlow {
 		if (balance < req.amount) throw new Error(`Your ${req.kind} USDC balance on Aztec is lower than this amount.`)
 	}
 
-	async #send(intent: ExitIntent, l2: L2Ctx, fee?: FeeChoice): Promise<void> {
+	/** Burns under the caller's hold; the located ticket, or null once the failure is on screen. */
+	async #burn(intent: ExitIntent, l2: L2Ctx, fee?: FeeChoice): Promise<ExitTicket | null> {
 		const env = this.#env
 		this.#exit = intent
 		this.store.set({ step: "exiting", notice: null })
-		let t: ExitTicket
 		try {
-			t = await env.gate.hold(() =>
-				env.ops.retryOnUnregistered(env.session, l2.wallet, () =>
-					env.ops.exitToL1(intent, l2.wallet, env.node, env.manifest, { fee }),
-				),
+			const t = await env.ops.retryOnUnregistered(env.session, l2.wallet, () =>
+				env.ops.exitToL1(intent, l2.wallet, env.node, env.manifest, { fee }),
 			)
+			this.#exit = null
+			return t
 		} catch (e) {
-			if (e instanceof SponsorUnavailableError) return this.store.set({ step: "fee-fallback", notice: e.message })
-			if (e instanceof ExitUnconfirmedError) {
-				return this.#unconfirmed({ l2TxHash: e.l2TxHash.toString(), recipient: e.recipient, amount: e.amount }, e.message)
-			}
-			if (mayHaveSent(e)) return this.#unconfirmed({ l2TxHash: "", recipient: intent.recipientL1, amount: intent.amount }, MAYBE_SENT)
-			return this.#back(e)
+			this.#burnFailed(e, intent)
+			return null
 		}
-		this.#exit = null
-		await this.#finishTicket(t)
+	}
+
+	#burnFailed(e: unknown, intent: ExitIntent): void {
+		if (e instanceof SponsorUnavailableError) this.store.set({ step: "fee-fallback", notice: e.message })
+		else if (e instanceof ExitUnconfirmedError) {
+			this.#unconfirmed({ l2TxHash: e.l2TxHash.toString(), recipient: e.recipient, amount: e.amount }, e.message)
+		} else if (surelyUnsent(e)) this.#back(e)
+		else this.#unconfirmed({ l2TxHash: "", recipient: intent.recipientL1, amount: intent.amount }, MAYBE_SENT)
 	}
 
 	/** An exit that may have burned: only finishing it from its hash, or closing after checking the wallet, leaves here. */

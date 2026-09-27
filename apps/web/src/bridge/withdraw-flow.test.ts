@@ -134,6 +134,48 @@ describe("WithdrawFlow", () => {
 		expect(f.env.inFlight.size).toBe(0)
 	})
 
+	it.each([
+		["a lost wallet connection", new Error("No provider: wallet connection lost")],
+		["text that only mentions a revert", new Error("Transaction reverted")],
+		["an error nothing recognizes", new Error("boom")],
+	])("keeps %s during the send as possibly sent", async (_, err) => {
+		const f = await fakeEnv({ exitToL1: vi.fn().mockRejectedValue(err) })
+		const flow = new WithdrawFlow(f.env)
+		await flow.exit({ ...REQ, from: f.account.toString() })
+		expect(flow.store.get()).toMatchObject({ step: "unconfirmed", l2TxHash: null, notice: expect.stringContaining("balance") })
+		expect(f.env.inFlight.size).toBe(1)
+	})
+
+	it.each([
+		["a declined prompt", Object.assign(new Error("User rejected the request."), { code: 4001 })],
+		["a refused permission", new Error("Capability rejected: permission denied")],
+		["a failed private execution", new Error("Assertion failed: Balance too low")],
+	])("returns %s to the form: nothing was broadcast", async (_, err) => {
+		const f = await fakeEnv({ exitToL1: vi.fn().mockRejectedValue(err) })
+		const flow = new WithdrawFlow(f.env)
+		await flow.exit({ ...REQ, from: f.account.toString() })
+		expect(flow.store.get().step).toBe("idle")
+		expect(f.env.inFlight.size).toBe(0)
+	})
+
+	it("holds the account switch only while the burn goes out, never through proving or Ethereum", async () => {
+		const proof = deferred<never>()
+		let blockedDuringBurn = false
+		const f = await fakeEnv({ waitWithdrawable: () => proof.promise })
+		f.env.ops.exitToL1 = async () => {
+			blockedDuringBurn = f.env.gate.blocked()
+			return exitTicket()
+		}
+		const flow = new WithdrawFlow(f.env)
+		const running = flow.exit({ ...REQ, from: f.account.toString() })
+		await until(() => flow.store.get().step === "proving")
+		expect(blockedDuringBurn).toBe(true)
+		expect(f.env.gate.blocked(), "proving does not depend on the selected account").toBe(false)
+		proof.resolve({} as never)
+		await running
+		expect(flow.store.get()).toMatchObject({ step: "done", outcome: "withdrawn" })
+	})
+
 	it("exits only from the reviewed account", async () => {
 		const exitToL1 = vi.fn()
 		const f = await fakeEnv({ exitToL1 })
