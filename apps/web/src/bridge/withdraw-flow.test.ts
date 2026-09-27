@@ -184,6 +184,15 @@ describe("WithdrawFlow", () => {
 		expect(exitToL1).not.toHaveBeenCalled()
 	})
 
+	it("burns nothing when the node or a wallet is on another network than the build's", async () => {
+		const exitToL1 = vi.fn()
+		const f = await fakeEnv({ exitToL1, assertNetwork: () => Promise.reject(new Error("another rollup")) })
+		const flow = new WithdrawFlow(f.env)
+		await flow.exit({ ...REQ, from: f.account.toString() })
+		expect(flow.store.get()).toMatchObject({ step: "idle", notice: expect.any(String) })
+		expect(exitToL1).not.toHaveBeenCalled()
+	})
+
 	it("burns with the wallet paying only after the user accepts the fee fallback", async () => {
 		const exitToL1 = vi
 			.fn()

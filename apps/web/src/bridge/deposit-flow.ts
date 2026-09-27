@@ -77,8 +77,8 @@ export interface DepositRequest {
 	readonly recipient: string
 }
 
-/** Fail-closed reads right before anything is signed: any failure, shortfall or pause stops the flow. */
-async function confirmReads(env: BridgeEnv, l1: L1Ctx, amount: bigint): Promise<{ allowance: bigint; l1Now: bigint }> {
+/** Fail-closed reads right before anything is signed: any failure, mismatch, shortfall or pause stops the flow. */
+async function confirmReads(env: BridgeEnv, l1: L1Ctx, l2: L2Ctx, amount: bigint): Promise<{ allowance: bigint; l1Now: bigint }> {
 	const m = env.manifest
 	const [balance, allowance, , paused, head] = await Promise.all([
 		l1UsdcBalance(l1.publicClient, m, l1.account),
@@ -86,6 +86,7 @@ async function confirmReads(env: BridgeEnv, l1: L1Ctx, amount: bigint): Promise<
 		env.ops.predictedWorstMinFees(env.node),
 		env.ops.isBridgePaused(env.node, m),
 		l1.publicClient.getBlock(),
+		env.ops.assertNetwork(env.node, l1, l2, m),
 	])
 	if (paused) throw new BridgePausedError()
 	if (balance < amount) throw new Error("Your USDC balance on Ethereum is lower than this amount.")
@@ -142,7 +143,8 @@ export class DepositFlow {
 			this.store.set(IDLE)
 		})
 
-	readonly retryClaim = () => this.#act(["claim-failed", "paused"], () => this.#claimWhenReady())
+	/** Re-reads the deposit from Ethereum first: a reorg can re-mine it at another Inbox index than the kept ticket's. */
+	readonly retryClaim = () => this.#act(["claim-failed", "paused"], () => this.#recheck())
 
 	/** The only path to a wallet-paid claim: the user accepted it may link their account to this deposit. */
 	readonly acceptFeeFallback = () => this.#act(["fee-fallback"], () => this.#claimNow("wallet-default"))
@@ -191,11 +193,12 @@ export class DepositFlow {
 		let reads: { allowance: bigint; l1Now: bigint }
 		try {
 			l1 = await env.l1()
-			recipient = env.l2().account
+			const l2 = env.l2()
+			recipient = l2.account
 			if (!recipient.equals(AztecAddress.fromStringUnsafe(req.recipient))) {
 				throw new Error("The Aztec account changed since you reviewed this deposit. Review it again.")
 			}
-			reads = await confirmReads(env, l1, req.amount)
+			reads = await confirmReads(env, l1, l2, req.amount)
 		} catch (e) {
 			return this.#back(e)
 		}
@@ -355,7 +358,7 @@ export class DepositFlow {
 		const env = this.#env
 		this.store.set({ step: "finalizing", notice: null })
 		if ((await env.ops.waitClaimFinalized(t, env.node, env.manifest, env.timing?.finalized)) === "dropped") {
-			return this.#claimWhenReady(t)
+			return this.#recheck()
 		}
 		this.#drop()
 		this.store.set({ step: "done", outcome, notice: null })

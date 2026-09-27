@@ -138,7 +138,8 @@ self_test() {
   }
 
   local derive='let secret = derive_claim_secret(claim_salt, recipient);'
-  local exits='// Burns publicly and creates an L2->L1 withdraw message.'
+  local exits='#[external("public")]
+fn exit_to_l1_public('
   mutant raw_secret "raw secret parameter" main "claim_salt: Field," "claim_salt: Field, raw_secret: Field,"
   mutant no_call "does not call derive_claim_secret" main "$derive" "let secret = claim_salt;"
   mutant discarded "does not bind the derived secret" main "$derive" \

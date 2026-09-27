@@ -1,26 +1,17 @@
-// Recipient-committed private-claim secret derivation. The one code object BOTH the
-// token_bridge contract (which consumes with it) and the keystone (which pins it against
-// the TS mirror in packages/bridge-core/src/claim-secret.ts) depend on — a single source
-// so the two toolchains cannot drift a deposit into an unclaimable state.
+// The one derivation token_bridge consumes with and the keystone pins against
+// packages/bridge-core/src/claim-secret.ts, so the toolchains cannot drift a deposit into an unclaimable state.
 //
-// The property: the L1->L2 private-deposit message commits to
-// `compute_secret_hash(derive_claim_secret(salt, recipient))`. Because claim_private
-// re-derives the consumption secret from its `recipient` ARGUMENT, a claim naming any
-// recipient other than the one bound at deposit time yields a different secret whose hash
-// can't match — so a relayer holding (salt, recipient, amount, leaf) can submit the claim
-// FOR a user but can never redirect the funds. Binding rests on poseidon2 preimage
-// resistance + this being the sole consumption path (enforced in token_bridge + the
-// sole-consumer static check).
+// A private deposit's message commits to `compute_secret_hash(derive_claim_secret(salt, recipient))` and
+// claim_private re-derives the secret from its `recipient` argument: a relayer holding the claim data can claim FOR
+// the recipient but never redirect. Rests on poseidon2 preimage resistance and claim_private being the sole consumer
+// of private-deposit messages (scripts/check-sole-consumer.sh).
 use aztec::protocol::address::AztecAddress;
 use aztec::protocol::hash::poseidon2_hash_with_separator;
 use aztec::protocol::traits::ToField;
 
-// poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32 — pinned
-// literal, NOT computed at load (mirrors the FPC constant discipline in private-fuel.ts). The
-// TS keystone (claim-secret.test.ts) re-derives it from the string and asserts equality, AND
-// asserts it differs from the FPC fuel separator (3952304070) and the protocol secret-hash
-// separator — the cross-protocol-reuse tripwire. The `nulo_` prefix is inherited
-// from the bridge this was ported from, not Aztec-canonical; changing it re-keys every claim.
+// poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32, pinned as a literal; the TS
+// keystone re-derives it and asserts it differs from the protocol secret-hash separator. The inherited `nulo_` prefix
+// is not Aztec-canonical, but changing it re-keys every claim.
 pub global DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET: u32 = 3140354885;
 
 pub fn derive_claim_secret(claim_salt: Field, recipient: AztecAddress) -> Field {

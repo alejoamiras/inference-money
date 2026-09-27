@@ -87,7 +87,6 @@ fn _assert_not_paused() {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
 }
 
-// Consumes an L1->L2 message and mints the bridged amount publicly.
 #[external("public")]
 fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
@@ -98,15 +97,9 @@ self.context.consume_l1_to_l2_message(content_hash, [secret], config.portal, mes
 self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_public(to, amount));
 }
 
-// Consumes an L1->L2 message and mints the bridged amount privately. The private content
-// hash omits the recipient (amount only), but the consumption secret is DERIVED from the
-// recipient in-circuit: `derive_claim_secret(claim_salt, recipient)`. So the recipient is
-// committed via the message's secret_hash (fixed at deposit), not via the content hash — a
-// claim naming a different recipient derives a different secret and can't consume the
-// message. This lets a relayer submit the claim FOR the user without being able to redirect
-// funds. INVARIANT: this is the ONLY path that consumes a `mint_to_private` message; adding
-// any entrypoint that takes a raw secret would reintroduce the bearer property.
-// Guarded by the sole-consumer static check (scripts/check-sole-consumer.sh).
+// The recipient is bound through the message's secret hash (claim_secret), not its content hash. INVARIANT: the only
+// consumer of a `mint_to_private` message; an entrypoint taking a raw secret would make deposits bearer claims
+// (scripts/check-sole-consumer.sh).
 #[external("private")]
 fn claim_private(
 recipient: AztecAddress,
@@ -129,7 +122,6 @@ message_leaf_index,
 self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_private(recipient, amount));
 }
 
-// Burns publicly and creates an L2->L1 withdraw message.
 #[external("public")]
 fn exit_to_l1_public(recipient: EthAddress, amount: u128, caller_on_l1: EthAddress, authwit_nonce: Field) {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
@@ -141,7 +133,6 @@ self.context.message_portal(config.portal, content);
 self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(self.msg_sender(), amount, authwit_nonce));
 }
 
-// Burns privately and creates an L2->L1 withdraw message. No attestation gate.
 #[external("private")]
 fn exit_to_l1_private(recipient: EthAddress, amount: u128, caller_on_l1: EthAddress, authwit_nonce: Field) {
 self.enqueue_self._assert_not_paused();
