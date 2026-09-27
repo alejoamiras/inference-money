@@ -148,3 +148,22 @@ Round 2 (resumed, `151a3a5`): "Not converged: one material gap remains in smoke 
 Run 10n (the `151a3a5` web code; `30b948f` touched only the deployer): e2e 18/18 in 11.4 min, clean teardown, the second consecutive green run.
 
 Round 3 (resumed, `30b948f`): "No new material findings." The final cross-arc loop has converged.
+
+## /harden security on contracts/ (after the cross-arc pass)
+
+Effort `high`, run `2026-09-27-contracts`. Scope was `contracts/` only (D16). The report is kept local in `audit/security/2026-09-27-contracts/` (`audit/` is in `.git/info/exclude`) and was not published: a security inventory is not published without the user's say-so.
+
+- **Shape:**
+  - Phase 1: Sonnet repo map.
+  - Phase 2: four clusters (L1 portal and router, L2 bridge and minter, the L1↔L2 message seam, build and supply chain), each audited by Claude Sonnet and Codex GPT-6 Astra at xhigh.
+  - Phase 2.5: light cross-rebuttal.
+  - Phase 3: Fable coordinator.
+  - Phase 4: driver plus a fresh Codex verifier.
+- **Result:** 0 Critical, 0 High, 1 Medium, 0 Low. C1–C3 are zero from both families, independently traced to the aztec-nr macros and the vendored Inbox/Outbox; the residual risks are the plan's accepted and deferred ones, and the code still matches them.
+- **F-001 (Medium, fixed):** `compile.sh` built deployable Noir artifacts without running `noir-deps.sh`, and nargo clones a mutable tag on a cache miss without checking its commit. The deployer imports the working-tree artifacts, and `deployer verify` is circular on provenance, so a retargeted upstream tag could reach a local build and then a deploy. CI verified first, so only the local path was exposed.
+  - Codex raised it. Claude missed it (it assumed CI's `--exact` backstopped deploys), then converged in rebuttal.
+  - Fix: `compile.sh` runs `noir-deps.sh` before compiling.
+- **Verifier pushback:** Codex first raised a residual, index flags hiding an edited cache entry from `git status`. The driver pushed back: a process that can write `~/nargo` runs as the user and can replace the toolchain binary, overwrite git objects, or plant a clean filter or `core.fsmonitor`, so a git-based check cannot stand against it. Codex: "Agree: insertion only." `noir-deps.sh`'s header now states that limit.
+- **Not applied:** the coordinator's defence-in-depth deployer check (refuse artifacts that differ from HEAD). No concrete path remains, and it would be an extra layer.
+- **Also fixed:** the `claim_secret` separator comment now names both keystone tripwires (Noir: FPC fuel; TS: protocol secret hash).
+- **Validation:** shellcheck clean; `noir-deps.sh --self-test` passed; `compile.sh --check` passed, printing "5 entries fetched + verified" first, with both class ids unchanged, so no contract bytes moved and the redeploy chain does not apply. Lint clean.

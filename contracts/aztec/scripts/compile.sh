@@ -11,6 +11,8 @@
 set -euo pipefail
 # shellcheck source=toolchain.sh
 source "$(dirname "${BASH_SOURCE[0]}")/toolchain.sh"
+# nargo builds from whatever ~/nargo holds, or clones a mutable tag: the deployable bytes need the pinned commits.
+bash "$(dirname "${BASH_SOURCE[0]}")/noir-deps.sh"
 
 identity() { (cd "$aztec_root" && bun scripts/artifact-identity.ts "$@"); }
 

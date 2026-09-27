@@ -9,9 +9,9 @@ use aztec::protocol::address::AztecAddress;
 use aztec::protocol::hash::poseidon2_hash_with_separator;
 use aztec::protocol::traits::ToField;
 
-// poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32, pinned as a literal; the TS
-// keystone re-derives it and asserts it differs from the protocol secret-hash separator. The inherited `nulo_` prefix
-// is not Aztec-canonical, but changing it re-keys every claim.
+// poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32, pinned as a literal; the keystones
+// re-derive it and assert it differs from the FPC fuel and protocol secret-hash separators. The inherited `nulo_`
+// prefix is not Aztec-canonical, but changing it re-keys every claim.
 pub global DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET: u32 = 3140354885;
 
 pub fn derive_claim_secret(claim_salt: Field, recipient: AztecAddress) -> Field {
