@@ -27,6 +27,7 @@ import {
 	type OutboxReader,
 	outboxReader,
 	prepareDeposit,
+	type Reconciled,
 	reconcileDeposit,
 	registerBridgeContracts,
 	registerSponsor,
@@ -205,19 +206,52 @@ async function depositAndClaim(s: Smoke, kind: DepositKind): Promise<void> {
 	const delta = (await l2Balance(s, kind)) - before
 	if (delta !== LEG_AMOUNT) throw new Error(`${kind} claim moved ${delta}, expected ${LEG_AMOUNT}`)
 	s.log(`leg ${kind} deposit → claim: +${delta} on L2 (${txs[0]?.hash}, payer ${txs[0]?.feePayer}); waiting until final`)
-	await finalizeClaim(s, t)
+	await keepUntilFinal(t, {
+		finality: (x) => waitClaimFinalized(x, s.node, s.m),
+		reconcile: (x) => reconcileDeposit(x.draft, s.l1, s.m),
+		claimAgain: async (x) => {
+			await waitClaimable(x, s.node, s.wallet, s.m, s.owner, (w) => s.log(`  ${w}`), CLAIMABLE)
+			await claim(x, s.node, s.wallet, s.m, { from: s.owner })
+		},
+		pause: (ms) => new Promise((r) => setTimeout(r, ms)),
+		log: s.log,
+	})
 }
 
-/** A checkpointed claim can still be pruned, so its ticket, the only copy of the secret, is kept until it is final. */
-async function finalizeClaim(s: Smoke, first: ClaimTicket): Promise<void> {
+export interface ReclaimSteps {
+	finality(t: ClaimTicket): Promise<"finalized" | "dropped">
+	reconcile(t: ClaimTicket): Promise<Reconciled>
+	claimAgain(t: ClaimTicket): Promise<void>
+	pause(ms: number): Promise<void>
+	log(line: string): void
+}
+
+/**
+ * A checkpointed claim can still be pruned, so its ticket, the only copy of the secret, is kept until the claim is
+ * final. Only a deposit proven never to have reached L1 gives it up; every other failure is retried.
+ */
+export async function keepUntilFinal(first: ClaimTicket, steps: ReclaimSteps): Promise<void> {
 	let t = first
-	while ((await waitClaimFinalized(t, s.node, s.m)) === "dropped") {
-		const r = await reconcileDeposit(t.draft, s.l1, s.m)
-		if (typeof r === "string") throw new Error(`the claim was pruned and its deposit is now ${r} on L1`)
-		s.log("  the claim was pruned before it was final; claiming again")
-		t = r
-		await waitClaimable(t, s.node, s.wallet, s.m, s.owner, (w) => s.log(`  ${w}`), CLAIMABLE)
-		await claim(t, s.node, s.wallet, s.m, { from: s.owner })
+	while ((await steps.finality(t)) === "dropped") {
+		steps.log("  the claim was pruned before it was final; claiming again")
+		t = await reclaim(t, steps)
+	}
+}
+
+async function reclaim(t: ClaimTicket, steps: ReclaimSteps): Promise<ClaimTicket> {
+	for (;;) {
+		const r = await steps.reconcile(t)
+		if (r === "not-deposited") throw new Error("the pruned claim's deposit never reached L1 and its permit expired")
+		if (r === "pending") steps.log("  the deposit is not readable on L1 right now; retrying in a minute")
+		else {
+			try {
+				await steps.claimAgain(r)
+				return r
+			} catch (e) {
+				steps.log(`  claiming again failed (${e instanceof Error ? e.message : String(e)}); retrying in a minute`)
+			}
+		}
+		await steps.pause(60_000)
 	}
 }
 
