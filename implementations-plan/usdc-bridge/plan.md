@@ -8,7 +8,7 @@ harden: "/harden security scoped to contracts/ only, after all arcs and the fina
 budget: "recon 3 agents (done); /code-review off; codex at high on gpt-6-astra"
 quality_bar: production-grade code (value-bearing design), deployed to local + Sepolia/Aztec testnet in this plan
 source: "alejoamiras/nulo @ 4df5eae5 (V1) + test-harness patterns from 6611f861 (freeze)"
-status: v5 — approved by the user 2026-09-25 (codex r5 APPROVE); implementing
+status: v5 — approved by the user 2026-09-25 (codex r5 APPROVE); delivered 2026-09-28 with Phase 7 deferred (D25)
 ---
 
 # usdc-bridge — USDC-only L1 ↔ Aztec bridge for Galactica
@@ -649,7 +649,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 - Commands: `bun run test:integration`
 - Pass: all specs green against node 5.0.0 with JS 5.2.0 (or the fallback pin, applied and logged); no owned processes left.
 
-#### Phase 7 — Testnet deploy + Node smoke
+#### Phase 7 — Testnet deploy + Node smoke (deferred, [D25])
 - **Precondition:** `.env.testnet` exists with mode 0600 (provisioned), and the L1 address holds ≥ 5 Circle Sepolia USDC (user funds it). If either is missing, surface and hold. Never create or rotate operational keys autonomously.
 - The deploy and smoke use ephemeral wallets/PXEs only. [D24] The deploy pays with self-funded Fee Juice; immediately before the private smoke legs, bridge ≥ 100 FJ to the canonical SponsoredFPC (a public claim anyone may make) and re-check its balance covers the two private legs.
 - Commit `deployments/testnet.json`. Pass the user the pause-key reminder (accepted: they keep the key).
@@ -768,6 +768,7 @@ Also:
 | D22 | TXE in CI | yes, behind the manifest gate (committed `txe-server/`, 2 threads), as V2's final CI did | local-only (V1; an unenforced manifest is a suggestion) | V2 QA port; codex r4 L6 correction | settled |
 | D23 | V2 QA port | adopt the filtered list (§ V2 QA port) | port V2 wholesale (factory/hub/fuel surface absent); keep V1's QA (user asked for V2-grade) | user request + 3 sweeps | settled |
 | D24 | Testnet fee path | self-funded Fee Juice: the throwaway L1 key mints the testnet fee asset from the permissionless `FeeAssetHandler` (1000 FEE/mint) and bridges it via `FeeJuicePortal`; bridge ≥ 100 FJ to the canonical SponsoredFPC before the private smoke legs so the sponsored-payer assertion still runs | SponsoredFPC-only (drained: 1.20 FJ vs ≈117 FJ budget); self-fund without top-up (loses the testnet sponsored-payer proof); hold for a refill (may never come) | Phase 1 probe; user 2026-09-26 | settled |
+| D25 | Delivery before testnet | open the 3-PR stack now; Phase 7 (and the testnet-manifest parts of Phases 8–10: `apps/web build`, `build:testnet`) follow once a public node serves Sepolia's new canonical rollup (`2914217885`, switched 2026-09-28), re-pinning as needed; the arc 3 `web` CI check stays red until `deployments/testnet.json` lands | wait and re-pin before any PR (plan as written); hold | user 2026-09-28, after the Phase 7 probe failed closed on the rollup switch | settled |
 | D10 | viem | canonical only; viem outbox reader; import ban | dual viem + `L1Port` seam | fable M3, codex (untyped seam) | settled |
 | D11 | Integration location | `packages/integration` | inside bridge-core (dependency cycle) | fable M4 | settled |
 | D12 | L1 transport | injected connector only | public RPC `http()` (egress leak) | fable M5 | settled |
@@ -877,7 +878,7 @@ Also:
 | 3 web | `usdc-bridge-web` | 8–10 | arc 2 | off |
 
 - **During implementation:** arcs are local branches (`git switch -c` at each boundary). Pushing branches to checkpoint is allowed; there is no PR, so no CI runs.
-- **Delivery (after every loop + `/harden` converge):**
+- **Delivery (after every loop + `/harden` converge; [D25] delivers before Phase 7):**
   1. `git push origin <root-commit-sha>:refs/heads/main`.
   2. `gh stack init --base main worktree-usdc-bridge usdc-bridge-core usdc-bridge-web`.
   3. `gh stack submit --auto`.

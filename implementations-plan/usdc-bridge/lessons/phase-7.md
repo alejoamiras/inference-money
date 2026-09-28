@@ -64,3 +64,24 @@ Codex: "No new material findings." The Arc 2 loop has converged. Integration run
 ## Arc 3 before Phase 7
 
 Arc 3 (web) is branched from the converged Arc 2 head while Phase 7 waits for funding. When the testnet run happens, its commit (`deployments/testnet.json` plus any fix it forces) lands on `usdc-bridge-core`, and `usdc-bridge-web` is rebased onto it locally; both branches are unpublished until Delivery. Any code change the run forces reopens the Arc 2 codex loop for that diff.
+
+## Run 1 (2026-09-28): funded, then stopped by a canonical-rollup change
+
+**Funding.** The user swapped 0.001 Sepolia ETH for 31.697366 Circle USDC on Uniswap v3 (tx `0xcd9b83c9e92f0ba47640e277b371ad4edd65cf830f619f9a81ae3ced5e3fc468`) with a one-off in-process viem script; the key never left the process and the script was deleted afterwards. The agent's own attempt was blocked by the auto-mode classifier as a real-world transaction, so the user ran it.
+
+**Gate stopped at the probe; nothing was spent.** `probe:testnet` failed 3 checks:
+- registry → rollup → inbox `0x816c…1E30`, outbox `0xb9da…DF0d`, version `2914217885`;
+- the pins are rollup `1821665230` with inbox `0x3047…4f7c` and outbox `0x905f…42ff`.
+
+**Facts (read-only reads on 2026-09-28):**
+- The Sepolia Registry now lists 7 rollups. Index 6 (version `2914217885`, `0x8c2fb2A68A3d362ab1DE99E06F83f8903160BbD9`) is canonical.
+- `https://v5.testnet.rpc.aztec-labs.com` still reports node 5.0.0 on rollup `1821665230` (`0xD73A…3178`).
+- docs.aztec.network/networks still lists rollup `1821665230` for testnet, but gives the live version as 5.1.0.
+- No public node answered for the new rollup at the obvious hostnames.
+- There is no new aztec-packages release since v5.2.0 (2026-08-17).
+- An aztec-node PR "setup testnet-v5" is open today, so the switch looks in progress.
+- The probe passed on 2026-09-27, so the change is less than a day old.
+
+**Why the probe is right to stop.** `TokenPortal.initialize` binds to `registry.getCanonicalRollup()`. A deploy now would send every deposit to the new rollup's Inbox, which the pinned node does not follow, so every claim would be impossible on the node the app uses. This is the plan's rollup-upgrade residual (accepted risk, deferred to mainnet), hit before the first deploy rather than after it.
+
+**Held for the user:** wait and re-pin to the new rollup once a node serves it, or deliver with Phase 7 deferred. Either path is a user decision: it changes plan pins or the Delivery precondition.
