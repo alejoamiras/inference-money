@@ -68,7 +68,7 @@ TXE_PID=""
 TXE_LOG=""
 
 # Tears down only the server and log this run created; a caller-pinned server is left alone.
-# shellcheck disable=SC2329 # invoked by the trap
+# shellcheck disable=SC2317,SC2329 # invoked by the trap (shellcheck < 0.11 reports it as SC2317)
 cleanup() {
   [ -n "$TXE_PID" ] && kill "$TXE_PID" 2>/dev/null
   [ -n "$TXE_LOG" ] && rm -f "$TXE_LOG"

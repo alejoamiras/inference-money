@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"test": "bun test scripts",
+		"test": "bun test --preload ../../test-preload.ts scripts",
 		"test:noir": "bash scripts/run-txe-tests.sh --crate token_bridge && bash scripts/run-txe-tests.sh --crate keystone",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
