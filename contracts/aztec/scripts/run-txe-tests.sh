@@ -92,7 +92,8 @@ start_server() {
     TXE_LOG="$(mktemp "$TOOLCHAIN_DIR/txe-$TXE_PORT.log.XXXXXX")"
     echo "starting TXE server on :$TXE_PORT (attempt $attempt)"
     # Node, not bun: the native lmdb binding crashes under bun. `exec` makes $! the server, not a subshell.
-    (cd "$TOOLCHAIN_DIR" && TXE_PORT="$TXE_PORT" NODE_OPTIONS="--max-old-space-size=8192" \
+    # FORCE_COLOR=0: under CI the logger colors its lines, and owned_up's anchored match then misses.
+    (cd "$TOOLCHAIN_DIR" && TXE_PORT="$TXE_PORT" FORCE_COLOR=0 NODE_OPTIONS="--max-old-space-size=8192" \
       exec node node_modules/@aztec/txe/dest/bin/index.js >"$TXE_LOG" 2>&1) &
     TXE_PID=$!
     for _ in $(seq 1 60); do
