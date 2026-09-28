@@ -180,3 +180,15 @@ Effort `high`, run `2026-09-27-contracts`. Scope was `contracts/` only (D16). Th
 - `bun run lint && bun run lint:actions && bun run typecheck` exits 0.
 
 **Still blocked:** Phase 7. The throwaway L1 key `0xFcc2…F6F5` holds 0 Circle Sepolia USDC; re-read on 2026-09-27 with an `eth_call` of `balanceOf` against the public RPC. Delivery waits on Phase 7, because the plan requires `verify:testnet` to pass against the final artifacts before any PR opens, and arc 2 must carry `deployments/testnet.json`.
+
+## Delivery: first CI run (2026-09-28)
+
+The arcs had never run on GitHub. After `gh stack submit`, two failures appeared that did not reproduce locally:
+
+- **`TypeError: expect.addEqualityTesters is not a function`** in every bun test job that loads `@aztec/foundation` (contracts/aztec, deployer, bridge-core).
+  - Cause: on a cold transpile, bun test injects its `expect` into `field.js`, which then takes its Jest branch. The local runtime transpiler cache held a copy without the injection.
+  - Reproduced with `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`.
+  - Fix: a root `test-preload.ts` adds a no-op, wired into each affected test script via `--preload` (the root `bunfig.toml` does not apply under `--cwd`), on arc 1, plus arc 2 for bridge-core and integration.
+- **Shellcheck SC2317** on `run-txe-tests.sh`'s trap-invoked `cleanup`. CI's shellcheck predates SC2329, which local 0.11 reports instead, so the directive names both.
+
+`web` stays red by design: `build:testnet` needs `deployments/testnet.json` (D25).
