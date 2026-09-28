@@ -31,15 +31,15 @@ owns_sidecar() {
   [ -n "$SIDECAR_PGID" ] && [ "$(ps -o lstart= -p "$SIDECAR_PGID" 2>/dev/null)" = "$SIDECAR_START" ]
 }
 
-# shellcheck disable=SC2329  # invoked from reap, which the EXIT trap runs
+# shellcheck disable=SC2317,SC2329  # invoked from reap, which the EXIT trap runs
 stop_sidecar() {
   owns_sidecar || return 0
   kill -TERM -- "-$SIDECAR_PGID" 2>/dev/null || true
   for _ in $(seq 1 20); do owns_sidecar || return 0; sleep 1; done
-  owns_sidecar && kill -KILL -- "-$SIDECAR_PGID" 2>/dev/null || true
+  if owns_sidecar; then kill -KILL -- "-$SIDECAR_PGID" 2>/dev/null || true; fi
 }
 
-# shellcheck disable=SC2329  # invoked by the EXIT trap
+# shellcheck disable=SC2317,SC2329  # invoked by the EXIT trap
 reap() {
   local status=$?
   if [ "${E2E_KEEP:-}" = "1" ]; then

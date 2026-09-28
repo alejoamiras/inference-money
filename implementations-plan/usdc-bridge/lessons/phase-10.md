@@ -191,4 +191,7 @@ The arcs had never run on GitHub. After `gh stack submit`, two failures appeared
   - Fix: a root `test-preload.ts` adds a no-op, wired into each affected test script via `--preload` (the root `bunfig.toml` does not apply under `--cwd`), on arc 1, plus arc 2 for bridge-core and integration.
 - **Shellcheck SC2317** on `run-txe-tests.sh`'s trap-invoked `cleanup`. CI's shellcheck predates SC2329, which local 0.11 reports instead, so the directive names both.
 
+- **TXE never "came up" in CI**, even though its log showed `TXE listening on port N`. Under CI, colorette enables color, so the line ends in ANSI resets and `owned_up`'s `$`-anchored grep never matched. Fix: spawn TXE with `FORCE_COLOR=0`. Reproduced with `CI=true GITHUB_ACTIONS=true`.
+- **ubuntu-24.04 ships shellcheck 0.9.0.** Running that exact binary over every tracked script also found SC2317 and SC2015 in `apps/web/e2e/agent.sh`. Check against CI's version, not the local 0.11.
+
 `web` stays red by design: `build:testnet` needs `deployments/testnet.json` (D25).
