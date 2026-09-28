@@ -8,7 +8,7 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
-		"test": "bun run --cwd ../../contracts/evm build && bun test src",
+		"test": "bun run --cwd ../../contracts/evm build && bun test --preload ../../test-preload.ts src",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {

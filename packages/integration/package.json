@@ -5,7 +5,7 @@
 	"description": "Integration suite: bridge-core flows against a per-run local network (node 5.0.0) with the bridge deployed.",
 	"type": "module",
 	"scripts": {
-		"test:integration": "INTEGRATION=1 bun test --preload ./test/setup.ts --timeout 900000 ./test",
+		"test:integration": "INTEGRATION=1 bun test --preload ../../test-preload.ts --preload ./test/setup.ts --timeout 900000 ./test",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
