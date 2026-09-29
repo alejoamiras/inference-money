@@ -861,7 +861,7 @@ Also:
    - re-run `test:integration` and `test:e2e`
    - `build:testnet`
 
-   Before Delivery, `verify:testnet` must pass against the **final** artifacts.
+   Before Delivery, `verify:testnet` must pass against the **final** artifacts ([D26]: arc 4's delivery, since arcs 1–3 ship without a testnet deploy).
 5. **Delivery** — the first time any PR is opened.
 
 **No-over-engineering rule** (verbatim in every codex prompt): *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*

@@ -33,6 +33,7 @@ jobs:
               - 'package.json'
               - 'bun.lock'
               - 'bunfig.toml'
+              - 'test-preload.ts'
               - '.github/workflows/contracts.yml'
               - '.github/workflows/_contracts.yml'
               - '.github/actions/setup-toolchains/**'
