@@ -36,6 +36,7 @@ jobs:
               - 'package.json'
               - 'bun.lock'
               - 'bunfig.toml'
+              - 'test-preload.ts'
               - 'biome.json'
               - 'tsconfig.base.json'
               - '.github/workflows/bridge-core.yml'

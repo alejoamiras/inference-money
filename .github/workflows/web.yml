@@ -62,7 +62,9 @@ jobs:
       - run: bunx biome ci apps/web
       - run: bun run --cwd apps/web typecheck
       - run: bun run --cwd apps/web test:components
-      # No testnet manifest is committed yet: build against the test fixture, which still exercises the bundle and _headers.
+      # Until deployments/testnet.json is committed, build against the test fixture (still exercising the bundle and
+      # _headers). The guard fails once it lands, so build:testnet and its identity check must replace this step.
+      - run: test ! -e deployments/testnet.json
       - run: bun run --cwd apps/web build
         env:
           BRIDGE_MANIFEST: apps/web/src/test/manifest.fixture.json
