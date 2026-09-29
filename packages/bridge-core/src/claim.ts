@@ -98,7 +98,7 @@ export interface WaitClaimableOptions {
 	sleep?: (ms: number) => Promise<void>
 }
 
-/** The witness exists once the message is in a committed block's L1-to-L2 tree, not merely ingested from L1. */
+/** The witness exists once a block (proposed is enough) holds the message in its L1-to-L2 tree, not at L1 ingestion. */
 type ClaimableNode = { getL1ToL2MessageMembershipWitness(block: "latest", message: Fr): Promise<unknown> }
 type ClaimWait = "waiting-for-inclusion" | "waiting-for-wallet-sync"
 
@@ -122,9 +122,8 @@ async function probeClaimable(
 }
 
 /**
- * Resolves once the claim would succeed from `from`'s wallet: the message must be in a checkpoint and inside the tree
- * the wallet's PXE anchors to, which only a successful simulation proves. An already-consumed message resolves too, so
- * `claim` reports it.
+ * Resolves once the claim would succeed from `from`'s wallet: the message must be in the L1-to-L2 tree the wallet's PXE
+ * anchors to, which only a successful simulation proves. An already-consumed message resolves too, so `claim` reports it.
  */
 export async function waitClaimable(
 	t: ClaimTicket,

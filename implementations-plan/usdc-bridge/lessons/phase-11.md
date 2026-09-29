@@ -21,3 +21,27 @@ Status: **in progress.**
 3. **Deployer account "not deployed" on a reused network.** v6 account deploys skip instance publication by default (`deploy_account_method.js`: `skipInstancePublication ?? true`), so `node.getContract(account)` never finds the account and a second deploy against the same network hit "Existing nullifier". `ensureDeployerAccount` now reads the wallet's `initializationStatus` (the initialization nullifier).
 4. **`compile.sh --check` before commit.** It compares against HEAD's artifacts, which are still 5.x until the rebuild is committed. v6 stdlib cannot parse their storage export (`storageExport.kind`), so the check reports drift until then; rerun after committing.
 5. **Brillig coverage warnings.** Every "Brillig call … not sufficiently constrained" warning sits in aztec-nr (`history/storage.nr`, `context/returns_hash.nr`, `oracle/get_contract_instance.nr`, …). Our `src/main.nr` appears only as the caller in their call stacks.
+6. **A dropped proxy deploy on the first reused network (unexplained).** On `v6a`, after the first attached run hit the account bug, the second attached run's proxy deploy was accepted by the node and then failed in the block builder with 0 gas ("Tx dropped by P2P node"). Two follow-ups did not reproduce it: two `deploy:local` runs on one fresh network (`v6b`), then the attached suite on that reused network (16/16). A tx-expiry theory does not fit: `MAX_TX_LIFETIME` is 86400 s, and the time warp was about 19 min. Revisit if it recurs.
+
+## Validation
+
+- Unit: bridge-core 120, deployer 29, local-network 14, web 93 + 1 skipped, contracts 2 + 1. Lint, typecheck and actionlint are clean.
+- Forge unit/fuzz/invariant 64, gas snapshot, halmos 8/8. TXE: token_bridge 48, keystone 8.
+- `compile.sh --check` against the committed v6 artifacts: clean.
+- Integration on its own network (`it-2888562`): 16 pass, 356 s. Attached to the reused `v6b` network: 16 pass, 328 s. Teardown is clean.
+- `probe:testnet`: 18/18.
+
+## Codex loop
+
+### Round 1 — session `01a0ef33-1f6a-7f53-9d6c-5148519b365f` (GPT-6 Astra, high), on `b130550`
+
+Verdict: **No new material findings.** It confirmed:
+- the Noir cache pins, lockfile integrity and the exact-name exclusion lists;
+- the bridge invariants (content hash, recipient binding, sole consumer, pause, initializer binding) and the Outbox interface;
+- that the witness check is stronger than the old assigned-checkpoint lookup;
+- the deployer-account fix.
+
+It also raised three Low comment fixes. All three were accepted:
+- `claim.ts`: `"latest"` is a proposed block, not a committed one, so both claimability comments now say that.
+- The three bunfigs dropped their `(D27)` plan reference.
+- The keystone secret-hash comment is down to one line.
