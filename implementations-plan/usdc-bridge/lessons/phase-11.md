@@ -1,6 +1,6 @@
 # Phase 11 — Re-pin to Aztec 6.0.0-rc.1
 
-Status: **in progress.**
+Status: **done** (gate green, codex loop converged).
 
 ## What changed
 
@@ -30,6 +30,7 @@ Status: **in progress.**
 - `compile.sh --check` against the committed v6 artifacts: clean.
 - Integration on its own network (`it-2888562`): 16 pass, 356 s. Attached to the reused `v6b` network: 16 pass, 328 s. Teardown is clean.
 - `probe:testnet`: 18/18.
+- e2e, two consecutive runs: 18 passed (8.6 min), then 18 passed (8.7 min). No registry rows or owned processes are left.
 
 ## Codex loop
 
