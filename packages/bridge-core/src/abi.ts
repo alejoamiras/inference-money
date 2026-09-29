@@ -1,6 +1,6 @@
 /**
  * The L1 ABI surface bridge-core calls, hand-written so browsers never load forge artifacts. abi.test.ts pins every
- * entry to the compiled contracts (router, portal) and to @aztec/l1-artifacts (Outbox, Registry, Rollup).
+ * entry to the compiled contracts (router, portal) and to @aztec-foundation/l1-artifacts (Outbox, Registry, Rollup).
  */
 
 const PERMIT2_DEPOSIT_ROUTER_ERRORS = [

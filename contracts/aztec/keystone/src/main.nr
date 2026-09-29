@@ -63,7 +63,7 @@ fn claim_secret_vectors_match_ts() {
 
 #[test]
 fn claim_secret_hash_vectors_match_ts() {
-    // compute_secret_hash([derive_claim_secret(...)]) — the value L1 commits into the message. 5.0.1's
+    // compute_secret_hash([derive_claim_secret(...)]) — the value L1 commits into the message.
     // compute_secret_hash is generic over the array length (`[Field; N]`); a single secret is `[secret]`.
     // For N=1 it is still `poseidon2_hash_with_separator([secret], DOM_SEP__SECRET_HASH)`.
     // The array form only made the single-secret case explicit in the signature.

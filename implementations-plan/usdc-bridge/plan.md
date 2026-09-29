@@ -763,7 +763,7 @@ The public testnet node runs `6.0.0-rc.1` on rollup `2914217885`, which is now S
   - every new repo and transitive dependency goes into `noir-deps.sh`'s pinned table.
 - **Artifacts:** rebuilt through `compile.sh`. Class ids and addresses change; the keystone vectors must still hold.
 - **API migration** per the v6 changelog: protocol-contract wrappers, `returnType`, `FeesPerGas`, the re-pinned HandshakeRegistry. The 5.x compat (`authorizeLegacyHandshakeReads`, publishing the 5.0.1 standard contracts locally) goes if v6 no longer needs it.
-- **Testnet pins:** `packages/deployer/src/networks.ts` takes the new rollup, Inbox, Outbox, fee-juice and SponsoredFPC values. The node URL comes from `.env.testnet` ([D29]).
+- **Testnet pins:** `packages/deployer/src/networks.ts` takes the new rollup, Inbox, Outbox, fee-juice and SponsoredFPC values, and the dRPC node URL as public config ([D29]).
 - **Docs:** AGENTS.md follows every changed rule.
 
 **Validation gate** (all local layers):
@@ -820,7 +820,7 @@ Phase 7 (above) then runs against the v6 pins.
 | D26 | Testnet as its own arc | a 4th PR carries the Aztec v6 bump, Phase 7 and Phase 10's `build:testnet`; arcs 1–3 merge now; the Phase 8–10 gates and CI's `web` job build against `apps/web/src/test/manifest.fixture.json` | hold arcs 1–3 until v6 ships (D25 as written) | user 2026-09-29: "PR 4 does the Testnet work, let's merge everything else" | settled |
 | D27 | npm age gate for v6 | the `6.0.0-rc.1` packages Arc 4 needs (`@aztec-labs/*`, `@aztec-foundation/*`, and any `@aztec/*` they pull in) go into `minimumReleaseAgeExcludes` by name; the rest of the 7-day gate stays | wait until 2026-09-30T20:10Z, when rc.1 clears the gate | user 2026-09-29: "exclude the aztec packages necessary" | settled |
 | D28 | v6 Noir sources | `aztec` from `aztec-labs-eng/aztec-nr` (the same source aztec-standards v6 uses, so the token and the bridge share one `aztec`); `token_portal_content_hash_lib` from `aztec-labs-eng/aztec-node`, its only v6 home | vendor the content-hash lib (it would drift from Aztec's copy, the one the keystone vectors pin) | v6 changelog + repo layout at `v6.0.0-rc.1` | settled |
-| D29 | Testnet node URL | the dRPC endpoint is the only node serving the v6 rollup; the deployer reads it from `.env.testnet`, and the committed manifest (hence the web bundle) carries it | a keyless public v6 endpoint (none answers yet) | user 2026-09-29: "don't worry about dRPC, this will be temp" | settled (temporary) |
+| D29 | Testnet node URL | the dRPC endpoint is the only node serving the v6 rollup; it is public config, pinned in `networks.ts` and carried by the committed manifest (hence the web bundle), never in `.env.testnet`, so `secrets:scan` stays clean | a keyless public v6 endpoint (none answers yet); keeping it in `.env.testnet` while the bundle ships it | user 2026-09-29: "don't worry about dRPC, this will be temp", then "Public in manifest" | settled (temporary) |
 | D10 | viem | canonical only; viem outbox reader; import ban | dual viem + `L1Port` seam | fable M3, codex (untyped seam) | settled |
 | D11 | Integration location | `packages/integration` | inside bridge-core (dependency cycle) | fable M4 | settled |
 | D12 | L1 transport | injected connector only | public RPC `http()` (egress leak) | fable M5 | settled |

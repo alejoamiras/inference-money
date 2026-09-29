@@ -1,5 +1,5 @@
-import { Fr } from "@aztec/aztec.js/fields"
-import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { computeL2ToL1MembershipWitness } from "@aztec-labs/stdlib/messaging"
 import {
 	BaseError,
 	bytesToHex,

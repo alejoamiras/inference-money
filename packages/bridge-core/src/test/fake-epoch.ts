@@ -1,7 +1,7 @@
-import { Fr } from "@aztec/aztec.js/fields"
-import { TxHash } from "@aztec/aztec.js/tx"
-import { MAX_CHECKPOINTS_PER_EPOCH } from "@aztec/constants"
-import { computeL2ToL1MembershipWitnessFromMessagesInEpoch, getL2ToL1MessageLeafId } from "@aztec/stdlib/messaging"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { TxHash } from "@aztec-labs/aztec.js/tx"
+import { MAX_CHECKPOINTS_PER_EPOCH } from "@aztec-labs/constants"
+import { computeL2ToL1MembershipWitnessFromMessagesInEpoch, getL2ToL1MessageLeafId } from "@aztec-labs/stdlib/messaging"
 import type { ExitNode } from "../exit"
 import type { OutboxReader } from "../outbox"
 

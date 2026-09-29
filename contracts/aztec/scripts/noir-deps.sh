@@ -15,8 +15,10 @@
 set -euo pipefail
 
 DEPS=(
-  "https://github.com/AztecProtocol/aztec-packages v5.0.1 72666f8d1d61b98be22126db6e467a0b6046cef9"
-  "https://github.com/AztecProtocol/aztec-standards v5.0.1 c74541f7cf2bb23b704e96fd326ea95d98252669"
+  "https://github.com/aztec-labs-eng/aztec-nr v6.0.0-rc.1 88ff1ded43051ed5393150799f4308aeda46e94a"
+  "https://github.com/aztec-labs-eng/aztec-node v6.0.0-rc.1 68274e7c39c6388975aab5ee6ada8e4764d619ec"
+  "https://github.com/AztecProtocol/aztec-packages v6.0.0-rc.1 d521f0d940d096fbea5b62010d9c9c70f1dc0fd2"
+  "https://github.com/AztecProtocol/aztec-standards v6.0.0-rc.1 cdfba943f59ae50cfb46f8c5e16fcce72d9abb42"
   "https://github.com/noir-lang/poseidon v0.3.0 0880c371e88e583d39515fd3f877538657ac41eb"
   "https://github.com/noir-lang/sha256 v0.3.0 9442e5b6856f98b2ec029882d7e90199ecff91ba"
   "https://github.com/noir-lang/keccak256 v0.1.3 f64ab3af714aa1a1e2699243037e0f11fe5bf706"

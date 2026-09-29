@@ -1,14 +1,14 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract } from "@aztec/aztec.js/contracts"
-import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
-import { Fr } from "@aztec/aztec.js/fields"
-import { TxStatus } from "@aztec/aztec.js/tx"
-import type { Wallet } from "@aztec/aztec.js/wallet"
-import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
-import { siloNullifier } from "@aztec/stdlib/hash"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { computeFeeJuiceMessageNullifier } from "@aztec/stdlib/messaging"
-import { MerkleTreeId } from "@aztec/stdlib/trees"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Contract } from "@aztec-labs/aztec.js/contracts"
+import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { TxStatus } from "@aztec-labs/aztec.js/tx"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
+import { siloNullifier } from "@aztec-labs/stdlib/hash"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { computeFeeJuiceMessageNullifier } from "@aztec-labs/stdlib/messaging"
+import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import { sponsoredFpcArtifact, tokenBridgeArtifact } from "./artifacts"
 import { deriveClaimSecret } from "./claim-secret"
 import type { ClaimTicket } from "./deposit"
@@ -98,7 +98,8 @@ export interface WaitClaimableOptions {
 	sleep?: (ms: number) => Promise<void>
 }
 
-type ClaimableNode = { getL1ToL2MessageCheckpoint(message: Fr): Promise<unknown> }
+/** The witness exists once the message is in a committed block's L1-to-L2 tree, not merely ingested from L1. */
+type ClaimableNode = { getL1ToL2MessageMembershipWitness(block: "latest", message: Fr): Promise<unknown> }
 type ClaimWait = "waiting-for-inclusion" | "waiting-for-wallet-sync"
 
 async function probeClaimable(
@@ -108,7 +109,8 @@ async function probeClaimable(
 	m: BridgeManifest,
 	from: AztecAddress,
 ): Promise<"ready" | ClaimWait> {
-	if ((await node.getL1ToL2MessageCheckpoint(Fr.fromHexString(t.messageHash))) === undefined) return "waiting-for-inclusion"
+	if ((await node.getL1ToL2MessageMembershipWitness("latest", Fr.fromHexString(t.messageHash))) === undefined)
+		return "waiting-for-inclusion"
 	try {
 		await claimCall(t, wallet, m).simulate({ from })
 		return "ready"

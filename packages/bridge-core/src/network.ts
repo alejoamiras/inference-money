@@ -1,4 +1,4 @@
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
+import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import type { Address, PublicClient } from "viem"
 import { REGISTRY_ABI, ROLLUP_ABI } from "./abi"
 import type { BridgeManifest } from "./manifest"

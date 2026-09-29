@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { getFeeJuiceBalance } from "@aztec/aztec.js/utils"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
 import { sponsoredPayment } from "@inference-money/bridge-core"
 import { topUpSponsor } from "@inference-money/deployer"
 import { L1_CHAIN_ID } from "@inference-money/local-network"

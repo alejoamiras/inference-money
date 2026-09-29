@@ -1,6 +1,6 @@
 # contracts/aztec
 
-Aztec.nr side of the USDC bridge, pinned to aztec-nr **v5.0.1** (the `noir` entry in `toolchain.json`).
+Aztec.nr side of the USDC bridge, pinned to aztec-nr **v6.0.0-rc.1** (the `noir` entry in `toolchain.json`).
 
 | Crate | Type | Role |
 |---|---|---|
@@ -14,7 +14,7 @@ to deploy.
 
 ## Commands
 
-nargo comes from `aztec-up install 5.0.1` (the scripts check it is `toolchain.json`'s `nargo`). The aztec CLI, bb and
+nargo comes from `aztec-up install 6.0.0-rc.1`, or `NARGO=<path>` to the noir-lang release (the scripts check it is `toolchain.json`'s `nargo`). The aztec CLI, bb and
 the TXE server come from `toolchain/`, a committed lockfile installed with `--frozen-lockfile` on first use.
 
 ```sh
@@ -26,4 +26,4 @@ bash scripts/check-sole-consumer.sh  # static recipient-commitment guard (add --
 ```
 
 Never run a bare `nargo compile`: it overwrites a committed artifact with an untranspiled one that aztec.js rejects.
-`scripts/nargo-5.sh <crate> <args>` runs the pinned nargo for anything else.
+`scripts/nargo.sh <crate> <args>` runs the pinned nargo for anything else.

@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto"
-import { NO_FROM } from "@aztec/aztec.js/account"
-import { AztecAddress, EthAddress } from "@aztec/aztec.js/addresses"
-import { BatchCall, Contract } from "@aztec/aztec.js/contracts"
-import type { FeePaymentMethod } from "@aztec/aztec.js/fee"
-import { Fq, Fr } from "@aztec/aztec.js/fields"
-import type { AztecNode } from "@aztec/aztec.js/node"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { NO_FROM } from "@aztec-labs/aztec.js/account"
+import { AztecAddress, EthAddress } from "@aztec-labs/aztec.js/addresses"
+import { BatchCall, Contract } from "@aztec-labs/aztec.js/contracts"
+import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
+import { Fq, Fr } from "@aztec-labs/aztec.js/fields"
+import { ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	instanceRecord,
 	type L2InstanceRecord,
@@ -27,16 +27,19 @@ export function signingKeyFor(secret: Fr): Fq {
 	return Fq.fromBufferReduce(createHash("sha256").update("inference-money/schnorr-signing-key").update(secret.toBuffer()).digest())
 }
 
-/** Registers the deployer's Schnorr account in `wallet`, deploying it first if the node has never seen it. */
+/**
+ * Registers the deployer's Schnorr account in `wallet`, deploying it first unless its initialization nullifier exists.
+ * An account deploy does not publish its instance, so the node's contract lookup cannot answer this.
+ */
 export async function ensureDeployerAccount(
 	wallet: EmbeddedWallet,
-	node: Pick<AztecNode, "getContract">,
 	secret: Fr,
 	fees: L2Fees,
 	log: (m: string) => void,
 ): Promise<AztecAddress> {
 	const manager = await wallet.createSchnorrAccount(secret, Fr.ZERO, signingKeyFor(secret))
-	if (await node.getContract(manager.address)) {
+	const { initializationStatus } = await wallet.getContractMetadata(manager.address)
+	if (initializationStatus === ContractInitializationStatus.INITIALIZED) {
 		log(`deployer ${manager.address}: already deployed`)
 		return manager.address
 	}

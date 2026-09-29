@@ -39,8 +39,8 @@ function depRoot(fromRoot: string, dep: string): string {
  * package see only what it declares.
  */
 function sqliteWasmEmit(): Plugin {
-	const pxe = depRoot(depRoot(appRoot, "@aztec/wallets"), "@aztec/pxe")
-	const wasm = depRoot(depRoot(pxe, "@aztec/kv-store"), "@aztec/sqlite3mc-wasm")
+	const pxe = depRoot(depRoot(appRoot, "@aztec-labs/wallets"), "@aztec-labs/pxe")
+	const wasm = depRoot(depRoot(pxe, "@aztec-labs/kv-store"), "@aztec-labs/sqlite3mc-wasm")
 	return {
 		name: "test-wallet-sqlite-wasm",
 		apply: "build",
@@ -88,9 +88,9 @@ export default defineConfig(() => {
 				},
 				{ find: "detect-node", replacement: join(here, "detect-node.ts") },
 			],
-			dedupe: ["@aztec/noir-noirc_abi", "@aztec/noir-acvm_js"],
+			dedupe: ["@aztec-foundation/noir-noirc_abi", "@aztec-foundation/noir-acvm_js"],
 		},
-		optimizeDeps: { exclude: ["@aztec/bb.js", "@aztec/noir-acvm_js", "@aztec/noir-noirc_abi"] },
+		optimizeDeps: { exclude: ["@aztec-foundation/bb.js", "@aztec-foundation/noir-acvm_js", "@aztec-foundation/noir-noirc_abi"] },
 		plugins: [nodePolyfills({ globals: { Buffer: true, global: true, process: true } }), sqliteWasmEmit()],
 	}
 })

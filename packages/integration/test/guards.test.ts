@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test"
-import { AztecAddress, EthAddress } from "@aztec/aztec.js/addresses"
-import { Contract } from "@aztec/aztec.js/contracts"
-import { publishInstance } from "@aztec/aztec.js/deployment"
-import { Fr } from "@aztec/aztec.js/fields"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
-import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
+import { AztecAddress, EthAddress } from "@aztec-labs/aztec.js/addresses"
+import { Contract } from "@aztec-labs/aztec.js/contracts"
+import { publishInstance } from "@aztec-labs/aztec.js/deployment"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
+import { getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
 import {
 	BridgePausedError,
 	claim,

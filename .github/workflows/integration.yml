@@ -44,7 +44,7 @@ jobs:
         id: override
         run: echo "relevant=true" >> "$GITHUB_OUTPUT"
 
-  # The specs need the pinned 5.0.0 node, so they run in the local phase gate; CI keeps them compiling.
+  # The specs need the pinned Aztec node, so they run in the local phase gate; CI keeps them compiling.
   integration:
     name: lint, typecheck
     needs: changes

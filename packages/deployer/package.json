@@ -19,14 +19,14 @@
 		"verify:testnet": "bun src/cli.ts verify testnet"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.2.0",
-		"@aztec/constants": "5.2.0",
-		"@aztec/ethereum": "5.2.0",
-		"@aztec/foundation": "5.2.0",
-		"@aztec/noir-contracts.js": "5.2.0",
-		"@aztec/standard-contracts": "5.2.0",
-		"@aztec/stdlib": "5.2.0",
-		"@aztec/wallets": "5.2.0",
+		"@aztec-labs/aztec.js": "6.0.0-rc.1",
+		"@aztec-labs/constants": "6.0.0-rc.1",
+		"@aztec-labs/ethereum": "6.0.0-rc.1",
+		"@aztec-labs/foundation": "6.0.0-rc.1",
+		"@aztec-labs/noir-contracts.js": "6.0.0-rc.1",
+		"@aztec-labs/standard-contracts": "6.0.0-rc.1",
+		"@aztec-labs/stdlib": "6.0.0-rc.1",
+		"@aztec-labs/wallets": "6.0.0-rc.1",
 		"@inference-money/bridge-core": "workspace:*",
 		"@inference-money/local-network": "workspace:*",
 		"viem": "2.56.7"

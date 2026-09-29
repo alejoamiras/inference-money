@@ -3,7 +3,7 @@
 #
 #   run-txe-tests.sh [--crate token_bridge|keystone] [nargo flags...] [-- test names...]
 #
-#   - aztec-nargo's test runner does not resolve TXE oracles; @aztec/txe serves them over JSON-RPC.
+#   - aztec-nargo's test runner does not resolve TXE oracles; @aztec-labs/txe serves them over JSON-RPC.
 #   - The server resolves dependency contracts from the crate's target/ as "<dep_package>-<Contract>.json", and
 #     they must be transpiled artifacts (the committed proxy; aztec-standards' published Token).
 #   - The server's dependency set is the committed ../toolchain lockfile (frozen), never an ad-hoc install.
@@ -94,7 +94,7 @@ start_server() {
     # Node, not bun: the native lmdb binding crashes under bun. `exec` makes $! the server, not a subshell.
     # FORCE_COLOR=0: under CI the logger colors its lines, and owned_up's anchored match then misses.
     (cd "$TOOLCHAIN_DIR" && TXE_PORT="$TXE_PORT" FORCE_COLOR=0 NODE_OPTIONS="--max-old-space-size=8192" \
-      exec node node_modules/@aztec/txe/dest/bin/index.js >"$TXE_LOG" 2>&1) &
+      exec node node_modules/@aztec-labs/txe/dest/bin/index.js >"$TXE_LOG" 2>&1) &
     TXE_PID=$!
     for _ in $(seq 1 60); do
       owned_up && return 0
