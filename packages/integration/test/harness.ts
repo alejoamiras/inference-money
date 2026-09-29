@@ -1,8 +1,8 @@
 import { rmSync } from "node:fs"
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
-import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	type BridgeManifest,
 	type OutboxReader,

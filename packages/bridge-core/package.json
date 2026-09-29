@@ -13,16 +13,17 @@
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
-		"@aztec-foundation/aztec-standards": "5.0.1",
-		"@aztec/aztec.js": "5.2.0",
-		"@aztec/constants": "5.2.0",
-		"@aztec/foundation": "5.2.0",
-		"@aztec/stdlib": "5.2.0",
+		"@aztec-foundation/aztec-standards": "6.0.0-rc.1",
+		"@aztec-labs/aztec.js": "6.0.0-rc.1",
+		"@aztec-labs/constants": "6.0.0-rc.1",
+		"@aztec-labs/foundation": "6.0.0-rc.1",
+		"@aztec-labs/noir-contracts.js": "6.0.0-rc.1",
+		"@aztec-labs/stdlib": "6.0.0-rc.1",
 		"viem": "2.56.7",
 		"zod": "4.6.5"
 	},
 	"devDependencies": {
-		"@aztec/l1-artifacts": "5.2.0",
+		"@aztec-foundation/l1-artifacts": "6.0.0-rc.1",
 		"@types/bun": "1.4.2",
 		"typescript": "6.0.3"
 	}

@@ -2,16 +2,16 @@
 	"name": "@inference-money/integration",
 	"version": "0.0.0",
 	"private": true,
-	"description": "Integration suite: bridge-core flows against a per-run local network (node 5.0.0) with the bridge deployed.",
+	"description": "Integration suite: bridge-core flows against a per-run local network with the bridge deployed.",
 	"type": "module",
 	"scripts": {
 		"test:integration": "INTEGRATION=1 bun test --preload ../../test-preload.ts --preload ./test/setup.ts --timeout 900000 ./test",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.2.0",
-		"@aztec/stdlib": "5.2.0",
-		"@aztec/wallets": "5.2.0",
+		"@aztec-labs/aztec.js": "6.0.0-rc.1",
+		"@aztec-labs/stdlib": "6.0.0-rc.1",
+		"@aztec-labs/wallets": "6.0.0-rc.1",
 		"@inference-money/bridge-core": "workspace:*",
 		"@inference-money/deployer": "workspace:*",
 		"@inference-money/local-network": "workspace:*",

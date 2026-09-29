@@ -1,4 +1,4 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { assertExitIntent, type BridgeManifest } from "@inference-money/bridge-core"
 import { useId, useState } from "react"
 import { type Address, getAddress, isAddress } from "viem"

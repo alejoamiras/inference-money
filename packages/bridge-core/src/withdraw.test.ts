@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "bun:test"
-import type { Fr } from "@aztec/aztec.js/fields"
+import type { Fr } from "@aztec-labs/aztec.js/fields"
 import {
 	type Address,
 	ContractFunctionExecutionError,

@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs"
 import { resolve } from "node:path"
-import { Fr } from "@aztec/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { Hex } from "viem"
 
 export interface TestnetSecrets {

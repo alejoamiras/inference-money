@@ -1,19 +1,14 @@
 /**
- * A stock `@aztec/wallets` embedded wallet plus the one thing a wallet-sdk wallet needs and the base class lacks: a
+ * A stock `@aztec-labs/wallets` embedded wallet plus the one thing a wallet-sdk wallet needs and the base class lacks: a
  * capability grant. Every bridge transaction still runs through the stock `BaseWallet` path, which is what the suite
  * tests the app against.
  */
-import { type InteractionWaitOptions, NO_WAIT, type SendReturn } from "@aztec/aztec.js/contracts"
-import { Fq, Fr } from "@aztec/aztec.js/fields"
-import type { SendOptions } from "@aztec/aztec.js/wallet"
-import { type ExecutionPayload, PendingTxReceipt, type Tx } from "@aztec/stdlib/tx"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import {
-	authorizeLegacyHandshakeReads,
-	registerLegacyHandshakeRegistry,
-	sponsoredFpcArtifact,
-	sponsorInstance,
-} from "@inference-money/bridge-core"
+import { type InteractionWaitOptions, NO_WAIT, type SendReturn } from "@aztec-labs/aztec.js/contracts"
+import { Fq, Fr } from "@aztec-labs/aztec.js/fields"
+import type { SendOptions } from "@aztec-labs/aztec.js/wallet"
+import { type ExecutionPayload, PendingTxReceipt, type Tx } from "@aztec-labs/stdlib/tx"
+import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
+import { sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
 import { type Grant, grantFrom } from "./guard"
 import type { Seed, TestWalletIdentity } from "./profile"
 
@@ -36,13 +31,8 @@ export class TestWallet extends EmbeddedWallet {
 	private imported = 0
 
 	static async createFor(identity: TestWalletIdentity): Promise<TestWallet> {
-		// Ephemeral, so nothing outlives the page; unproven, since the local network accepts fake proofs. The hook lets the
-		// 5.0.0 SponsoredFPC read the handshake registry this 5.2.0 PXE does not preload.
-		const wallet = await TestWallet.create(identity.nodeUrl, {
-			ephemeral: true,
-			pxe: { proverEnabled: false, hooks: { authorizeUtilityCall: authorizeLegacyHandshakeReads } },
-		})
-		await registerLegacyHandshakeRegistry(wallet)
+		// Ephemeral, so nothing outlives the page; unproven, since the local network accepts fake proofs.
+		const wallet = await TestWallet.create(identity.nodeUrl, { ephemeral: true, pxe: { proverEnabled: false } })
 		await wallet.registerContract(await sponsorInstance(), sponsoredFpcArtifact)
 		wallet.observeSubmissions()
 		return wallet

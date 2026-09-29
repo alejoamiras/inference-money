@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "bun:test"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { NO_WAIT } from "@aztec/aztec.js/contracts"
-import { Fr } from "@aztec/aztec.js/fields"
-import { TxStatus } from "@aztec/aztec.js/tx"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { NO_WAIT } from "@aztec-labs/aztec.js/contracts"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { getAddress, zeroAddress } from "viem"
 import { SponsorUnavailableError } from "./claim"
 import {

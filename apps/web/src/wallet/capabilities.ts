@@ -1,5 +1,5 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
 import type { BridgeManifest } from "@inference-money/bridge-core/manifest"
 
 interface ScopedFunction {

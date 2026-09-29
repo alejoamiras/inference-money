@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { BlockNumber } from "@aztec/foundation/branded-types"
+import { BlockNumber } from "@aztec-labs/foundation/branded-types"
 import { depositStatus, type ProvenBlockSource, withdrawStatus } from "./status"
 
 /** A node whose proven tip is `n`; any other tag would be the wrong tip. */

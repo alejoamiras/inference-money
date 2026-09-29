@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "bun:test"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { Fr } from "@aztec/aztec.js/fields"
-import { MerkleTreeId } from "@aztec/stdlib/trees"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import { claim, L2_DONE, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable, waitClaimFinalized } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { fakeWallet } from "./test/fake-wallet"
@@ -22,7 +22,7 @@ const fail = (message: string) => () => {
 const NO_NULLIFIER: NullifierNode = { findLeavesIndexes: async (_b, _t, leaves) => leaves.map(() => undefined) }
 
 describe("registerSponsor", () => {
-	const SPONSOR = "0x0628377e98bca5913dc86765ad0758f7b7aa83eac49079c6fba125807b393fe1" as const
+	const SPONSOR = "0x06a9fa0208c78509921b0487a6b5cd5c2e93baf17de1a18d310f65a3cc1d924b" as const
 
 	it("registers the pinned sponsor, and refuses a manifest naming any other", async () => {
 		const registered: string[] = []
@@ -128,9 +128,9 @@ describe("waitClaimFinalized", () => {
 describe("waitClaimable", () => {
 	const noSleep = async () => {}
 
-	it("waits for the checkpoint, then for the wallet's anchor, then resolves", async () => {
-		const checkpoints = [undefined, 7, 7]
-		const node = { getL1ToL2MessageCheckpoint: async () => checkpoints.shift() }
+	it("waits for the message's inclusion, then for the wallet's anchor, then resolves", async () => {
+		const witnesses = [undefined, [7n, []], [7n, []]]
+		const node = { getL1ToL2MessageMembershipWitness: async () => witnesses.shift() }
 		let sims = 0
 		const { wallet } = fakeWallet({
 			simulate: () => {
@@ -143,13 +143,13 @@ describe("waitClaimable", () => {
 	})
 
 	it("rethrows an unexpected simulation error and gives up after its attempts", async () => {
-		const node = { getL1ToL2MessageCheckpoint: async () => 7 }
+		const node = { getL1ToL2MessageMembershipWitness: async () => [7n, []] }
 		const broken = fakeWallet({ simulate: fail("Assertion failed: bridge is paused") })
 		await expect(
 			waitClaimable(await ticket("public"), node, broken.wallet, M, recipient, undefined, { sleep: noSleep }),
 		).rejects.toThrow("paused")
 
-		const never = { getL1ToL2MessageCheckpoint: async () => undefined }
+		const never = { getL1ToL2MessageMembershipWitness: async () => undefined }
 		const { wallet } = fakeWallet()
 		await expect(
 			waitClaimable(await ticket("public"), never, wallet, M, recipient, undefined, { sleep: noSleep, attempts: 3 }),

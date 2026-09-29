@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import {
 	type Address,
 	encodeAbiParameters,

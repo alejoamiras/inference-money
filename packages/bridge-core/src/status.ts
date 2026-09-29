@@ -1,4 +1,4 @@
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { type BridgeProgress, computeProgress } from "./progress"
 
 /** The node's proven tip; aztec.js 5.x names it by tag, not by a dedicated getter. */

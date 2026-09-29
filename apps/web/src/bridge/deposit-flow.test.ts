@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { type DepositDraft, SponsorUnavailableError } from "@inference-money/bridge-core"
 import { pad } from "viem"
 import { describe, expect, it, vi } from "vitest"

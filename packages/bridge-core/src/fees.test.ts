@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { GasFees } from "@aztec/stdlib/gas"
+import { GasFees } from "@aztec-labs/stdlib/gas"
 import { type MinFeeNode, predictedWorstMinFees } from "./fees"
 
 const CURRENT = new GasFees(1n, 1n)
