@@ -1,0 +1,59 @@
+import { describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { OutboxAbi } from "@aztec/l1-artifacts/OutboxAbi"
+import { RegistryAbi } from "@aztec/l1-artifacts/RegistryAbi"
+import { RollupAbi } from "@aztec/l1-artifacts/RollupAbi"
+import { OUTBOX_ABI, PERMIT2_DEPOSIT_ROUTER_ABI, REGISTRY_ABI, ROLLUP_ABI, TOKEN_PORTAL_ABI } from "./abi"
+
+type Param = { name?: string; type: string; indexed?: boolean; components?: readonly Param[] }
+type Entry = { type: string; name?: string; stateMutability?: string; inputs?: readonly Param[]; outputs?: readonly Param[] }
+
+const param = (p: Param): unknown => ({
+	name: p.name ?? "",
+	type: p.type,
+	...(p.indexed !== undefined ? { indexed: p.indexed } : {}),
+	...(p.components ? { components: p.components.map(param) } : {}),
+})
+const shape = (e: Entry) => ({
+	type: e.type,
+	name: e.name,
+	stateMutability: e.stateMutability,
+	inputs: (e.inputs ?? []).map(param),
+	outputs: (e.outputs ?? []).map(param),
+})
+
+/** Every hand-written entry must equal the source entry of the same kind and name (overloads: any one of them). */
+function expectPinned(ours: readonly Entry[], source: readonly Entry[]) {
+	for (const e of ours) {
+		const candidates = source.filter((s) => s.type === e.type && s.name === e.name).map(shape)
+		expect(candidates, `${e.type} ${e.name}`).toContainEqual(shape(e))
+	}
+}
+
+// Read inside `it`, never at collection: a missing `out/` must fail these tests, not crash the whole run.
+const EVM_OUT = join(import.meta.dir, "..", "..", "..", "contracts", "evm", "out")
+const forgeAbi = (contract: string): Entry[] => {
+	const path = join(EVM_OUT, `${contract}.sol`, `${contract}.json`)
+	try {
+		return (JSON.parse(readFileSync(path, "utf8")) as { abi: Entry[] }).abi
+	} catch (e) {
+		throw new Error(`${path} unreadable: build the contracts first (bun run --cwd contracts/evm build)`, { cause: e })
+	}
+}
+
+describe("hand-written ABIs equal the compiled contracts", () => {
+	it("Permit2DepositRouter", () => expectPinned(PERMIT2_DEPOSIT_ROUTER_ABI, forgeAbi("Permit2DepositRouter")))
+	it("TokenPortal (with the Outbox errors its withdraw bubbles)", () =>
+		expectPinned(TOKEN_PORTAL_ABI, [...forgeAbi("TokenPortal"), ...(OutboxAbi as readonly Entry[])]))
+	it("a drifted entry fails the pin", () => {
+		const deposit = PERMIT2_DEPOSIT_ROUTER_ABI[0]
+		const swapped = { ...deposit, inputs: [deposit.inputs[1], deposit.inputs[0], ...deposit.inputs.slice(2)] }
+		expect(() => expectPinned([swapped], forgeAbi("Permit2DepositRouter"))).toThrow()
+	})
+	it("Outbox, Registry, Rollup", () => {
+		expectPinned(OUTBOX_ABI, OutboxAbi as readonly Entry[])
+		expectPinned(REGISTRY_ABI, RegistryAbi as readonly Entry[])
+		expectPinned(ROLLUP_ABI, RollupAbi as readonly Entry[])
+	})
+})

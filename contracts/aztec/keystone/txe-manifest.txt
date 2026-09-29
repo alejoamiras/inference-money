@@ -1,0 +1,9 @@
+# Every test run-txe-tests.sh requires to pass; a dropped module or skipped file fails the gate.
+claim_secret_dom_sep_is_pinned
+claim_secret_hash_vectors_match_ts
+claim_secret_vectors_match_ts
+fuzz_derive_changes_with_recipient
+fuzz_derive_changes_with_salt
+mint_to_private_matches_l1
+mint_to_public_matches_l1
+withdraw_matches_l1

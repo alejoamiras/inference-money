@@ -1,0 +1,6 @@
+{
+	"*.{ts,tsx,js,jsx,json,jsonc}": ["biome check --write --no-errors-on-unmatched"],
+	"*.sh": ["shellcheck"],
+	".github/workflows/*.yml": ["actionlint"],
+	"**/package.json": ["sort-package-json"]
+}

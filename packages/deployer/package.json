@@ -1,0 +1,38 @@
+{
+	"name": "@inference-money/deployer",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"deploy:local": "bun src/cli.ts deploy local",
+		"deploy:testnet": "bun src/cli.ts deploy testnet",
+		"probe:testnet": "bun src/cli.ts probe testnet",
+		"secrets:scan": "bun src/cli.ts scan secrets",
+		"smoke:testnet": "bun src/cli.ts smoke testnet",
+		"spike:proof-compat": "bun src/cli.ts spike testnet",
+		"test": "bun test --preload ../../test-preload.ts src",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"verify:local": "bun src/cli.ts verify local",
+		"verify:testnet": "bun src/cli.ts verify testnet"
+	},
+	"dependencies": {
+		"@aztec/aztec.js": "5.2.0",
+		"@aztec/constants": "5.2.0",
+		"@aztec/ethereum": "5.2.0",
+		"@aztec/foundation": "5.2.0",
+		"@aztec/noir-contracts.js": "5.2.0",
+		"@aztec/standard-contracts": "5.2.0",
+		"@aztec/stdlib": "5.2.0",
+		"@aztec/wallets": "5.2.0",
+		"@inference-money/bridge-core": "workspace:*",
+		"@inference-money/local-network": "workspace:*",
+		"viem": "2.56.7"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.2",
+		"typescript": "6.0.3"
+	}
+}
