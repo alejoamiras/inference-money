@@ -8,7 +8,7 @@ harden: "/harden security scoped to contracts/ only, after all arcs and the fina
 budget: "recon 3 agents (done); /code-review off; codex at high on gpt-6-astra"
 quality_bar: production-grade code (value-bearing design), deployed to local + Sepolia/Aztec testnet in this plan
 source: "alejoamiras/nulo @ 4df5eae5 (V1) + test-harness patterns from 6611f861 (freeze)"
-status: v5 — approved by the user 2026-09-25 (codex r5 APPROVE); delivered 2026-09-28 with Phase 7 deferred (D25)
+status: v5 — approved by the user 2026-09-25 (codex r5 APPROVE); delivered 2026-09-28 (D25); arcs 1–3 merge without testnet, arc 4 carries Aztec v6 + testnet (D26)
 ---
 
 # usdc-bridge — USDC-only L1 ↔ Aztec bridge for Galactica
@@ -649,7 +649,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 - Commands: `bun run test:integration`
 - Pass: all specs green against node 5.0.0 with JS 5.2.0 (or the fallback pin, applied and logged); no owned processes left.
 
-#### Phase 7 — Testnet deploy + Node smoke (deferred, [D25])
+#### Phase 7 — Testnet deploy + Node smoke (moved to arc 4, [D26])
 - **Precondition:** `.env.testnet` exists with mode 0600 (provisioned), and the L1 address holds ≥ 5 Circle Sepolia USDC (user funds it). If either is missing, surface and hold. Never create or rotate operational keys autonomously.
 - The deploy and smoke use ephemeral wallets/PXEs only. [D24] The deploy pays with self-funded Fee Juice; immediately before the private smoke legs, bridge ≥ 100 FJ to the canonical SponsoredFPC (a public claim anyone may make) and re-check its balance covers the two private legs.
 - Commit `deployments/testnet.json`. Pass the user the pause-key reminder (accepted: they keep the key).
@@ -687,7 +687,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 - CI: `web.yml` + `bridge-core.yml`.
 
 **Validation gate** (lint + typecheck + component + e2e smoke):
-- Commands: `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && bun run --cwd apps/web build && bun run test:e2e -- connect.spec.ts`
+- Commands: `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build && bun run test:e2e -- connect.spec.ts`
 - Pass: exit 0. Session store tests cover stale-flow discard, the duplicate-id anti-spoof path, grant parsing (bidi/length caps), and 1 vs many accounts. The connect spec passes (Inference 8 proven).
 
 #### Phase 9 — Bridge UI
@@ -705,7 +705,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 - **Copy review.** Plain language, no jargon.
 
 **Validation gate** (lint + typecheck + component):
-- Commands: `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && bun run --cwd apps/web build`
+- Commands: `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build`
 - Pass: exit 0. Component tests cover:
   - amount validation
   - private mode never putting the recipient in the witness/tx
@@ -736,12 +736,12 @@ Specs:
 Each spec carries its `docs/assurance-map.md` cell id.
 
 Also:
-- `build:testnet` embeds `deployments/testnet.json`; a test asserts the embedded manifest equals the committed file.
+- Arc 4 ([D26]): `build:testnet` embeds `deployments/testnet.json`; a test asserts the embedded manifest equals the committed file.
 - `_e2e.yml` reusable workflow (`workflow_dispatch` + `e2e` label).
 
 **Validation gate** (e2e):
-- Commands: `bun run test:e2e && bun run test:e2e && bun run --cwd apps/web build:testnet`
-- Pass: all specs green on two consecutive runs; zero egress violations; no owned processes left; the testnet build succeeds with the manifest identity check.
+- Commands: `bun run test:e2e && bun run test:e2e && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build`
+- Pass: all specs green on two consecutive runs; zero egress violations; no owned processes left; the fixture-manifest build succeeds (the testnet build and its identity check are arc 4's, [D26]).
 
 **Arc 3 boundary:** codex loop.
 
@@ -769,6 +769,7 @@ Also:
 | D23 | V2 QA port | adopt the filtered list (§ V2 QA port) | port V2 wholesale (factory/hub/fuel surface absent); keep V1's QA (user asked for V2-grade) | user request + 3 sweeps | settled |
 | D24 | Testnet fee path | self-funded Fee Juice: the throwaway L1 key mints the testnet fee asset from the permissionless `FeeAssetHandler` (1000 FEE/mint) and bridges it via `FeeJuicePortal`; bridge ≥ 100 FJ to the canonical SponsoredFPC before the private smoke legs so the sponsored-payer assertion still runs | SponsoredFPC-only (drained: 1.20 FJ vs ≈117 FJ budget); self-fund without top-up (loses the testnet sponsored-payer proof); hold for a refill (may never come) | Phase 1 probe; user 2026-09-26 | settled |
 | D25 | Delivery before testnet | open the 3-PR stack now; Phase 7 (and the testnet-manifest parts of Phases 8–10: `apps/web build`, `build:testnet`) follow once a public node serves Sepolia's new canonical rollup (`2914217885`, switched 2026-09-28), re-pinning as needed; the arc 3 `web` CI check stays red until `deployments/testnet.json` lands | wait and re-pin before any PR (plan as written); hold | user 2026-09-28, after the Phase 7 probe failed closed on the rollup switch | settled |
+| D26 | Testnet as its own arc | a 4th PR carries the Aztec v6 bump, Phase 7 and Phase 10's `build:testnet`; arcs 1–3 merge now; the Phase 8–10 gates and CI's `web` job build against `apps/web/src/test/manifest.fixture.json` | hold arcs 1–3 until v6 ships (D25 as written) | user 2026-09-29: "PR 4 does the Testnet work, let's merge everything else" | settled |
 | D10 | viem | canonical only; viem outbox reader; import ban | dual viem + `L1Port` seam | fable M3, codex (untyped seam) | settled |
 | D11 | Integration location | `packages/integration` | inside bridge-core (dependency cycle) | fable M4 | settled |
 | D12 | L1 transport | injected connector only | public RPC `http()` (egress leak) | fable M5 | settled |
@@ -874,8 +875,9 @@ Also:
 | Arc | Branch | Phases | Stacks on | `/code-review` |
 |---|---|---|---|---|
 | 1 contracts | `worktree-usdc-bridge` | 1–3 | `main` (root commit) | off |
-| 2 core + testnet | `usdc-bridge-core` | 4–7 | arc 1 | off |
+| 2 core | `usdc-bridge-core` | 4–6 | arc 1 | off |
 | 3 web | `usdc-bridge-web` | 8–10 | arc 2 | off |
+| 4 v6 + testnet ([D26]) | TBD | 7, plus Phase 10's `build:testnet` | `main`, after arcs 1–3 merge | off |
 
 - **During implementation:** arcs are local branches (`git switch -c` at each boundary). Pushing branches to checkpoint is allowed; there is no PR, so no CI runs.
 - **Delivery (after every loop + `/harden` converge; [D25] delivers before Phase 7):**
@@ -885,6 +887,7 @@ Also:
   4. `gh pr edit` each body.
   5. `gh pr checks --watch`.
 - `gh stack merge` is the user's call.
+- **[D26]:** arcs 1–3 merge without the testnet run. Arc 4 bumps every Aztec pin to v6, runs Phase 7, commits `deployments/testnet.json`, and puts `build:testnet` back in `web.yml` (which builds against the test fixture manifest until then).
 - Update `implementations-plan/index.md`; suggest `agent-worktree done usdc-bridge` after merge.
 
 ---

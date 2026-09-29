@@ -195,3 +195,11 @@ The arcs had never run on GitHub. After `gh stack submit`, two failures appeared
 - **ubuntu-24.04 ships shellcheck 0.9.0.** Running that exact binary over every tracked script also found SC2317 and SC2015 in `apps/web/e2e/agent.sh`. Check against CI's version, not the local 0.11.
 
 `web` stays red by design: `build:testnet` needs `deployments/testnet.json` (D25).
+
+## Split the testnet work into arc 4 (2026-09-29)
+
+- Aztec v6 is still unreleased: no stable npm 6.x (only nightlies up to 2026-08-28), no aztec-packages or aztec-standards v6.
+- A 12 h watcher saw the public node stay on rollup `1821665230` throughout.
+- The user split the testnet work into arc 4 (D26) and chose to merge arcs 1–3 now.
+- `vite build` defaults to `deployments/testnet.json`, so the Phase 8–10 gates were blocked by the testnet deploy too, not just Phase 10's `build:testnet`.
+- Their gates and CI's `web` job now build against the test fixture manifest.
