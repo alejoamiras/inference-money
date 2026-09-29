@@ -84,3 +84,7 @@ The flows are plain TS controllers in `src/bridge/`, apart from React. Each keep
 - `bun run test` (every workspace): exit 0. bridge-core 117 pass.
 - `BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build`: exit 0.
 - Literal `bun run --cwd apps/web build`: exit 1, because `deployments/testnet.json` is absent (Phase 7).
+
+## Gate after the arc 4 split (2026-09-29): the build now uses the fixture manifest, per the revised gate
+
+- `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build`: exit 0 (93 component tests pass, 1 skipped).

@@ -203,3 +203,23 @@ The arcs had never run on GitHub. After `gh stack submit`, two failures appeared
 - The user split the testnet work into arc 4 (D26) and chose to merge arcs 1–3 now.
 - `vite build` defaults to `deployments/testnet.json`, so the Phase 8–10 gates were blocked by the testnet deploy too, not just Phase 10's `build:testnet`.
 - Their gates and CI's `web` job now build against the test fixture manifest.
+
+## Gate after the arc 4 split (2026-09-29): the build now uses the fixture manifest, per the revised gate
+
+- `bun run test:e2e && bun run test:e2e && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build`:
+  - run 1: 18/18 passed (11.3 m);
+  - run 2: 18/18 passed (11.6 m);
+  - the build: exit 0.
+- The egress fence held on every test.
+- Afterwards no registry rows and no owned processes were left.
+
+## Codex review of the post-delivery diff (`71e74f7..HEAD`)
+
+Session `01a0eea8-1c52-7602-9b22-b41f3763c00c`, Astra at high effort.
+
+- **Round 1**, one material finding: `test-preload.ts` was missing from the path filters of the three workflows whose suites load it. Fixed.
+- **Round 1 nitpicks**, all accepted:
+  - a guard in `web.yml` that fails once `deployments/testnet.json` exists, so `build:testnet` cannot stay off;
+  - roadmap and plan wording;
+  - the preload comment now says the no-op keeps bun's structural equality.
+- **Round 2:** "No new material findings."

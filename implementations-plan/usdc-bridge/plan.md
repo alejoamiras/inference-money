@@ -666,7 +666,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 
 ### Arc 3 — web
 
-#### Phase 8 — App scaffold + wallet layer + e2e harness (connect spec)
+#### Phase 8 — App scaffold + wallet layer + e2e harness (connect spec) ✓
 - Vite + React 19 + TS strict + Tailwind v4 (`@tailwindcss/vite`, `@theme`) + shadcn/ui + `tailwind-variants`. Placeholder look (neutral palette, name "USDC Bridge"). The network config embeds the manifest at build time, with no prod override.
 - **L1:** wagmi 3 + injected connector, `unstable_connector(injected)` transport, chain guard.
 - **Aztec session:** port `createAztecWalletSession.ts` to an external store + `useSyncExternalStore`, covering discovery (1 s ambiguity window, anti-spoof), picker, emoji verification, capabilities, account chooser and registration.
@@ -690,7 +690,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 - Commands: `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build && bun run test:e2e -- connect.spec.ts`
 - Pass: exit 0. Session store tests cover stale-flow discard, the duplicate-id anti-spoof path, grant parsing (bidi/length caps), and 1 vs many accounts. The connect spec passes (Inference 8 proven).
 
-#### Phase 9 — Bridge UI
+#### Phase 9 — Bridge UI ✓
 - **Direction toggle.** L1 → L2 / L2 → L1.
 - **Deposit form.** 6 dp amount validation, and a public/private switch with privacy copy: "hides **who** receives, not **how much** or **when**". The Permit2 approval step carries the unlimited-approval risk note. The review screen shows exact values. The draft is created before signing, with a stepper (approve → sign → L1 confirmed → message ready → claim → done) and "keep waiting / re-check" on receipt trouble.
 - **Withdraw form.** Recipient defaults to the connected L1 account. Stepper: exit → proving progress → L1 withdraw → done.
@@ -718,7 +718,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
   - the Web Lock is held across the "hash returned, not yet mined" interval
   - stepper transitions from a fake core
 
-#### Phase 10 — Full e2e + testnet build
+#### Phase 10 — Full e2e + testnet build ✓ (the testnet build is arc 4's, [D26])
 Specs:
 - public deposit → claim
 - private deposit → claim, where the test wallet's submitted payer == SponsoredFPC (**mandatory** locally)
