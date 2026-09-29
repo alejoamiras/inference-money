@@ -62,8 +62,10 @@ jobs:
       - run: bunx biome ci apps/web
       - run: bun run --cwd apps/web typecheck
       - run: bun run --cwd apps/web test:components
-      # The shipped artifact: the committed testnet manifest and nothing else, with its generated _headers.
-      - run: bun run --cwd apps/web build:testnet
+      # No testnet manifest is committed yet: build against the test fixture, which still exercises the bundle and _headers.
+      - run: bun run --cwd apps/web build
+        env:
+          BRIDGE_MANIFEST: apps/web/src/test/manifest.fixture.json
       - run: test -s apps/web/dist/_headers
 
   # The browser suite runs only on request, and then whatever the PR touches: it deploys the contracts too, so no
