@@ -1,0 +1,37 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+libs = ["node_modules"]
+solc = "0.8.28"
+evm_version = "cancun"
+via_ir = true
+# The isolated linker symlinks each dependency into the repo-root store; solc must be allowed to read it.
+allow_paths = ["../../node_modules"]
+# Relative targets through this package's own node_modules symlinks keep source unit names machine-independent,
+# so bytecode metadata reproduces anywhere. scripts/check-remappings.ts asserts every target resolves.
+auto_detect_remappings = false
+remappings = [
+  "@oz/=node_modules/@openzeppelin/contracts/",
+  "@aztec/=node_modules/@aztec/l1-artifacts/l1-contracts/src/",
+  "@aztec-blob-lib/=node_modules/@aztec/l1-artifacts/l1-contracts/src/core/libraries/rollup/",
+  "forge-std/=node_modules/forge-std/src/",
+]
+
+# Pinned rather than inherited, so a toolchain bump cannot silently shrink the explored input space.
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 256
+depth = 500
+# Handlers bound their inputs and catch the reverts they expect, so any other revert is a regression, not noise.
+fail_on_revert = true
+
+[lint]
+# Tests cast revert data to selectors and mask fuzz deltas to 160 bits on purpose; src/ is gated with `-D warnings`.
+ignore = ["test/**"]
+
+[fmt]
+line_length = 120
+tab_width = 4

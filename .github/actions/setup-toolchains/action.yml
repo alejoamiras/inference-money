@@ -1,0 +1,98 @@
+name: Setup toolchains
+description: >
+  Bun (+ frozen install) always; Foundry, halmos, the Aztec CLI and the Aztec node on request. Every
+  version is read from toolchain.json. Callers check out the repo first.
+
+inputs:
+  foundry:
+    description: Install Foundry at toolchain.json's pin.
+    required: false
+    default: "false"
+  halmos:
+    description: Install halmos at toolchain.json's pin (implies Python).
+    required: false
+    default: "false"
+  aztec:
+    description: Node, the pinned nargo release and contracts/aztec/toolchain (compile, TXE).
+    required: false
+    default: "false"
+  aztec-node:
+    description: Node and the pinned Aztec node + its Foundry for the local network (exports AZTEC_NODE_HOME).
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Read toolchain.json
+      id: pins
+      shell: bash
+      run: |
+        for key in bun foundry halmos nargo node; do
+          echo "$key=$(jq -er --arg k "$key" '.[$k]' toolchain.json)" >> "$GITHUB_OUTPUT"
+        done
+
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ steps.pins.outputs.bun }}
+
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-${{ hashFiles('bun.lock', 'contracts/aztec/toolchain/bun.lock', 'packages/local-network/toolchain/bun.lock') }}
+        restore-keys: ${{ runner.os }}-bun-${{ steps.pins.outputs.bun }}-
+
+    - shell: bash
+      run: bun install --frozen-lockfile
+
+    # A newer Foundry routes test-contract creation through a cheatcode halmos 0.3.3 lacks: bump both together.
+    - if: inputs.foundry == 'true' || inputs.halmos == 'true'
+      uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+      with:
+        version: v${{ steps.pins.outputs.foundry }}
+
+    # pipx, not pip: the runner's system Python is externally managed (PEP 668) and refuses `pip install --user`.
+    - if: inputs.halmos == 'true'
+      shell: bash
+      env:
+        HALMOS: ${{ steps.pins.outputs.halmos }}
+      run: |
+        pipx install "halmos==$HALMOS"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    # The aztec CLI, the TXE server and the node run on node.
+    - if: inputs.aztec == 'true' || inputs.aztec-node == 'true'
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+
+    # No aztec-up installer: it runs unpinned remote scripts (noirup, foundryup) and an unlocked npm install. The JS
+    # toolchain (aztec CLI, bb, TXE) comes from contracts/aztec/toolchain's frozen lockfile; nargo is the noir-lang
+    # release, checked against its pin before extraction. A compiler that lies can make `compile.sh --check` agree with
+    # any committed artifact, so a `nargo` bump without a matching nargo-<version>.sha256 fails here.
+    - if: inputs.aztec == 'true'
+      shell: bash
+      env:
+        NARGO_VERSION: ${{ steps.pins.outputs.nargo }}
+        PINS: ${{ github.action_path }}/nargo-${{ steps.pins.outputs.nargo }}.sha256
+      run: |
+        dir="$RUNNER_TEMP/nargo"
+        asset=nargo-x86_64-unknown-linux-gnu.tar.gz
+        mkdir -p "$dir"
+        curl -fsSL "https://github.com/noir-lang/noir/releases/download/v${NARGO_VERSION}/$asset" -o "$dir/$asset"
+        (cd "$dir" && grep -v '^#' "$PINS" | sha256sum -c -)
+        tar -xzf "$dir/$asset" -C "$dir" nargo
+        echo "NARGO=$dir/nargo" >> "$GITHUB_ENV"
+
+    - if: inputs.aztec == 'true'
+      shell: bash
+      working-directory: contracts/aztec/toolchain
+      run: bun install --frozen-lockfile
+
+    # Same reasoning as above: no aztec-up. The script installs the node from a frozen lockfile and the Foundry
+    # release it ships with against a pinned digest; the local network resolves both through AZTEC_NODE_HOME.
+    - if: inputs.aztec-node == 'true'
+      shell: bash
+      run: |
+        bash packages/local-network/scripts/install-node.sh "$RUNNER_TEMP/aztec-node"
+        echo "AZTEC_NODE_HOME=$RUNNER_TEMP/aztec-node" >> "$GITHUB_ENV"

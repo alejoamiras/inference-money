@@ -1,0 +1,6 @@
+[install]
+# Blocks packages published in the last 7 days: npm token-compromise worms are usually pulled within hours.
+# CVE bypass: add `minimumReleaseAgeExcludes = ["<name>"]`, install the patched version, remove the entry in the same PR.
+minimumReleaseAge = 604800
+# Per-workspace symlinked node_modules: a workspace resolves only what it declares.
+linker = "isolated"

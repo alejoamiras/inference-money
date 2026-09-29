@@ -1,0 +1,11 @@
+// An assets-only Worker: no script, so nothing runs server-side and the bundle is the whole app.
+// Workers Builds runs `bun run --cwd apps/web build:testnet`, which embeds deployments/testnet.json and nothing else.
+// Headers (COOP/COEP/CSP/frame-ancestors) ship in dist/_headers, generated from that same manifest.
+{
+	"name": "usdc-bridge",
+	"compatibility_date": "2026-09-01",
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application"
+	}
+}

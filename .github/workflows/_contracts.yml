@@ -1,0 +1,59 @@
+name: Contracts (reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  evm:
+    name: forge + halmos
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchains
+        with:
+          foundry: "true"
+          halmos: "true"
+      - name: Remapping check (unit)
+        run: bun run --cwd contracts/evm test
+      # fmt, lint (src), unit, fuzz and invariant suites; the Sepolia fork suite runs locally in the phase gate.
+      - name: Forge (hermetic)
+        run: bun run test:evm
+      - name: Gas snapshot
+        run: bun run test:evm:gas
+      # Exact proof names and per-contract counts: a renamed, deleted or failing proof fails the job.
+      - name: Halmos (strict)
+        run: bun run test:evm:formal
+
+  noir:
+    name: aztec.nr (artifacts, sole-consumer, TXE)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchains
+        with:
+          aztec: "true"
+      # ~/nargo starts empty (deliberately uncached): every dependency is fetched and verified against its pin, and
+      # the final --exact step proves nargo fetched nothing outside the pinned table.
+      - name: Noir dependencies (fetch + verify)
+        run: |
+          bash contracts/aztec/scripts/noir-deps.sh --self-test
+          bash contracts/aztec/scripts/noir-deps.sh
+      - name: Identity check (unit)
+        run: bun run --cwd contracts/aztec test
+      - name: Committed artifacts match source (class id + ABI)
+        run: bash contracts/aztec/scripts/compile.sh --check
+      - name: TXE suites (manifest-gated; token_bridge + keystone)
+        run: bun run test:noir
+      - name: Sole-consumer guard
+        run: |
+          bash contracts/aztec/scripts/check-sole-consumer.sh --self-test
+          bash contracts/aztec/scripts/check-sole-consumer.sh
+      - name: No unpinned Noir dependency was fetched
+        run: bash contracts/aztec/scripts/noir-deps.sh --verify --exact
+      - name: Tree unchanged
+        run: test -z "$(git status --porcelain)" || { git status --porcelain; exit 1; }

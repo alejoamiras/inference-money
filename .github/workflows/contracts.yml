@@ -1,0 +1,67 @@
+name: Contracts
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: contracts-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.override.outputs.relevant || steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - 'contracts/**'
+              - 'toolchain.json'
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'test-preload.ts'
+              - '.github/workflows/contracts.yml'
+              - '.github/workflows/_contracts.yml'
+              - '.github/actions/setup-toolchains/**'
+      - if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "relevant=true" >> "$GITHUB_OUTPUT"
+
+  contracts:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    uses: ./.github/workflows/_contracts.yml
+
+  status:
+    name: contracts-status
+    if: always()
+    needs: [changes, contracts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # A skipped suite is green only when the filter said it was irrelevant; anything else fails.
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          CONTRACTS: ${{ needs.contracts.result }}
+        run: |
+          [ "$CHANGES" = success ] || { echo "::error::change detection: $CHANGES"; exit 1; }
+          if [ "$RELEVANT" = true ]; then
+            [ "$CONTRACTS" = success ] || { echo "::error::contracts ended $CONTRACTS"; exit 1; }
+          else
+            case "$CONTRACTS" in success|skipped) ;; *) echo "::error::contracts ended $CONTRACTS"; exit 1 ;; esac
+          fi
