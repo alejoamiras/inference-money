@@ -39,3 +39,8 @@ Status: **code complete; ✓ deferred.** Every gate command passes except the li
 - `bun run test:e2e -- connect.spec.ts`: **5/5 passed** (57.4 s), run `0beccc70-web-e2e-686989-64769`. The egress fence was empty after every test. Teardown left no net handle, no run manifest, no registry rows and no sidecar.
 - `bun run test:integration`, re-run after the shared-helper refactor: 16/16 passed, exit 0, teardown clean.
 - Literal `bun run --cwd apps/web build`: blocked on the missing `deployments/testnet.json` (Phase 7).
+
+## Gate after the arc 4 split (2026-09-29): the build now uses the fixture manifest, per the revised gate
+
+- `bun run lint && bun run typecheck && bun run --cwd apps/web test:components && BRIDGE_MANIFEST=apps/web/src/test/manifest.fixture.json bun run --cwd apps/web build`: exit 0 (93 component tests pass, 1 skipped).
+- `bun run test:e2e -- connect.spec.ts`: 6/6 passed (58.1 s), exit 0. Afterwards no registry rows remained for this worktree and no anvil or aztec processes were left.
