@@ -745,6 +745,54 @@ Also:
 
 **Arc 3 boundary:** codex loop.
 
+### Arc 4 — Aztec v6 + testnet ([D26])
+
+Branch `usdc-bridge-testnet` from `main` (arcs 1–3 merged at `283f9fb`), delivered as one PR. The order is Phase 11 → codex loop → Phase 7 → Phase 12, so the deployed bytes are the reviewed bytes.
+
+#### Phase 11 — Re-pin to Aztec 6.0.0-rc.1
+The public testnet node runs `6.0.0-rc.1` on rollup `2914217885`, which is now Sepolia's canonical rollup. Every Aztec pin moves together:
+- **`toolchain.json`:** the node, JS and Noir pins move to `6.0.0-rc.1`, and nargo moves to the version v6's aztec-nr requires. The mixed-version split (node 5.0.0 with JS 5.2.0) ends.
+- **npm:**
+  - `@aztec/*` becomes `@aztec-labs/*` (SDK) or `@aztec-foundation/*` (bb.js, noir-*, l1-artifacts), all exact `6.0.0-rc.1`, including both toolchain packages;
+  - the needed packages go into `minimumReleaseAgeExcludes` ([D27]);
+  - `foundry.toml` keeps the `@aztec/` Solidity import prefix and remaps it to `@aztec-foundation/l1-artifacts`.
+- **Noir** ([D28]):
+  - `aztec` from `aztec-labs-eng/aztec-nr` at `v6.0.0-rc.1`;
+  - the token from `AztecProtocol/aztec-standards` at `v6.0.0-rc.1`;
+  - `token_portal_content_hash_lib` from `aztec-labs-eng/aztec-node` at `v6.0.0-rc.1`;
+  - every new repo and transitive dependency goes into `noir-deps.sh`'s pinned table.
+- **Artifacts:** rebuilt through `compile.sh`. Class ids and addresses change; the keystone vectors must still hold.
+- **API migration** per the v6 changelog: protocol-contract wrappers, `returnType`, `FeesPerGas`, the re-pinned HandshakeRegistry. The 5.x compat (`authorizeLegacyHandshakeReads`, publishing the 5.0.1 standard contracts locally) goes if v6 no longer needs it.
+- **Testnet pins:** `packages/deployer/src/networks.ts` takes the new rollup, Inbox, Outbox, fee-juice and SponsoredFPC values. The node URL comes from `.env.testnet` ([D29]).
+- **Docs:** AGENTS.md follows every changed rule.
+
+**Validation gate** (all local layers):
+- Commands:
+  - `bun run test && bun run test:evm && bun run test:evm:formal && bun run test:evm:gas && bun run test:noir`
+  - `bun run lint && bun run lint:actions && bun run typecheck`
+  - `bash contracts/aztec/scripts/compile.sh --check`
+  - `bun run test:integration`
+  - `bun run test:e2e && bun run test:e2e`
+- Pass:
+  - all exit 0: integration all green, e2e all green on two consecutive runs, no owned processes left;
+  - no `@aztec/` npm specifier remains outside the Solidity import prefix.
+
+**Codex loop** on the Phase 11 diff (adversarial ask + both rules) until a resumed pass reports no new material findings. Contract bytes change here, so the ask covers the recompiled contracts and the L1 interface diff.
+
+Phase 7 (above) then runs against the v6 pins.
+
+#### Phase 12 — Testnet build
+- Commit `deployments/testnet.json` from Phase 7. Its `nodeUrl` is the dRPC URL ([D29]).
+- `web.yml` goes back to `build:testnet`; the fixture build and its guard are removed.
+
+**Validation gate:**
+- Commands: `bun run --cwd apps/web build:testnet`
+- Pass: exit 0, with the manifest identity test run.
+
+**Arc 4 boundary:**
+- Resume the codex session with the Phase 7 + 12 delta until a pass reports no new material findings.
+- Then open the PR and watch `gh pr checks --watch`: all green, `web` included.
+
 ---
 
 ## Decision ledger
@@ -770,6 +818,9 @@ Also:
 | D24 | Testnet fee path | self-funded Fee Juice: the throwaway L1 key mints the testnet fee asset from the permissionless `FeeAssetHandler` (1000 FEE/mint) and bridges it via `FeeJuicePortal`; bridge ≥ 100 FJ to the canonical SponsoredFPC before the private smoke legs so the sponsored-payer assertion still runs | SponsoredFPC-only (drained: 1.20 FJ vs ≈117 FJ budget); self-fund without top-up (loses the testnet sponsored-payer proof); hold for a refill (may never come) | Phase 1 probe; user 2026-09-26 | settled |
 | D25 | Delivery before testnet | open the 3-PR stack now; Phase 7 (and the testnet-manifest parts of Phases 8–10: `apps/web build`, `build:testnet`) follow once a public node serves Sepolia's new canonical rollup (`2914217885`, switched 2026-09-28), re-pinning as needed; the arc 3 `web` CI check stays red until `deployments/testnet.json` lands | wait and re-pin before any PR (plan as written); hold | user 2026-09-28, after the Phase 7 probe failed closed on the rollup switch | settled |
 | D26 | Testnet as its own arc | a 4th PR carries the Aztec v6 bump, Phase 7 and Phase 10's `build:testnet`; arcs 1–3 merge now; the Phase 8–10 gates and CI's `web` job build against `apps/web/src/test/manifest.fixture.json` | hold arcs 1–3 until v6 ships (D25 as written) | user 2026-09-29: "PR 4 does the Testnet work, let's merge everything else" | settled |
+| D27 | npm age gate for v6 | the `6.0.0-rc.1` packages Arc 4 needs (`@aztec-labs/*`, `@aztec-foundation/*`, and any `@aztec/*` they pull in) go into `minimumReleaseAgeExcludes` by name; the rest of the 7-day gate stays | wait until 2026-09-30T20:10Z, when rc.1 clears the gate | user 2026-09-29: "exclude the aztec packages necessary" | settled |
+| D28 | v6 Noir sources | `aztec` from `aztec-labs-eng/aztec-nr` (the same source aztec-standards v6 uses, so the token and the bridge share one `aztec`); `token_portal_content_hash_lib` from `aztec-labs-eng/aztec-node`, its only v6 home | vendor the content-hash lib (it would drift from Aztec's copy, the one the keystone vectors pin) | v6 changelog + repo layout at `v6.0.0-rc.1` | settled |
+| D29 | Testnet node URL | the dRPC endpoint is the only node serving the v6 rollup; the deployer reads it from `.env.testnet`, and the committed manifest (hence the web bundle) carries it | a keyless public v6 endpoint (none answers yet) | user 2026-09-29: "don't worry about dRPC, this will be temp" | settled (temporary) |
 | D10 | viem | canonical only; viem outbox reader; import ban | dual viem + `L1Port` seam | fable M3, codex (untyped seam) | settled |
 | D11 | Integration location | `packages/integration` | inside bridge-core (dependency cycle) | fable M4 | settled |
 | D12 | L1 transport | injected connector only | public RPC `http()` (egress leak) | fable M5 | settled |
@@ -877,7 +928,7 @@ Also:
 | 1 contracts | `worktree-usdc-bridge` | 1–3 | `main` (root commit) | off |
 | 2 core | `usdc-bridge-core` | 4–6 | arc 1 | off |
 | 3 web | `usdc-bridge-web` | 8–10 | arc 2 | off |
-| 4 v6 + testnet ([D26]) | TBD | 7, plus Phase 10's `build:testnet` | `main`, after arcs 1–3 merge | off |
+| 4 v6 + testnet ([D26]) | `usdc-bridge-testnet` | 11, 7, 12 | `main` (`283f9fb`) | off |
 
 - **During implementation:** arcs are local branches (`git switch -c` at each boundary). Pushing branches to checkpoint is allowed; there is no PR, so no CI runs.
 - **Delivery (after every loop + `/harden` converge; [D25] delivers before Phase 7):**
