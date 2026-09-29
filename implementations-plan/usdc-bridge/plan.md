@@ -749,7 +749,7 @@ Also:
 
 Branch `usdc-bridge-testnet` from `main` (arcs 1–3 merged at `ff8279a`), delivered as one PR. The order is Phase 11 → codex loop → Phase 7 → Phase 12, so the deployed bytes are the reviewed bytes.
 
-#### Phase 11 — Re-pin to Aztec 6.0.0-rc.1
+#### Phase 11 — Re-pin to Aztec 6.0.0-rc.1 ✓
 The public testnet node runs `6.0.0-rc.1` on rollup `2914217885`, which is now Sepolia's canonical rollup. Every Aztec pin moves together:
 - **`toolchain.json`:** the node, JS and Noir pins move to `6.0.0-rc.1`, and nargo moves to the version v6's aztec-nr requires. The mixed-version split (node 5.0.0 with JS 5.2.0) ends.
 - **npm:**
