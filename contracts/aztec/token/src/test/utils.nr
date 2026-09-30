@@ -81,7 +81,7 @@ pub unconstrained fn deploy_token_with_initial_supply(
         to,
         auth_contract,
     );
-    let token_contract_address = env.deploy("@token_contract/Token").with_public_initializer(
+    let token_contract_address = env.deploy("@merchant_token/Token").with_public_initializer(
         owner,
         initializer_call_interface,
     );
@@ -103,7 +103,7 @@ pub unconstrained fn deploy_token_with_minter(
         minter,
         auth_contract,
     );
-    let token_contract_address = env.deploy("@token_contract/Token").with_public_initializer(
+    let token_contract_address = env.deploy("@merchant_token/Token").with_public_initializer(
         owner,
         initializer_call_interface,
     );

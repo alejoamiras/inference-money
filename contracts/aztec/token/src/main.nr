@@ -1,3 +1,5 @@
+// Forked from AztecProtocol/aztec-standards v6.0.0-rc.1 (cdfba943), src/token_contract; MIT, see LICENSE.
+// Delta: the package is `merchant_token`, and its path dependencies are the same upstream crates by pinned git tag.
 pub mod test;
 
 use aztec::macros::aztec;
