@@ -14,4 +14,8 @@ mod transfer_public_to_private;
 mod authorization;
 mod cancel_authwit;
 mod view;
+mod merchants;
+mod rules_private;
+mod rules_requests;
+mod hints;
 pub mod utils;

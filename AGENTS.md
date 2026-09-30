@@ -7,7 +7,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | Path | What |
 |---|---|
 | `contracts/evm` | Foundry: `TokenPortal` (L1 escrow, Aztec messaging) and `Permit2DepositRouter` |
-| `contracts/aztec` | Aztec.nr: `token_bridge`, `token_minter_proxy`, `claim_secret`, `keystone` (cross-toolchain vectors) |
+| `contracts/aztec` | Aztec.nr: `token` (the merchant fork of aztec-standards' Token), `token_bridge`, `token_minter_proxy`, `claim_secret`, `merchant_stamp`, `keystone` (cross-toolchain vectors) |
 | `packages/bridge-core` | Framework-agnostic protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw, the manifest schema |
 | `packages/local-network` | Per-run anvil + Aztec local network (`toolchain.json`'s node): registry-claimed ports, owned process groups |
 | `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
@@ -46,7 +46,7 @@ bun run test:evm:formal # halmos, strict: exact proof names and counts (scripts/
 bun run test:evm:gas    # .gas-snapshot --check --tolerance 2
 SEPOLIA_RPC_URL=… bun run test:evm:fork  # real Permit2, Circle USDC, Aztec registry + Inbox; refuses to run unset
 
-bun run test:noir                                     # TXE suites (token_bridge, keystone), manifest-gated
+bun run test:noir                                     # TXE suites (token, token_bridge, keystone), manifest-gated
 bash contracts/aztec/scripts/noir-deps.sh             # fetch + verify the pinned Noir git deps (--self-test)
 bash contracts/aztec/scripts/compile.sh [--check]     # rebuild artifacts; --check: committed == source (class id + ABI)
 bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment static guard (--self-test)

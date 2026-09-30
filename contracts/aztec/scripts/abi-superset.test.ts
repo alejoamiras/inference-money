@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
-import { type ContractArtifact, loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import { type ContractArtifact, FunctionType, loadContractArtifact } from "@aztec-labs/stdlib/abi"
 import type { NoirCompiledContract } from "@aztec-labs/stdlib/noir"
-import { artifactIdentity, normalizedFunctions, storageSlots } from "./artifact-identity"
+import { normalizedFunctions, storageSlots } from "./artifact-identity"
 
 const UPSTREAM = new URL("../node_modules/@aztec-foundation/aztec-standards/artifacts/target/token_contract-Token.json", import.meta.url)
 	.pathname
@@ -9,9 +9,25 @@ const FORK = new URL("../token/target/merchant_token-Token.json", import.meta.ur
 
 // Everything the fork adds to aztec-standards' Token. The rest must be upstream's, unchanged, so integrations written
 // against upstream (Galactica's x402 calls among them) keep working.
-const ADDED_FUNCTIONS: string[] = []
-const ADDED_STORAGE: string[] = []
-const ADDED_EVENTS: string[] = []
+const ADDED_FUNCTIONS = [
+	"accept_merchant_admin",
+	"add_merchant",
+	"cancel_merchant_change",
+	"get_merchant_roles",
+	"get_merchant_status",
+	"is_merchant",
+	"propose_merchant_admin",
+	"schedule_merchant_guardian",
+	"schedule_merchant_off",
+	"set_merchant_delay",
+	"sync_merchant_delay",
+	"try_prove_merchant",
+]
+const ADDED_STORAGE = ["merchant_admin", "merchant_delay", "merchant_guardian", "merchant_off", "merchants", "pending_merchant_admin"]
+const ADDED_EVENTS = ["Token::MerchantAdded", "Token::MerchantDelayScheduled", "Token::MerchantOffScheduled"]
+// The class registry packs public bytecode 31 bytes per field plus a length field, and refuses more than 3000
+// (MAX_PACKED_PUBLIC_BYTECODE_SIZE_IN_FIELDS). Upstream packs to 707; the ceiling leaves the fork headroom for fixes.
+const MAX_PUBLIC_BYTECODE_FIELDS = 2700
 
 const load = async (path: string) => (await Bun.file(path).json()) as NoirCompiledContract
 const upstreamJson = await load(UPSTREAM)
@@ -48,7 +64,13 @@ describe("the merchant token is an ABI superset of aztec-standards' Token", () =
 		expect(added(paths(fork), paths(upstream))).toEqual([...ADDED_EVENTS].sort())
 	})
 
-	it("is still upstream's contract class", async () => {
-		expect((await artifactIdentity(forkJson)).classId).toBe((await artifactIdentity(upstreamJson)).classId)
-	}, 30_000)
+	it("keeps its public bytecode within the ceiling", () => {
+		const packedFields = (a: ContractArtifact) => {
+			const dispatch = a.functions.filter((f) => f.functionType === FunctionType.PUBLIC)
+			expect(dispatch.map((f) => f.name)).toEqual(["public_dispatch"])
+			return Math.ceil(dispatch[0].bytecode.length / 31) + 1
+		}
+		expect(packedFields(upstream)).toBe(707)
+		expect(packedFields(fork)).toBeLessThanOrEqual(MAX_PUBLIC_BYTECODE_FIELDS)
+	})
 })

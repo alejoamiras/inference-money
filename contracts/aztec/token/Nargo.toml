@@ -12,3 +12,4 @@ compressed_string = { git = "https://github.com/aztec-labs-eng/aztec-nr", tag = 
 generic_proxy = { git = "https://github.com/AztecProtocol/aztec-standards", tag = "v6.0.0-rc.1", directory = "src/generic_proxy" }
 arc403_interface = { git = "https://github.com/AztecProtocol/aztec-standards", tag = "v6.0.0-rc.1", directory = "src/arc403_interface" }
 authorization_contract = { git = "https://github.com/AztecProtocol/aztec-standards", tag = "v6.0.0-rc.1", directory = "src/token_contract/src/test/test_authorization_contract" }
+merchant_stamp = { path = "../merchant_stamp" }

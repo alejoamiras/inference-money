@@ -38,6 +38,7 @@ pub unconstrained fn setup_with_initial_supply(
         owner,
         AztecAddress::zero(),
     );
+    list_merchants(env, token_contract_address, owner, [owner, recipient]);
 
     (env, token_contract_address, owner, recipient)
 }
@@ -61,8 +62,68 @@ pub unconstrained fn setup_with_minter(
 
     let token_contract_address =
         deploy_token_with_minter(&mut env, owner, minter, AztecAddress::zero());
+    list_merchants(env, token_contract_address, owner, [owner, recipient]);
 
     (env, token_contract_address, owner, recipient, minter)
+}
+
+/// The merchant suites' cast: `admin` deploys (so holds the merchant admin role), `m1` and `m2` are listed merchants,
+/// `alice` and `bob` are users. `m1`, `m2` and `alice` hold `mint_amount` both privately and publicly.
+pub struct MerchantWorld {
+    pub env: TestEnvironment,
+    pub token: AztecAddress,
+    pub admin: AztecAddress,
+    pub minter: AztecAddress,
+    pub m1: AztecAddress,
+    pub m2: AztecAddress,
+    pub alice: AztecAddress,
+    pub bob: AztecAddress,
+}
+
+pub unconstrained fn setup_merchant_world(with_account_contracts: bool) -> MerchantWorld {
+    let mut env = TestEnvironment::new();
+    let admin = create_account(&mut env, with_account_contracts);
+    let minter = create_account(&mut env, with_account_contracts);
+    let m1 = create_account(&mut env, with_account_contracts);
+    let m2 = create_account(&mut env, with_account_contracts);
+    let alice = create_account(&mut env, with_account_contracts);
+    let bob = create_account(&mut env, with_account_contracts);
+    let token = deploy_token_with_minter(&mut env, admin, minter, AztecAddress::zero());
+    list_merchants(env, token, admin, [m1, m2]);
+    for holder in [m1, m2, alice] {
+        mint_to_private(env, token, holder, mint_amount, minter);
+        env.call_public(minter, Token::at(token).mint_to_public(holder, mint_amount));
+    }
+    MerchantWorld { env, token, admin, minter, m1, m2, alice, bob }
+}
+
+unconstrained fn create_account(
+    env: &mut TestEnvironment,
+    with_account_contract: bool,
+) -> AztecAddress {
+    if with_account_contract {
+        env.create_contract_account()
+    } else {
+        env.create_light_account()
+    }
+}
+
+/// Mines a block at `timestamp`, so the next private call anchors there.
+pub unconstrained fn anchor_at(env: TestEnvironment, timestamp: u64) {
+    env.mine_block_at(timestamp);
+}
+
+/// Lists `accounts` as merchants, signed by `admin` (the token's deployer): the merchant rules would otherwise refuse
+/// the upstream suite's user-to-user transfers.
+pub unconstrained fn list_merchants<let N: u32>(
+    env: TestEnvironment,
+    token_contract_address: AztecAddress,
+    admin: AztecAddress,
+    accounts: [AztecAddress; N],
+) {
+    for account in accounts {
+        env.call_public(admin, Token::at(token_contract_address).add_merchant(account));
+    }
 }
 
 pub unconstrained fn deploy_token_with_initial_supply(
@@ -292,6 +353,7 @@ pub unconstrained fn setup_with_auth_contract(
         owner,
         auth_contract_address,
     );
+    list_merchants(env, token_contract_address, owner, [owner, recipient]);
 
     (env, token_contract_address, owner, recipient, auth_contract_address)
 }
@@ -335,6 +397,7 @@ pub unconstrained fn setup_with_auth_contract_and_minter(
 
     let token_contract_address =
         deploy_token_with_minter(&mut env, owner, minter, auth_contract_address);
+    list_merchants(env, token_contract_address, owner, [owner, recipient]);
 
     (env, token_contract_address, owner, recipient, minter, auth_contract_address)
 }
