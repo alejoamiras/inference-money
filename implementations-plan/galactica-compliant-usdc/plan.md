@@ -7,13 +7,13 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "consolidated draft 2026-09-30: contradiction check and audits pending"
+status: "consolidated draft 2026-09-30: contradiction check applied; double audit pending"
 ---
 
 # galactica-compliant-usdc
 
 Rebuild this repo as Galactica's compliant USDC:
-- **Token and bridge.** A fork of the aztec-standards token lets users pay only merchants. Deposits record the Ethereum address they came from, and a user's withdrawals can only go back to it. An operator CLI deploys and runs all of it.
+- **Token and bridge.** A fork of the aztec-standards token lets users pay only merchants, or into payment requests a merchant opened while it was listed. Deposits record the Ethereum address they came from, and a user's withdrawals can only go back to it. An operator CLI deploys and runs all of it.
 - **Showcase.** A demo-only page runs the flows with embedded wallets. Everything goes live on Sepolia + Aztec testnet, then the contracts get a `/harden security` pass.
 
 The design was agreed with the user and is recorded in the explainer (https://claude.ai/artifact/XCL4MmbRY9RBRcvMpqb1dn). This plan is how to build it. `recon.md` is the map of what exists. Three independent drafts fed this plan: main, codex and fable (Opus 5.5). The decision ledger at the end says which choice came from where.
@@ -31,7 +31,7 @@ Roles, used throughout:
   - Upstream storage slots don't move.
   - The additions are exactly the list in this plan.
   - `contracts/aztec/scripts/abi-superset.test.ts` pins all three. Galactica's two x402 calls (`initialize_transfer_commitment`, `transfer_private_to_commitment`) keep working unchanged.
-- Every rule has an allowed-path test and a refused-path test at three layers: Noir (TXE), kernel-validated integration, and the testnet acceptance run.
+- Every rule has an allowed-path test and a refused-path test in TXE, where the app enforces it, and in kernel-validated integration. The testnet acceptance run covers the full flow and its two refusals.
 - Each refusal carries one exact rule string, exported from `bridge-core/src/rules.ts` and matched against the Noir sources by a test.
 - `bun run bridge export <manifest> --out <dir>` writes what a wallet or facilitator registers: address, class id, instance and the artifact with its sha256. A test registers the export in a fresh wallet and reads a balance through it.
 - `docs/integration.md` covers the rules, every refusal string, the L1↔L2 message formats and what each action makes public. It fits in a few pages.
@@ -64,7 +64,7 @@ Roles, used throughout:
 - a desktop-first showcase;
 - shared demo accounts that can race (retry and replay are the answer);
 - browser proving measured and gated, not tuned;
-- no guardian key and no multisig tooling (both documented as follow-ups);
+- no multisig tooling (documented as a follow-up);
 - no mainnet fee path or rollup-upgrade handling.
 
 ## Architecture & Implementation
@@ -88,6 +88,7 @@ TS: bridge-core (flows, rules, preflights) · demo (cast, tour, world view) · d
 - **Deposit content hashes** move to a local Noir lib (`contracts/aztec/portal_messages`), because the upstream `token_portal_content_hash_lib` is pinned and can't take a depositor. Withdraw keeps its format.
 - **Trust model:**
   - The admin (a multisig in production) curates the list, pauses the bridge, and owns both two-step handovers.
+  - The optional guardian can only cancel pending merchant changes. The admin replaces it on the same delayed schedule. It is unset on testnet.
   - The proxy lets only the bridge mint and burn.
   - The portal lets only its bound router name a depositor.
   - Nothing trusts the demo keys.
@@ -101,6 +102,7 @@ Storage. The upstream fields (`token_contract/src/main.nr:53-63`) come first, un
 ```rust
 merchant_admin: PublicMutable<AztecAddress, Context>,
 pending_merchant_admin: PublicMutable<AztecAddress, Context>,
+merchant_guardian: DelayedPublicMutable<AztecAddress, 3600, Context>,     // replaced on the delay, never instantly
 merchant_delay: PublicMutable<u64, Context>,                               // the setting, in [3600, 86400]
 merchants: Map<AztecAddress, PublicImmutable<bool, Context>, Context>,    // append-only register; adds are instant
 merchant_off: Map<AztecAddress, DelayedPublicMutable<bool, 3600, Context>, Context>, // default false = on
@@ -119,14 +121,19 @@ merchant_off: Map<AztecAddress, DelayedPublicMutable<bool, 3600, Context>, Conte
     - a no-op if the latest scheduled value already equals `off`, so repeat calls never restart the clock;
     - scheduling the current value is how a pending change is cancelled;
     - emits `MerchantOffScheduled { account, off, effective_at }`.
-  - `set_merchant_delay(delay)`: enforces 3600 ≤ delay ≤ 86400.
+  - `set_merchant_delay(delay)`: enforces 3600 ≤ delay ≤ 86400, and also schedules the guardian slot's delay.
   - `sync_merchant_delay(account)`: a no-op when the entry's scheduled delay already equals the setting.
   - `propose_merchant_admin(new)`, where zero cancels.
+  - `schedule_merchant_guardian(guardian)`: takes effect after the delay; zero removes the guardian.
 - `accept_merchant_admin()`: public, pending admin only.
+- `cancel_merchant_change(account)`: public, admin or guardian.
+  - Requires a pending value change or a pending delay decrease.
+  - Re-schedules the current value, and the current delay if a decrease is pending.
+  - The guardian can do nothing else.
 - Public views:
   - `is_merchant(account) -> bool`, which is `merchants.at(a).is_initialized() & !merchant_off.at(a).get_current_value()`;
   - `get_merchant_status(account)`: registered, off, scheduled off and when, delay, scheduled delay and when;
-  - `get_merchant_roles()`: admin, pending admin, delay.
+  - `get_merchant_roles()`: admin, pending admin, guardian, scheduled guardian and when, delay.
 - Private view `try_prove_merchant(account) -> bool`.
   - `true` is proven at the anchor block.
   - `false` is only the prover's claim, and callers may use it only to refuse. The doc comment says so.
@@ -170,7 +177,9 @@ The hint reads the anchor block through oracles: `check_nullifier_exists` for th
   - `Payment refused: users may only pay into requests opened for a merchant`
 - Token admin and state:
   - `Only the merchant admin`
+  - `Only the merchant admin or guardian`
   - `Only the pending merchant admin`
+  - `No pending change`
   - `Merchant already added`
   - `Not a registered merchant`
   - `Delay out of range`
@@ -195,7 +204,7 @@ The hint reads the anchor block through oracles: `check_nullifier_exists` for th
 | `claim_public(to, amount, secret, message_leaf_index, depositor)` (public) | • Pause check; `amount > 0`.<br>• `Token.is_merchant(to)`.<br>• Consume `mint_to_public(to, amount, depositor)`; mint.<br>• Stays relayable (the mint goes to the committed merchant). |
 | `return_deposit_private(recipient, amount, claim_salt, message_leaf_index, depositor)` (private) | • Enqueue the pause check.<br>• Consume with the derived secret.<br>• `message_portal(portal, withdraw(depositor, amount, 0))`.<br>• Mints nothing; whoever holds the claim data may call it. |
 | `return_deposit_public(to, amount, secret, message_leaf_index, depositor)` (public) | • Pause check.<br>• `!Token.is_merchant(to)`. Otherwise anyone could copy a merchant's claim secret from the mempool and bounce its deposit.<br>• Consume, then message the portal the same way. |
-| `exit_to_l1_private(recipient, amount, caller_on_l1, authwit_nonce, as_merchant: bool)` (private) | • `!as_merchant` → read the sender's note, `address == recipient`.<br>• `as_merchant` → `Token.try_prove_merchant(sender)` must be `true`.<br>• Then message the portal and burn, as today. |
+| `exit_to_l1_private(recipient, amount, caller_on_l1, authwit_nonce, as_merchant: bool)` (private) | • `!as_merchant` → an unconstrained "has a note" pre-check fails with the rule text before `get_note()` can fail generically; then read the sender's note and require `address == recipient`.<br>• `as_merchant` → `Token.try_prove_merchant(sender)` must be `true`.<br>• Both branches fail with `Withdrawals from a user account go only to its funding address`.<br>• Then message the portal and burn, as today. |
 | `exit_to_l1_public` (signature unchanged) | `Token.is_merchant(sender)`. |
 | `get_funding_address(owner) -> EthAddress` (utility) | Zero when unbound. |
 
@@ -270,14 +279,15 @@ Two planners computed these independently with viem during planning, and the sam
 |---|---|---|
 | `deploy <local\|testnet> [--merchant-delay <s>]` | `TESTNET_L1_PRIVATE_KEY`, `TESTNET_DEPLOYER_SECRET`, `SEPOLIA_RPC_URL`; plain `TESTNET_ADMIN_ADDRESS` | deploy L1 then L2, wire them, propose both handovers, write the manifest |
 | `admin address` | `TESTNET_ADMIN_SECRET` | print the admin account's address |
-| `admin accept <manifest>` | admin | accept bridge ownership and the merchant admin role |
-| `merchants add <manifest> <acct…>`, `off`, `on`, `delay <s>` | admin | list operations; `delay` sets the value, then syncs every added merchant |
+| `admin accept <manifest>` | admin | deploy the admin account through the sponsor if needed, then accept bridge ownership and the merchant admin role |
+| `merchants add <manifest> <acct…>`, `off`, `on`, `delay <s>`, `guardian <addr>` | admin | list operations; `delay` sets the value, then syncs every added merchant |
+| `merchants cancel <manifest> <acct>` | admin or guardian | cancel a pending change |
 | `merchants list <manifest>` | none | status of every added merchant, from `MerchantAdded` events |
 | `pause <manifest> <on\|off>` | admin | bridge pause |
 | `verify <manifest>` | none | strict read-back (below) |
 | `smoke <manifest> [--record <file>]` | none (the demo cast) | the acceptance run, including refusals |
 | `export <manifest> --out <dir>` | none | the integration bundle |
-| `demo setup` / `status` / `reset <manifest>` | none | deploy the cast's accounts (and on local also list and fund them), show floats, refund to floors |
+| `demo setup` / `status` / `reset <manifest>` | none | `setup`: deploy the cast's accounts and seed the L2 float with keyless A_demo deposits (a private deposit Alice claims, a public one Galactica claims); on local it also lists the merchants. `status`: show the floats. `reset`: rebalance with merchant→user refunds |
 | `demo fund <manifest>` | `TESTNET_L1_PRIVATE_KEY`, `SEPOLIA_RPC_URL` | refill A_demo's ETH and USDC, approve Permit2, top up the sponsor |
 | `probe testnet`, `scan secrets` | as today | as today |
 
@@ -287,7 +297,9 @@ Two planners computed these independently with viem during planning, and the sam
 - the handover complete and nothing pending;
 - every merchant's delay equal to the setting;
 - the token's `total_supply` no higher than the portal's USDC;
-- demo-cast accounts listed only on a `testnet` manifest.
+- demo-cast accounts listed only on `local` and `testnet` manifests.
+
+**Local admin.** `deploy local` hands over to a fixed public `LOCAL_ADMIN_SECRET` and accepts in the same command, so the local handover path runs every time. The integration harness and `demo setup local` sign as that admin.
 
 **Keyed-run templates** (committed; refs are `op://Keyed-Runs/InferenceMoney-Testnet/<VAR>`):
 
@@ -303,12 +315,15 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 - **Layout.** A header with the two modes. On the left, a composer (ACT AS / ACTION / TO / USDC / Try it, plus the Happy path and Try to cheat chips) and a stage: an Ethereum lane, four wallet cards and the coin. A verdict banner steps through Simulate, Prove, Send, Settle. On the right, the dark "What the world sees" feed.
 - **Wallet.** One embedded PXE hosts all four accounts: one sync, one prover, one memory footprint. Its OPFS store is keyed by the bridge address, so a new deployment starts fresh. The prover mode comes from the build target: real proofs on testnet, fake ones in local e2e except in the `proving` project.
 - **Tour.** The build embeds the tour and checks its identity against the manifest.
-- **Ethereum lane.** A_demo makes live Permit2 deposits and finishes withdrawals while its float allows, and replays the recording when underfunded. The CSP adds exactly one L1 RPC origin, fixed at build time.
+- **Ethereum lane.** A_demo makes live Permit2 deposits and finishes withdrawals while its float allows, and replays the recording when underfunded.
+  - The L1 RPC is a committed public endpoint in the build target, never `SEPOLIA_RPC_URL`, which is a keyed secret. The CSP adds exactly that origin.
+  - The build refuses to run with any keyed-run variable set, and a bundle assertion checks the origin.
 - **Resilience.**
-  - Pending withdrawals persist in `localStorage`.
-  - An action retries once on a duplicate nullifier, after a resync.
+  - Pending deposit secrets, submission records and withdrawal tickets persist in `localStorage`.
+  - An action that fails on a duplicate nullifier first reconciles its own submission: did it land? Only a proven conflict with another tx is re-simulated and retried once. A payment, burn or deposit is never re-sent blindly.
   - A reset chip is available.
   - An empty float falls back to replay.
+  - A demo account's binding can't be reset. If a stranger binds a fresh cast account first, the cast is rotated (`demo/v1` → `v2`).
 
 ### Critical paths
 
@@ -317,7 +332,7 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 | # | Step | Call | Proven | Public |
 |---|---|---|---|---|
 | 1 | A deposits 10 | `router.deposit(10, 0, secretHash, true, …)` → `portal.depositToAztecPrivateFor(A, 10, secretHash)` | Permit2 witness, signer A | L1: A, 10, private, secret hash, message index |
-| 2 | Alice claims | `claim_private(alice, 10, salt, leaf, A, bind=true)` | self-claim; message consumed; binds A | message nullifier; supply +10; first-claim nullifier and note |
+| 2 | Alice claims | `claim_private(alice, 10, salt, leaf, A, bind)`, with `bind` from `get_funding_address` (true only on a fresh account) | self-claim; message consumed; binds A or matches it | message nullifier; supply +10; on the first claim, the binding nullifier and note |
 | 3 | Facilitator opens a request | `initialize_transfer_commitment(galactica, alice)` from galactica | `to` is a merchant at the anchor | validity nullifier + stamp |
 | 4 | Alice pays 10 | `transfer_private_to_commitment(alice, c, 10, 0)` | settled `stamp(c)` | note nullifiers; completion log with 10 |
 | 5 | Galactica refunds 3 | `transfer_private_to_private(galactica, alice, 3, 0)` | sender is a merchant | nullifiers and notes only |
@@ -325,7 +340,7 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 | 7 | Alice withdraws 1 to B | `exit_to_l1_private(B, 1, 0, nonce, false)` | refused: not the funding address | nothing |
 | 8 | Alice withdraws 3 to A | `exit_to_l1_private(A, 3, 0, nonce, false)` → epoch proof → `portal.withdraw(A, 3, false, …)` | note address equals A | supply −3; L2→L1 content; L1: A receives 3 |
 
-Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, portal reserve +7.
+Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +7. The smoke asserts deltas, not absolute balances, so it runs the same on a fresh cast and on a repeat run (`bind=false`).
 
 **Returns**
 - **Private.** Alice is bound to A and receives a deposit from C.
@@ -339,7 +354,10 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
 
 **Switching a merchant off, delays, emergency**
 - **Switch-off.** `merchants off <m>` schedules the change for now + D (24 h by default). Until then m is still a merchant, and each proof that reads m expires at `change − 1`. After D, m is a user.
-- **Delay change.** `merchants delay <s>` sets the value, then syncs each merchant. An increase applies at once. A decrease applies after old − new: 24 h → 1 h takes 23 h, and the merchant's txs are recognisable meanwhile.
+- **Delay change.** `merchants delay <s>` sets the value, then syncs each merchant.
+  - A decrease applies after old − new: 24 h → 1 h takes 23 h, and the merchant's txs are recognisable meanwhile.
+  - An increase applies at once. That is upstream's rule (`scheduled_delay_change.nr:55-111`); raising the delay can only slow switch-offs. The explainer's "a later change is itself scheduled, never instant" holds for decreases only; the docs and the ELI5 say so.
+- **Cancel.** `merchants cancel <m>` (admin or guardian) re-schedules the current value. The entry stays marked until the new change time.
 - **Emergency.**
   1. `pause on`: instant; stops claims, exits and returns.
   2. `merchants off <m>`.
@@ -400,8 +418,8 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
 ### Non-obvious mechanics
 
 1. **Expiry.**
-   - The kernel caps every tx at `anchor + 86399`, the instance registry's update horizon.
-   - A DPM read with D = 86400 and nothing pending sets the same cap, so merchant checks blend in.
+   - The kernel caps every tx at `anchor + 86399`, the instance registry's update horizon: `MAX_TX_LIFETIME` and `DEFAULT_UPDATE_DELAY` are both 86400 (aztec-packages protocol `types/src/constants.nr:202,1333`), and the kernel takes the minimum (`private_kernel_circuit_output_composer.nr:158-190`).
+   - A DPM read with D = 86400 and nothing pending sets the same cap, so merchant checks blend in. This is an inference; A21 pins it by comparing expiry with a non-reading tx at the same anchor.
    - A pending change sets `change − 1`.
    - D = 3600 sets `anchor + 3599`.
 2. **`InitialDelay = 3600`, then `schedule_delay_change(setting)` at add.** Raising from the floor always applies at once, so a new merchant starts with the configured delay. A compile-time 24 h would make a later 1 h setting take 23 h for every new merchant.
@@ -423,7 +441,9 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
    - a raw secret on the private return;
    - a foreign sender;
    - a fifth site;
-   - `claim_public` without the merchant guard.
+   - `claim_public` without the merchant guard;
+   - an `as_merchant` branch that ignores `try_prove_merchant`'s result;
+   - `exit_to_l1_public` without its merchant check.
 9. **No private rule check enqueues a public call**: one would publish the checked address. This becomes an AGENTS.md rule.
 10. **Binding races.** Two first claims from different depositors can both simulate. Only one lands; the other becomes a return.
 11. **Rollbacks.** Artifacts are checked against HEAD, so commit the rebuild before `compile.sh --check`. Reverting source doesn't revert deployed contracts: a fix that changes class ids needs a new deployment, and old manifests and tickets are kept until their liabilities settle.
@@ -436,10 +456,11 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
 | ARC-403 hook as the rule engine | Its interface is `(from, amount, selector)`, with no `to`. |
 | Instant public switch-off | Rejected with the user: a public check at inclusion names the merchant on every payment. |
 | Marker nullifier instead of `PublicImmutable` register | Saves one historical read, but TXE can't see it without hand-written pre-asserts. Kernels dominate the proof. |
-| Batched on-chain delay-change proposals | Needs cursors, snapshots and lifecycle state for a rare admin action. A set, then per-entry syncs driven by the CLI, gives the same result. |
-| Guardian key that cancels scheduled changes | Optional in the explainer. The multisig is the control; recorded as a follow-up. |
+| Batched on-chain delay-change proposals | Needs cursors, snapshots and lifecycle state for a rare admin action. A set, then admin-driven per-entry syncs, reaches the same end state. |
+| An on-chain notice period for delay increases | An increase only slows switch-offs. Upstream applies it at once, and the docs correct the explainer instead. |
+| No guardian | Only the possibly compromised admin could cancel a malicious switch-off, for example of the facilitator. |
 | One `return_deposit` taking a raw secret for both kinds | A public claim exposes its secret in the mempool, so a copied return could bounce a merchant's deposit. The private return never sees a raw secret. |
-| Returns open while paused | The pause is the "stop everything" switch, as the explainer promises. |
+| Returns open while paused | The explainer's pause "blocks every deposit and withdrawal", and a return is a withdrawal to Ethereum. Token transfers on Aztec are outside the bridge and continue. |
 | One-shot `setRouter` | An extra privileged call with an ordering hazard. The binding is checked at `initialize`. |
 | Recorded-only Ethereum lane | Loses the live L1 story. Bounded exposure of test assets with a replay fallback costs little. |
 | One PXE per actor | Four syncs, four provers, four times the memory. |
@@ -458,12 +479,15 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
 | User or relayer | claim someone else's private deposit | `msg_sender == recipient` plus the derived secret | – |
 | User | re-bind an account; forge a binding | the init nullifier derives from the owner's `nhk_app` | – |
 | Gifter | bind a fresh account to the gifter's address | only the recipient claims; a first-claim warning; the return path | an account that claims a gift first is bound to the gifter |
+| Gifter | take back an unclaimed gift | a depositor holding the claim data can return it before the recipient claims | documented: a deposit is final only once claimed |
 | Front-runner | copy a merchant's public-claim secret into a return | `!is_merchant(to)` | – |
 | Front-runner | redirect a router deposit; name a victim as depositor | Permit2 owner is `msg.sender`; `…For` is router-only | – |
 | Merchant | open a request for Carol payable by Bob | a stamp only when `to` is proven a merchant | – |
 | Merchant | act as a mixer for users; pay anyone; exit anywhere | curation of the list; switch-off; the pause | inherent to the role; key custody is Galactica's control |
-| Compromised admin | rogue instant add; malicious switch-offs; delay decreases; pause DoS | multisig; decreases wait old − new; a switch-off is public for D before it bites | a rogue merchant is live at once (Ask 1) |
+| Compromised admin | rogue instant add; malicious switch-offs; delay decreases; guardian replacement; pause DoS | multisig; decreases and guardian replacement wait D; a switch-off is public for D, and the guardian can cancel it | a rogue merchant is live at once (Ask 1); an instant delay increase (at most 86400) slows later switch-offs |
+| Compromised guardian | cancel legitimate switch-offs repeatedly | the admin schedules a replacement | removals delayed by at most D |
 | Sequencer | include a stale merchant proof after a switch-off | DPM expiry | targeted censorship of recognisable txs (1 h delay, pending changes) |
+| Slow device at D = 1 h | a merchant-proving tx must be proven and included within 1 h of its anchor | P10's proving budget (at most 240 s at 4× throttle) | a liveness cost of the 1 h option (documented) |
 | Showcase visitor or bot | drain the float with public keys; sweep A_demo; spam the sponsor | bounded testnet float; replay fallback; refill run; strict CSP; no user content rendered as HTML | demo downtime only |
 | Malicious RPC or manifest | wrong identity, forged receipts, malformed fields | zod schemas; identity checks at build and in `verify`; messages reconstructed locally | a node can still deny service |
 | Supply chain | poisoned npm, Noir or forge dependency | `toolchain.json` pins; `noir-deps.sh` exact commits (`--exact` in CI); fork copied from a pinned commit; frozen lockfile; 7-day release age; pinned forge-std | – |
@@ -485,7 +509,8 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
 - **Keyed runs** are split by role.
 - **CI** holds no secrets and gets `contents: read`.
 - **Workers Builds** pulls from GitHub; no Cloudflare token lives in GitHub.
-- **Demo keys** hold no role, and are merchant-listed only on the testnet deployment.
+- **Demo keys** never hold an admin or minting role, and are merchant-listed only on local and testnet deployments.
+- **The guardian** can only cancel.
 
 **Cryptography**
 - Protocol primitives only: poseidon2, with separators derived like `claim_secret`'s; sha256 and keccak through the Aztec `Hash` library and the pinned noir-lang crates (sha256 v0.3.0, keccak256 v0.1.3); viem.
@@ -529,7 +554,8 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
   - The private mint and burn enqueue public supply updates (`:692,712`).
   - ARC-403 gets `(from, amount, selector)` (`:525-547`).
 - **aztec-nr**
-  - `DelayedPublicMutable`: minimum delay 3600 (`delayed_public_mutable.nr:16`); `InitialDelay` is a type parameter with a static assert (`:95-112`); increases apply at once and decreases wait old − new (`:225-289`); a private read reads `this_address` and caps expiry (`:519-559`).
+  - `DelayedPublicMutable`: minimum delay 3600 (`delayed_public_mutable.nr:16`); `InitialDelay` is a type parameter with a static assert (`:139-145`); a private read reads `this_address` and caps expiry (`:519-559`).
+  - Increases apply at once and decreases wait old − new (documented at `delayed_public_mutable.nr:225-289`; implemented in aztec-packages protocol `types/src/delayed_public_mutable/scheduled_delay_change.nr:55-111`).
   - `PublicImmutable`'s private read pushes a nullifier-existence request and asserts initialization (`public_immutable.nr`).
   - `PrivateImmutable`'s init nullifier uses `nhk_app(owner)` (`private_immutable.nr:66-100`).
   - Partial-note completion needs a settled validity commitment and is not single-use (`uint-note/src/uint_note.nr:136,183-214`).
@@ -550,28 +576,35 @@ Expected balances on an isolated run: Alice 0, galactica 7, A's net USDC −7, p
 - **I3 (P2/P6):** a private `#[view]` may do DPM reads, since setting expiry isn't a side effect. Fallback: `self.call`.
 - **I4 (P6):** a conditional `initialize(...).deliver(...)` compiles (mechanics 7).
 - **I5 (P2):** the fork's public bytecode stays at or under about 2,700 fields; upstream is about 705.
-- **I6 (P2/P3):** a merchant check's two reads are under about 5 % of proving time. P10 measures it.
+- **I6:** a merchant check's two reads (about 8k gates) are small next to the kernels. Nothing measures the check alone; P10 times whole actions.
 - **I7 (P2):** TXE `OracleMock` can make the hint lie.
 - **I8 (P9):** `op-remote create` on a later template adds its fields to the existing item. Otherwise the owner adds them by hand.
 - **I9 (P9):** the testnet SponsoredFPC can be topped up through the FeeAssetHandler faucet (lessons.md).
 - **I10 (P10):** in-browser proving meets P10's thresholds. If not, live mode simulates and shows the recorded proof.
+- **I11 (P13):** Workers Builds deploys only after a successful build. While `main` still has `apps/web`, its builds fail once the root directory points at `apps/showcase`, and the last good deployment stays live.
 
 **Asks** (resolved at the approval gate; recommendation first)
 1. **Instant adds (your decision).** Keep them. For production, Galactica can put adds through its multisig review. Delayed adds would drop the register and a read per check, but onboarding would take D.
 2. **ABI superset instead of strict identity.** Every upstream function stays unchanged; merchant admin functions are added. Strict identity would cost one extra private call on every payment.
 3. **Merchants bind on private claims too.** A merchant funding from several treasuries uses public deposits.
-4. **No guardian key in v1.** The multisig covers admin compromise. A guardian is a follow-up.
+4. **A cancel-only guardian is built and left unset on testnet.** Without one, only the admin could cancel a malicious switch-off. Galactica can set one in production.
 5. **Testnet admin is one generated key.** Production uses Galactica's multisig account; `docs/operations.md` shows the handover.
 6. **Demo exposure.**
    - A_demo holds at most 0.02 ETH and 50 test USDC, and the L2 float is at most 50 test USDC.
    - The testnet deployment lists public-key demo merchants, so its rules are bypassable by anyone reading the bundle.
-   - `verify` refuses those merchants on any other network.
+   - `verify` refuses those merchants on any network other than local and testnet.
 7. **You, during P9:**
    - Create the 1Password item `Keyed-Runs/InferenceMoney-Testnet`.
    - Import a funded Sepolia key holding test USDC, or fund a generated one.
    - Import `SEPOLIA_RPC_URL`.
    - Approve each keyed run with `op-remote`.
-8. **You, at merge:** point Workers Builds' root directory and build command at `apps/showcase`. If branch protection names `web-status`, rename it to `showcase-status`.
+8. **You, before P13.** In Workers Builds:
+   - point the root directory and build command at `apps/showcase`;
+   - enable non-production branch builds, so the showcase branch gets a hosted preview URL.
+
+   P13 and the hardening arc run against that hosted preview. Production switches at merge. If branch protection names `web-status`, rename it to `showcase-status`.
+
+Already accepted, recorded for the audit trail: a request stamped while its recipient was a merchant stays payable after a switch-off. The explainer states this, and the user accepted it on 2026-09-30.
 
 ## Phases
 
@@ -618,8 +651,10 @@ Tests (TXE):
   - an instant add;
   - a switch-off that takes effect after D and not before, and doesn't restart on a repeat;
   - switch-on as a cancel;
+  - `cancel_merchant_change`: admin or guardian only, pending changes only;
   - delay bounds; an increase applies at once and a decrease waits; sync;
   - the two-step admin handover;
+  - scheduled guardian replacement and removal;
   - the views.
 - **`rules_private.nr`:**
   - user→user refused in all four entry points;
@@ -668,7 +703,7 @@ Validation gate:
 ```
 bash contracts/aztec/scripts/compile.sh --check && bun run test:noir
 bun run lint && bun run typecheck && bun run test && bun run test:integration
-RUN_ID=p3 bun run net:up && RUN_ID=p3 bun run deploy:local && RUN_ID=p3 bun run verify:local; RUN_ID=p3 bun run net:down
+RUN_ID=p3 bun run net:up && RUN_ID=p3 bun run deploy:local && RUN_ID=p3 bun run verify:local; s=$?; RUN_ID=p3 bun run net:down; test $s -eq 0
 bun run --cwd apps/web test:components && bun run --cwd apps/web build:testnet
 ```
 Pass:
@@ -733,7 +768,7 @@ bash contracts/aztec/scripts/noir-deps.sh --self-test && bash contracts/aztec/sc
 bash contracts/aztec/scripts/compile.sh --check && bun run test:noir
 bash contracts/aztec/scripts/check-sole-consumer.sh --self-test && bash contracts/aztec/scripts/check-sole-consumer.sh
 bun run test:evm && bun run lint && bun run typecheck && bun run test && bun run test:integration
-RUN_ID=p5 bun run net:up && RUN_ID=p5 bun run deploy:local && RUN_ID=p5 bun run verify:local; RUN_ID=p5 bun run net:down
+RUN_ID=p5 bun run net:up && RUN_ID=p5 bun run deploy:local && RUN_ID=p5 bun run verify:local; s=$?; RUN_ID=p5 bun run net:down; test $s -eq 0
 bun run test:e2e
 ```
 Pass:
@@ -784,7 +819,7 @@ Work:
 Validation gate:
 ```
 bun run lint && bun run typecheck && bun run test && bun run test:integration
-RUN_ID=p7 bun run net:up && RUN_ID=p7 bun run deploy:local && RUN_ID=p7 bun run verify:local; RUN_ID=p7 bun run net:down
+RUN_ID=p7 bun run net:up && RUN_ID=p7 bun run deploy:local && RUN_ID=p7 bun run verify:local; s=$?; RUN_ID=p7 bun run net:down; test $s -eq 0
 bun run --cwd apps/web test:components
 ```
 Pass:
@@ -808,7 +843,11 @@ Work:
 - The manifest's `protocolVersion`, `l1.deployer` and `l2.admin`.
 - Strict keyless `verify`.
 - `export`.
-- `smoke` as the acceptance run with `--record`. Its state is namespaced by deployment and run and locked, and it never discards another deployment's pending tickets.
+- `smoke` as the acceptance run with `--record`.
+  - Its state is namespaced by deployment and run and locked, and it never discards another deployment's pending tickets.
+  - It asserts deltas, so a repeat run on the same cast works.
+  - On local it runs its own block heartbeat (`withBlockHeartbeat`), since L1→L2 messages don't become claimable without traffic.
+- `deploy local` hands over to the fixed public local admin and accepts it in the same command.
 - The `demo *` commands.
 - `packages/demo`; `signingKeyFor` moves to bridge-core.
 - Update `budget.ts` and the probe.
@@ -817,7 +856,7 @@ Work:
   - AGENTS.md:
     - commands;
     - the secrets rule, rewritten for keyed runs;
-    - the demo-key carve-out: "derived from fixed public labels in `packages/demo`, demo funds only, never a role, merchant-listed only on testnet; agents may use them without a keyed run";
+    - the demo-key carve-out: "derived from fixed public labels in `packages/demo`, demo funds only, never an admin or minting role, merchant-listed only on local and testnet; agents may use them without a keyed run";
   - A28.
 
 Tests:
@@ -832,11 +871,11 @@ Tests:
 Validation gate:
 ```
 bun run lint && bun run typecheck && bun run test && bun run test:integration
-RUN_ID=p8 bun run net:up && RUN_ID=p8 bun run bridge deploy local && RUN_ID=p8 bun run bridge demo setup local && RUN_ID=p8 bun run bridge smoke local --record deployments/local/p8/tour.json && RUN_ID=p8 bun run bridge verify local && RUN_ID=p8 bun run bridge export local --out deployments/local/p8/export; RUN_ID=p8 bun run net:down
+RUN_ID=p8 bun run net:up && RUN_ID=p8 bun run bridge deploy local && RUN_ID=p8 bun run bridge demo setup local && RUN_ID=p8 bun run bridge smoke local --record deployments/local/p8/tour.json && RUN_ID=p8 bun run bridge smoke local && RUN_ID=p8 bun run bridge verify local && RUN_ID=p8 bun run bridge export local --out deployments/local/p8/export; s=$?; RUN_ID=p8 bun run net:down; test $s -eq 0
 bun run secrets:scan
 ```
 Pass:
-- the acceptance run settles, including the L1 payout;
+- the acceptance run settles, including the L1 payout, and a repeat run on the same cast settles too;
 - both refusals show the exact rule text;
 - the tour validates;
 - the export round-trips;
@@ -850,7 +889,7 @@ Each request is committed and pushed first. The agent runs `env-exec wait` in th
 
 1. Request the admin address:
    ```
-   env-exec request --template deployments/testnet-admin.env.example --slug admin-address -- bash -c 'bun install --frozen-lockfile && bun run bridge admin address'
+   env-exec request --template deployments/testnet-admin.env.example --slug admin-address -- bash -c 'bun install --frozen-lockfile && bun run bridge admin address && bun run secrets:scan'
    ```
    Then commit `TESTNET_ADMIN_ADDRESS` into the deploy template and push.
 2. Deploy:
@@ -858,15 +897,15 @@ Each request is committed and pushed first. The agent runs `env-exec wait` in th
    env-exec request --template deployments/testnet-deploy.env.example --slug deploy -- bash -c 'bun install --frozen-lockfile && bun run probe:testnet && bun run bridge deploy testnet && bun run secrets:scan'
    ```
    Then commit and push `deployments/testnet.json`.
-3. Accept the handover and list the demo merchants. Their addresses come from the keyless `bun run bridge demo status`:
-   ```
-   env-exec request --template deployments/testnet-admin.env.example --slug admin-accept -- bash -c 'bun install --frozen-lockfile && bun run bridge admin accept deployments/testnet.json && bun run bridge merchants add deployments/testnet.json <galactica> <supplier> && bun run secrets:scan'
-   ```
-4. Fund the demo:
+3. Fund the demo and top up the sponsor, which the admin account's deployment in step 4 relies on:
    ```
    env-exec request --template deployments/testnet-fund.env.example --slug demo-fund -- bash -c 'bun install --frozen-lockfile && bun run bridge demo fund deployments/testnet.json && bun run secrets:scan'
    ```
-5. Keyless, in the background (about 2 h, resumable):
+4. Deploy the admin account (sponsored), accept the handover, and list the demo merchants. Their addresses come from the keyless `bun run bridge demo status`:
+   ```
+   env-exec request --template deployments/testnet-admin.env.example --slug admin-accept -- bash -c 'bun install --frozen-lockfile && bun run bridge admin accept deployments/testnet.json && bun run bridge merchants add deployments/testnet.json <galactica> <supplier> && bun run secrets:scan'
+   ```
+5. Keyless, in the background: `demo setup` seeds the L2 float from A_demo, then the acceptance run (about 2 h, resumable):
    ```
    bun run bridge demo setup deployments/testnet.json && bun run bridge smoke deployments/testnet.json --record deployments/testnet-tour.json
    ```
@@ -950,11 +989,11 @@ Work:
 - `e2e/agent.sh`, in order:
   1. ports;
   2. `net:up`;
-  3. `bridge deploy local`;
-  4. `bridge demo setup local`;
-  5. `bridge smoke local --record`;
-  6. build, with the bundle assertions;
-  7. the heartbeat sidecar;
+  3. the heartbeat sidecar, which must run before any L1→L2 message is claimed;
+  4. `bridge deploy local`;
+  5. `bridge demo setup local`;
+  6. `bridge smoke local --record`;
+  7. build, with the bundle assertions;
   8. Playwright;
   9. reap.
 - **Specs:**
@@ -969,7 +1008,7 @@ Validation gate:
 ```
 bun run test:e2e && bun run lint:actions
 ```
-Then dispatch CI e2e on the branch (`gh workflow run showcase.yml --ref <branch>`) and confirm with `gh run view`.
+Then push the branch and dispatch CI e2e on it: `gh workflow run _e2e.yml --ref galactica-compliant-usdc-showcase`, then `gh run watch`. `_e2e.yml` already carries `workflow_dispatch` on `main`, so the branch's own copy runs. `showcase.yml` can't be dispatched before merge.
 
 Pass: green locally on a fresh network, and green in CI within 90 min.
 
@@ -978,19 +1017,20 @@ Layers: browser e2e, local network.
 **P13. Testnet live check.**
 
 Work:
-- `playwright.testnet.config.ts`: `baseURL` is `SHOWCASE_URL`, or a `vite preview` of the `build:testnet` output.
+- `playwright.testnet.config.ts`: `baseURL` is `SHOWCASE_URL`. For this phase that's the hosted Workers preview URL of the showcase branch (Ask 8), so headers, CSP and isolation are tested as served. A local `vite preview` is only for development.
 - `test:testnet` covers:
   - the tour and its identity;
   - live refusals by simulation;
   - one proven action if P10 said go (Galactica refunds Alice 0.01);
   - the Ethereum lane's state.
-- Docs: the showcase sections of `architecture.md` and `operations.md`; A29. Prepare the owner steps for Ask 8.
+- Docs: the showcase sections of `architecture.md` and `operations.md`; A29.
+- At the start of the phase, ask the owner for the Ask 8 change and wait for the preview URL. Push the branch so Workers Builds builds it.
 
 Validation gate:
 ```
-bun run --cwd apps/showcase build:testnet && bun run --cwd apps/showcase test:testnet
+bun run --cwd apps/showcase build:testnet && SHOWCASE_URL=<preview URL> bun run --cwd apps/showcase test:testnet
 ```
-Pass: green against testnet, with no CSP violations in the console.
+Pass: green against the hosted preview on testnet, with no CSP violations in the console. The showcase is live on Workers before hardening starts.
 
 Layers: live-testnet browser.
 
@@ -1033,7 +1073,7 @@ If deployed bytes changed, run the redeploy chain:
 4. **Close-out**, as the stack's docs-only top layer:
    1. an `## Outcome` block right after this front matter: date, status, PRs, what was dropped and why, and a line retiring the seeds;
    2. promote the generalizable gotchas into `implementations-plan/lessons.md`, keeping it under about 8 KiB: deduplicate, and retire what the new entries supersede;
-   3. move the open follow-ups to `implementations-plan/follow-ups.md`: multisig tooling, guardian, delayed adds, mainnet fee path, rollup upgrade, sponsor strategy, demo rotation;
+   3. move the open follow-ups to `implementations-plan/follow-ups.md`: multisig tooling, delayed adds, mainnet fee path, rollup upgrade, sponsor strategy, demo rotation;
    4. `git mv implementations-plan/galactica-compliant-usdc implementations-plan/archive/galactica-compliant-usdc` in its own commit, then repair the links;
    5. move the index line to `archive/index.md`.
 
@@ -1056,17 +1096,17 @@ If deployed bytes changed, run the redeploy chain:
 | Close-out | `galactica-compliant-usdc-close-out` | docs only | arc 6 | off |
 
 **During implementation**
-- `gh stack init --adopt worktree-galactica-compliant-usdc` at the start.
+- `gh stack init worktree-galactica-compliant-usdc` at the start. It adopts the existing branch; there is no `--adopt` flag.
 - `gh stack add <next-branch>` at each arc boundary, after that arc's loop converges.
 - Branches are pushed as checkpoints (`gh stack push`), and must be before every keyed run. Pushing opens no PR and runs no PR-gate CI.
 
 **Delivery**, after every loop converges:
 1. `gh stack sync` if `main` moved.
-2. `gh stack submit --auto`, then `gh pr edit` each body. Bodies end with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
+2. `gh stack submit --auto --open` (without `--open`, `--auto` creates drafts, which `gh stack merge` skips), then `gh pr edit` each body. Bodies end with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
 3. Label the showcase and hardening PRs `e2e`, then `gh pr checks --watch`.
-4. `gh stack add galactica-compliant-usdc-close-out`, the close-out commits, then `gh stack submit --auto`.
+4. `gh stack add galactica-compliant-usdc-close-out`, the close-out commits, then `gh stack submit --auto --open`.
 
-Merging (`gh stack merge --squash` on the close-out lands the whole stack) is the user's call. At merge, the user makes the Workers Builds change (Ask 8). Then run `SHOWCASE_URL=<worker URL> bun run --cwd apps/showcase test:testnet`.
+Merging (`gh stack merge --squash` on the close-out lands the whole stack) is the user's call. Workers Builds already points at `apps/showcase` (Ask 8), so production redeploys from `main` at merge. Then run `SHOWCASE_URL=<production URL> bun run --cwd apps/showcase test:testnet`.
 
 ## Decision ledger
 
@@ -1076,20 +1116,20 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 |---|---|---|---|---|
 | 1 | Merchant list in the token; ABI superset | M, F | Separate registry behind `auth_contract` for strict ABI identity (C): an extra private call per restricted transfer, because a DPM is read by its owner | disputed (Ask 2) |
 | 2 | Register `PublicImmutable<bool>` + off switch `DPM<bool, 3600>` | F (M: PublicImmutable) | Marker nullifier (C): TXE-invisible without hand-written pre-asserts; small saving | agreed |
-| 3 | `InitialDelay = 3600`; the setting applied at add; `set_merchant_delay` + admin-only `sync_merchant_delay` driven by the CLI | F (C: 3600 floor) | Batched on-chain delay proposals (C): heavy for a rare action. Build-time-only delay (M): a 1 h deployment would need a rebuild | agreed |
-| 4 | No guardian in v1 | M | Guardian that cancels scheduled changes (C, F): optional in the explainer; the multisig covers it | disputed (Ask 4) |
+| 3 | `InitialDelay = 3600`; the setting applied at add; `set_merchant_delay` + admin-only `sync_merchant_delay` driven by the CLI | F (C: 3600 floor) | Batched on-chain delay proposals (C): heavy for a rare action. Build-time-only delay (M): a 1 h deployment would need a rebuild | agreed (see 24 for C's remaining point) |
+| 4 | A cancel-only guardian, replaced on the delay, unset on testnet | C, F | No guardian (M): only the possibly compromised admin could cancel a malicious switch-off | agreed after the contradiction check (Ask 4) |
 | 5 | `stamp(c)` + deterministic `pad(c)` in `merchant_stamp` | F (M: stamp + random pad) | `stamp(c, completer)` with no pad (C): the upstream validity commitment already binds the completer, and without a pad refund requests stand out | agreed |
-| 6 | Hints choose the side in the token (the ABI can't change); explicit `bind` / `as_merchant` flags in the bridge | M, F (hints); C (flags) | Hints in the bridge (F): an oracle-side note lookup, harder to test in TXE; the bridge's ABI changes anyway | agreed |
+| 6 | Hints choose the side in the token (the ABI can't change); explicit `bind` / `as_merchant` flags in the bridge | M, F (hints); C (flags) | Hints in the bridge (F): an oracle-side note lookup, harder to test in TXE; the bridge's ABI changes anyway | agreed after the contradiction check (F accepts the flags) |
 | 7 | Merchants bind on private claims | C, F | A merchant claim branch (M): an extra cross-contract call in every merchant claim, and public deposits already serve multi-treasury merchants | agreed (Ask 3) |
 | 8 | Two returns: private (derived secret) and public (raw secret, `!is_merchant(to)`) | F (M: two, without the guard) | One private return taking a raw secret (C): a copied public-claim secret could bounce a merchant's deposit | agreed |
-| 9 | Returns are paused with everything else | M, F | Returns open while paused (C): the pause is the explainer's "stop everything" | agreed |
+| 9 | The pause also blocks returns | M, F | Returns open while paused (C): the explainer's pause "blocks every deposit and withdrawal", and a return is a withdrawal to Ethereum | agreed |
 | 10 | `initialize(…, router)`; the router takes `token` explicitly | M, F | One-shot `setRouter` (C): an extra privileged call with an ordering hazard | agreed |
 | 11 | Content formats `(amount, depositor)` / `(to, amount, depositor)` | M, F | `(depositor, amount)` ordering (C): no benefit; F's vectors were verified | agreed |
 | 12 | Public deposits survive, claimable only by merchants | C, F, M | Dropping them (none) | agreed |
 | 13 | Live Ethereum lane with a bounded public A_demo key and a replay fallback | C, F | Recorded-only lane (M): loses the live L1 story; the exposure is testnet assets | agreed |
 | 14 | One PXE hosting four accounts | F | One PXE per actor (C, brief): 4× memory and sync | agreed |
 | 15 | `packages/demo`, shared by the deployer and the showcase; `signingKeyFor` in bridge-core | F (C: shared browser-safe module) | Cast inside the app (M): the deployer's smoke and funding need it too | agreed |
-| 16 | Keyed runs split by role (deploy / admin / fund); separate generated admin key; keyless `smoke` via the demo cast | F | One key for everything (M, C default): no handover rehearsal, broader exposure | agreed |
+| 16 | Keyed runs split by role (deploy / admin / fund); separate generated admin key; keyless `smoke` via the demo cast | F, C (separate admin account) | One key for everything (M): no handover rehearsal, broader exposure | agreed |
 | 17 | Keyless strict `verify`; `protocolVersion`; `consumed-unknown` | C, F | – | agreed |
 | 18 | Proving harness with numeric thresholds in P10, not an early spike | F (C: its own infrastructure phase) | Early throwaway spike (M): contract design doesn't depend on it, and the UI supports both modes | agreed |
 | 19 | CI e2e stays opt-in by label; delivery requires it green | F | Automatic e2e on relevant paths (C): about an hour of CI per push | agreed |
@@ -1097,10 +1137,42 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 | 21 | Don't push planning commits to `main` | M | "Push the planning root to main first" (F, citing precedent): violates never pushing to main; merging is the user's call | agreed |
 | 22 | Hardening after testnet goes live | brief (user) | Harden before deploy (none): the user fixed the order | agreed |
 | 23 | `try_prove_merchant` returns `bool`, so the bridge refuses with its own rule text | F | An asserting view (M): the user would see the token's message instead of the exit rule | agreed |
+| 24 | Delay increases apply at once (upstream's rule); the docs and ELI5 correct the explainer's "never instant" | M, F | An on-chain notice period for increases (C): an increase only slows switch-offs, and it's bounded at 86400 | disputed (C) |
+| 25 | The showcase goes live on a hosted Workers preview before hardening; production switches at merge | C | Local `vite preview` in P13 (M, F): not "live on Workers" before hardening, as the user ordered | agreed |
+| 26 | A duplicate-nullifier failure reconciles the original submission before any retry | C | Blind retry once (F, M): could repeat a payment, burn or deposit that landed | agreed |
+| 27 | CI e2e before merge by dispatching `_e2e.yml` on the branch | M | No pre-merge CI e2e (F): `_e2e.yml` carries `workflow_dispatch` on `main` | agreed |
 
 ## Audit log (adopted vs rejected)
 
-To be filled by the contradiction check, the double audit and the final codex pass.
+### Contradiction check (codex, resumed planning session; Opus planner, resumed)
+
+**Adopted**
+- **Local verify vs local demo merchants (C):** demo merchants are allowed on local and testnet; demo keys never hold an admin or minting role.
+- **Blind duplicate-nullifier retry could repeat a landed action (C):** reconcile first; persist deposit secrets and submission records (ledger 26).
+- **The acceptance run can't always `bind=true` (C):** `bind` comes from `get_funding_address`; the smoke asserts deltas and runs twice in P8; a poisoned demo binding means rotating the cast.
+- **Gates masked failures behind `; net:down` (C):** now `s=$?; …; test $s -eq 0`.
+- **Heartbeat started after the smoke that needs it (C):** it now starts before; local smoke owns a heartbeat.
+- **Admin account never deployed or funded (C, F):** `admin accept` deploys it through the sponsor; P9 funds the sponsor first.
+- **Showcase "live" only after merge, which is after hardening (C):** hosted preview before P14 (Ask 8, ledger 25).
+- **Stamps outliving a switch-off were presented as settled (C):** acceptance is recorded, the headline narrowed, and the row-9 rationale fixed.
+- **Ledger 16 misattributed (C):** fixed.
+- **Local had no admin (F):** a fixed public local admin, with the handover in `deploy local`.
+- **The /loop hard limit forbade the keyless demo steps (F):** carve-out added.
+- **`gh stack init --adopt` and drafts from `--auto` (F):** `gh stack init <branch>` and `submit --auto --open`, checked against `gh stack --help`.
+- **The Outcome over-claimed testnet coverage (F):** reworded.
+- **Exit refusals without the rule text (F):** an unconstrained pre-check, with both branches asserting the rule.
+- **Guardian (F, disputing ledger 4):** built, unset on testnet.
+- **Where the L1 RPC comes from (F):** a committed public endpoint; the build refuses keyed variables; a bundle assertion.
+- **Citations (F):** fixed; the expiry parity is cited, and labelled an inference pinned by A21; I6 no longer claims a measurement.
+- **P9 order and gaps (F):** `secrets:scan` in every chain; funding before admin; L2 float seeding in `demo setup`.
+- **Guard v2 mutants for the exit rules (F):** added.
+- **Threat model (F):** added the 1 h liveness cost and gift revocation.
+
+**Rejected**
+- **An on-chain notice period for delay increases (C, high):** upstream applies increases at once by design (`scheduled_delay_change.nr:55-111`), and an increase can only slow switch-offs. The explainer's wording is corrected instead (ledger 24).
+- **"CI e2e dispatch is impossible before merge" (F):** true for `showcase.yml` only. `_e2e.yml` is dispatchable from `main` and runs the branch's copy (ledger 27).
+
+**Still disputed:** ledger 24 (C).
 
 ## Seeds (draft; finalized after approval)
 
@@ -1117,7 +1189,7 @@ Alternative: `/loop`
 1. **Reality check**: read implementations-plan/galactica-compliant-usdc/plan.md and lessons/ (authoritative state — not the chat), including its Outcome & Quality Bar section: every step is judged against those criteria, not just against "it runs". On a stack, read them from the TOP layer (`gh stack view` names it; `git show <top-branch>:<path>`), never from a lower arc's checkout. If that path is gone, the close-out has run: `git fetch -q origin && git cat-file -e origin/main:implementations-plan/archive/galactica-compliant-usdc/plan.md` succeeds → it merged and the plan is done: STOP and say so. Fails → delivered and awaiting my merge: babysit only (CI per step 2, fixes on the arc they belong to then `gh stack sync`, keep the Outcome true); once every PR is green, report that and STOP. A live plan.md that already carries an `## Outcome` block means a close-out was interrupted: finish it. Otherwise, native task list empty (fresh session)? rebuild it from plan.md, one task per remaining step; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (multi-arc: `gh stack view`). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
 2. **Waiting on CI or a keyed run is fine** — confirm it's progressing (`gh run watch <run-id>` up to 10 minutes; `env-exec status <id>`). A step that needs a keyed run: commit and push, file `env-exec request`, start `env-exec wait <id>` in the background, print the exact `op-remote <host> <id>` line for me, and work on keyless steps meanwhile.
 3. **No task in hand?** Pick the next pending step from plan.md and start it. After each meaningful edit, run `bun run lint` + the touched packages' tests. Then commit → push (`gh stack push`; `gh stack sync` if main or a lower arc moved).
-4. **Stuck, or facing a decision you'd normally bring to me?** Call `/codex high` with full context until you reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never push to main, never publish or deploy outside the approved keyed runs, never create or handle secrets outside keyed runs, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
+4. **Stuck, or facing a decision you'd normally bring to me?** Call `/codex high` with full context until you reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never push to main, never publish or deploy outside the approved keyed runs — except the keyless demo-cast actions plan.md runs with the public demo keys (P9 step 5, P13) — never create or handle secrets outside keyed runs, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
 5. **Same step failed 5 times?** Stop retrying; reassess with codex, then continue down the agreed path.
 6. **Phase green?** "Green" means the phase's validation gate as written in plan.md passes. Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/galactica-compliant-usdc/lessons/phase-N.md`, advance. Arc boundary crossed (per the Delivery table)? Run the arc's codex loop FIRST (`code_review` is off: no /code-review) with the arc map and the plan's no-over-engineering + comment-quality rules until a round yields nothing material — THEN `gh stack add <next-arc-branch>`.
 7. **All phases ✓?** Run the final cross-arc pass (fresh codex, net diff from e1103f8, seams / duplication / plan drift, same rules, loop until clean). Then Delivery per plan.md — the FIRST time any PR is opened: `gh stack sync`, `gh stack submit --auto`, `gh pr edit` bodies, `e2e` labels; then the close-out layer (`gh stack add galactica-compliant-usdc-close-out`, its commits, `gh stack submit --auto`), then `gh pr checks --watch`. Then write the wrap-up: what shipped, every contentious decision codex and I debated — each with ELI5 context (the question, the options, why we picked ours) — and open items. Surface and stop — merging is my call.
