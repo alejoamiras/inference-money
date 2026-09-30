@@ -16,8 +16,8 @@ function fixture(pinned: string, installed: string, bins = ["internal-bin/anvil"
 		writeFileSync(join(base, bin), "#!/bin/sh\n")
 		chmodSync(join(base, bin), 0o755)
 	}
-	mkdirSync(join(base, "node_modules", "@aztec", "aztec"), { recursive: true })
-	writeFileSync(join(base, "node_modules", "@aztec", "aztec", "package.json"), JSON.stringify({ version: installed }))
+	mkdirSync(join(base, "node_modules", "@aztec-labs", "aztec"), { recursive: true })
+	writeFileSync(join(base, "node_modules", "@aztec-labs", "aztec", "package.json"), JSON.stringify({ version: installed }))
 	return { dir, root, env: { AZTEC_NODE_HOME: base }, base }
 }
 

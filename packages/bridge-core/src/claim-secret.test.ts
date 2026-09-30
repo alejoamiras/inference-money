@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
-import { poseidon2HashBytes } from "@aztec/foundation/crypto/sync"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { poseidon2HashBytes } from "@aztec-labs/foundation/crypto/sync"
+import { Fr } from "@aztec-labs/foundation/curves/bn254"
+import { AztecAddress } from "@aztec-labs/stdlib/aztec-address"
 import { claimSecretHash, DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET, deriveClaimSecret } from "./claim-secret"
 
 // The same literals as contracts/aztec/keystone: a drift strands every private deposit made against the derivation.

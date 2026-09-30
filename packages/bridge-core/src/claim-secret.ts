@@ -7,10 +7,10 @@
  * relayer holding the salt) can finish it but never redirect it. That holds only while no raw-secret consumption path
  * exists on L2 (check-sole-consumer.sh), not because the salt stays private.
  */
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { Fr } from "@aztec/aztec.js/fields"
-import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
-import { computeSecretHash } from "@aztec/stdlib/hash"
+import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { poseidon2HashWithSeparator } from "@aztec-labs/foundation/crypto/sync"
+import { computeSecretHash } from "@aztec-labs/stdlib/hash"
 
 /**
  * `poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32`, equal to the Noir constant; the

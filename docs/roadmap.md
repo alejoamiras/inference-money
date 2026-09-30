@@ -7,7 +7,7 @@ Active plan: [`implementations-plan/usdc-bridge/plan.md`](../implementations-pla
 | 1 | Repo scaffold, L1 contracts, L2 contracts | delivered (PR #1) |
 | 2 | bridge-core, local network + deployer, integration suite | delivered (PR #2) |
 | 3 | React app, wallet layer, Playwright e2e | delivered (PR #3) |
-| 4 | Aztec v6 bump, testnet deploy + smoke, testnet build | waits on the Aztec v6 release |
+| 4 | Aztec v6 bump, testnet deploy + smoke, testnet build | in progress (`usdc-bridge-testnet`) |
 
 ## Deferred to mainnet
 

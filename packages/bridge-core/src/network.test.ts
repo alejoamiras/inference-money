@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { PublicClient, WalletClient } from "viem"
 import { assertNetworkIdentity, assertSigningContext, NetworkMismatchError, walletChainIdOf } from "./network"
 import { MANIFEST as M } from "./test/fixtures"

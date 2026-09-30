@@ -12,6 +12,13 @@ export interface FeesPerGas {
 export const TESTNET_DEPLOY_AND_SMOKE_TXS = [
 	"deploy deployer account",
 	"deploy smoke recipient account",
+	// Standard contracts the node lacks (testnet: all three), a class and an instance tx each.
+	"publish AuthRegistry class",
+	"publish AuthRegistry instance",
+	"publish PublicChecks class",
+	"publish PublicChecks instance",
+	"publish HandshakeRegistry class",
+	"publish HandshakeRegistry instance",
 	"deploy token_minter_proxy",
 	"deploy Token",
 	"deploy token_bridge",

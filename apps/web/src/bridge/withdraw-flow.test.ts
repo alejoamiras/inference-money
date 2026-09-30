@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { TxHash } from "@aztec/aztec.js/tx"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { TxHash } from "@aztec-labs/aztec.js/tx"
 import { ExitRevertedError, ExitUnconfirmedError, SponsorUnavailableError, StaleProofError } from "@inference-money/bridge-core"
 import { zeroAddress } from "viem"
 import { describe, expect, it, vi } from "vitest"

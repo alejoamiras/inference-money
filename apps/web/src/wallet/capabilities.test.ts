@@ -1,4 +1,4 @@
-import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec-labs/standard-contracts/auth-registry/constants"
 import { describe, expect, it } from "vitest"
 import { MANIFEST } from "@/config/network"
 import { buildBridgeManifest } from "./capabilities"

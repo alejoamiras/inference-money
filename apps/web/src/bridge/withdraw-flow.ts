@@ -1,5 +1,5 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { TxHash } from "@aztec/aztec.js/tx"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { TxHash } from "@aztec-labs/aztec.js/tx"
 import {
 	AlreadyWithdrawnError,
 	assertExitIntent,

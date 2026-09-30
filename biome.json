@@ -10,8 +10,7 @@
 			"!**/target",
 			"!contracts/evm/lib",
 			"!contracts/evm/out",
-			"!implementations-plan",
-			"!packages/bridge-core/vendor/*.json"
+			"!implementations-plan"
 		]
 	},
 	"formatter": {
@@ -53,11 +52,11 @@
 							"level": "error",
 							"options": {
 								"paths": {
-									"@aztec/ethereum": "One viem: read L1 through canonical viem (see bridge-core/src/outbox.ts)."
+									"@aztec-labs/ethereum": "One viem: read L1 through canonical viem (see bridge-core/src/outbox.ts)."
 								},
 								"patterns": [
-									{ "group": ["@aztec/ethereum/*"], "message": "One viem: read L1 through canonical viem." },
-									{ "group": ["@aztec/aztec.js/ethereum"], "message": "One viem: read L1 through canonical viem." }
+									{ "group": ["@aztec-labs/ethereum/*"], "message": "One viem: read L1 through canonical viem." },
+									{ "group": ["@aztec-labs/aztec.js/ethereum"], "message": "One viem: read L1 through canonical viem." }
 								]
 							}
 						}

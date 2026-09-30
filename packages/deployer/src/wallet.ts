@@ -1,25 +1,14 @@
-import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
-import type { Tx } from "@aztec/stdlib/tx"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { authorizeLegacyHandshakeReads, registerLegacyHandshakeRegistry } from "@inference-money/bridge-core"
+import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import type { Tx } from "@aztec-labs/stdlib/tx"
+import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { withOwnedTmpDir } from "./owned-tmp"
 
 /**
- * An ephemeral wallet that can execute the 5.0.0 sponsor (see bridge-core's compat). `prove: false` only for a local
- * correctness loop. Its key stores land in TMPDIR, so open it inside an owned tmp scope.
+ * An ephemeral wallet; `prove: false` only for a local correctness loop. Its key stores land in TMPDIR, so open it
+ * inside an owned tmp scope.
  */
-export async function openBridgeWallet(node: AztecNode, opts: { prove: boolean }): Promise<EmbeddedWallet> {
-	const wallet = await EmbeddedWallet.create(node, {
-		ephemeral: true,
-		pxe: { proverEnabled: opts.prove, hooks: { authorizeUtilityCall: authorizeLegacyHandshakeReads } },
-	})
-	try {
-		await registerLegacyHandshakeRegistry(wallet)
-		return wallet
-	} catch (e) {
-		await wallet.stop()
-		throw e
-	}
+export function openBridgeWallet(node: AztecNode, opts: { prove: boolean }): Promise<EmbeddedWallet> {
+	return EmbeddedWallet.create(node, { ephemeral: true, pxe: { proverEnabled: opts.prove } })
 }
 
 /** {@link openBridgeWallet} inside an owned tmp scope, stopped before the scope's dir is removed. */

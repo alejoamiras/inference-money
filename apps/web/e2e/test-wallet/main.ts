@@ -2,8 +2,8 @@
  * The page the app frames. The connection handler starts synchronously (the `late` profile excepted) so the SDK's
  * discovery probe always finds it; the wallet itself, a PXE, boots on the first secure message.
  */
-import { Fr } from "@aztec/aztec.js/fields"
-import { IframeConnectionHandler } from "@aztec/wallet-sdk/iframe/handlers"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { IframeConnectionHandler } from "@aztec-labs/wallet-sdk/iframe/handlers"
 import { type Fault, faultFor, type Parked, parkedCall } from "./faults"
 import { violation } from "./guard"
 import { APP_ID, LATE_WALLET_DELAY_MS, parseProfile, seedsFor, walletIdOf } from "./profile"

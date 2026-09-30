@@ -77,11 +77,11 @@ runs:
         PINS: ${{ github.action_path }}/nargo-${{ steps.pins.outputs.nargo }}.sha256
       run: |
         dir="$RUNNER_TEMP/nargo"
-        asset=nargo-x86_64-unknown-linux-gnu.tar.gz
+        asset=noir-x86_64-unknown-linux-gnu.tar.gz
         mkdir -p "$dir"
         curl -fsSL "https://github.com/noir-lang/noir/releases/download/v${NARGO_VERSION}/$asset" -o "$dir/$asset"
         (cd "$dir" && grep -v '^#' "$PINS" | sha256sum -c -)
-        tar -xzf "$dir/$asset" -C "$dir" nargo
+        tar -xzf "$dir/$asset" -C "$dir" ./nargo
         echo "NARGO=$dir/nargo" >> "$GITHUB_ENV"
 
     - if: inputs.aztec == 'true'

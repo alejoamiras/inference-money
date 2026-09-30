@@ -45,7 +45,7 @@ export default defineConfig(() => {
 				},
 			],
 			// Two copies of a wasm binding package split init from use, and the wasm instance never resolves.
-			dedupe: ["@aztec/noir-noirc_abi", "@aztec/noir-acvm_js"],
+			dedupe: ["@aztec-foundation/noir-noirc_abi", "@aztec-foundation/noir-acvm_js"],
 		},
 		plugins: [
 			react(),

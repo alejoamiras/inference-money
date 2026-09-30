@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-toolchains
-      # Advisory: every current finding is transitive through the exact-pinned @aztec/* stack, which is bumped only as a
+      # Advisory: every current finding is transitive through the exact-pinned @aztec-labs/* and @aztec-foundation/* stack, which is bumped only as a
       # whole (toolchain.json). The step summary keeps them visible on every dependency PR.
       - name: Audit the workspace and the Aztec toolchain and node lockfiles
         continue-on-error: true

@@ -13,8 +13,8 @@ allow_paths = ["../../node_modules"]
 auto_detect_remappings = false
 remappings = [
   "@oz/=node_modules/@openzeppelin/contracts/",
-  "@aztec/=node_modules/@aztec/l1-artifacts/l1-contracts/src/",
-  "@aztec-blob-lib/=node_modules/@aztec/l1-artifacts/l1-contracts/src/core/libraries/rollup/",
+  "@aztec/=node_modules/@aztec-foundation/l1-artifacts/l1-contracts/src/",
+  "@aztec-blob-lib/=node_modules/@aztec-foundation/l1-artifacts/l1-contracts/src/core/libraries/rollup/",
   "forge-std/=node_modules/forge-std/src/",
 ]
 

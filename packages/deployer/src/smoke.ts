@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { FeePaymentMethod } from "@aztec/aztec.js/fee"
-import { Fr } from "@aztec/aztec.js/fields"
-import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
-import { FeeJuiceContract } from "@aztec/aztec.js/protocol"
-import { TxHash } from "@aztec/aztec.js/tx"
-import { getFeeJuiceBalance } from "@aztec/aztec.js/utils"
-import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import { FeeJuiceContract } from "@aztec-labs/aztec.js/protocol"
+import { TxHash } from "@aztec-labs/aztec.js/tx"
+import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
+import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	assertNetworkIdentity,
 	type BridgeManifest,

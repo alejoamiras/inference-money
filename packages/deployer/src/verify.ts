@@ -1,8 +1,8 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import type { AztecNode } from "@aztec/aztec.js/node"
-import { getFeeJuiceBalance } from "@aztec/aztec.js/utils"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
+import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
 import {
 	assertNetworkIdentity,
 	BRIDGE_CONTRACTS,
