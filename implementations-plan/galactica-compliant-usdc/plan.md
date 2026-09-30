@@ -7,7 +7,7 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "consolidated draft 2026-09-30: contradiction check and double audit applied; final codex pass pending"
+status: "consolidated draft 2026-09-30: contradiction check, double audit and final codex pass (conditional approve) applied; awaiting approval"
 ---
 
 # galactica-compliant-usdc
@@ -58,7 +58,7 @@ Roles, used throughout:
 **A future maintainer**:
 - Every rule has an assurance-map cell (A20–A29) that names its tests.
 - Every cross-toolchain literal is pinned in each toolchain that uses it: three content hashes (Noir, Solidity, TypeScript), two stamp separators and the side-hint capsule slot (Noir, TypeScript).
-- The fork's delta from upstream is reviewable. P1 lands a verbatim copy, and the provenance header lists every change made after it.
+- The fork's delta from upstream is reviewable. P1 lands a verbatim copy, so a diff against that commit is the delta, and the provenance header names the upstream commit and summarizes the delta in a few lines.
 
 **Good enough stops at:**
 - no x402 end-to-end test;
@@ -116,20 +116,20 @@ merchant_off: Map<AztecAddress, DelayedPublicMutable<bool, 3600, Context>, Conte
   - `add_merchant(account)`:
     - rejects zero and already-registered accounts;
     - runs `merchants.at(a).initialize(true)`, then `merchant_off.at(a).schedule_delay_change(merchant_delay)`;
-    - emits `MerchantAdded { account }`.
+    - emits `MerchantAdded { account }` and `MerchantDelayScheduled { account, delay, effective_at }`.
   - `schedule_merchant_off(account, off: bool)`:
     - the account must be registered;
     - a no-op if the latest scheduled value already equals `off`, so repeat calls never restart the clock;
     - scheduling the current value is how a pending change is cancelled;
     - emits `MerchantOffScheduled { account, off, effective_at }`.
   - `set_merchant_delay(delay)`: enforces 3600 ≤ delay ≤ 86400, and also schedules the guardian slot's delay.
-  - `sync_merchant_delay(account)`: a no-op when the entry's scheduled delay already equals the setting.
+  - `sync_merchant_delay(account)`: a no-op when the entry's scheduled delay already equals the setting; otherwise it emits `MerchantDelayScheduled`.
   - `propose_merchant_admin(new)`, where zero cancels.
   - `schedule_merchant_guardian(guardian)`: takes effect after the delay; zero removes the guardian.
 - `accept_merchant_admin()`: public, pending admin only.
 - `cancel_merchant_change(account)`: public, admin or guardian.
   - Requires a pending change: a scheduled value that differs from the current one, or a pending delay decrease. Re-scheduling an unchanged value would only restart the mark, so a guardian could otherwise keep an entry marked forever.
-  - Re-schedules the current value, and the current delay if a decrease is pending.
+  - Re-schedules the current value, and the current delay if a decrease is pending, emitting the matching events. So every change to an entry has an event, and the events form a complete feed of the list.
   - The guardian can do nothing else.
 - Public views:
   - `is_merchant(account) -> bool`, which is `merchants.at(a).is_initialized() & !merchant_off.at(a).get_current_value()`;
@@ -164,8 +164,12 @@ fn _assert_merchant(x) {
 ```
 
 **The side hint.** `merchant_side_hint` first loads a transient capsule: `capsules::load(this, MERCHANT_SIDE_SLOT, AztecAddress::zero())`, one field holding 0, 1 or 2. The zero address is the global capsule scope, always allowed (`pxe/storage/capsule_store/capsule_service.js:11-15`), and the class registry passes its bytecode the same way (`contract_class_registry_contract/src/main.nr:77-81`).
-- bridge-core and the showcase always attach it, with the side computed from the whole merchant list, which they sync in bulk from the token's `MerchantAdded` and `MerchantOffScheduled` events. When both sides are merchants they pick one with no pending change, so the tx's expiry isn't cut short. One capsule serves every restricted call in its tx, so the SDK never batches calls whose sides differ.
-- Without a capsule (a generic wallet), the hint probes the anchor block through oracles. It checks the register nullifier with `check_nullifier_exists` and evaluates the DPM slots with `ScheduledValueChange::get_current_at(anchor_ts)`. It probes the counterparty before the sender (the stamp before `from` when paying a request), and stops at the first merchant with no pending change.
+- The choice follows three rules, the same in the SDK and in the fallback probe:
+  1. Any eligible merchant side is kept; the answer is "neither" only when no side is a merchant.
+  2. When opening a request (`initialize_transfer_commitment`, `transfer_private_to_public_with_commitment`), the recipient is proven whenever it is a merchant, so a merchant's request is stamped, never padded.
+  3. Otherwise, between two merchants, prove the one whose entry has no change scheduled ahead, which keeps the tx's expiry longest. A cancel or switch-on schedules one too (mechanics 3).
+- bridge-core and the showcase always attach it. They compute the side from the token's entry events, which they sync in bulk for the whole list. One capsule serves every restricted call in its tx, so the SDK never batches calls whose sides differ.
+- Without a capsule (a generic wallet), the hint probes the anchor block through oracles. It checks the register nullifier with `check_nullifier_exists` and evaluates the DPM slots with `ScheduledValueChange::get_current_at(anchor_ts)`. It probes the counterparty before the sender, and the stamp before `from` when paying a request.
 - A capsule or probe that picks the wrong side fails simulation. The SDK re-syncs the list and retries once.
 
 A merchant check costs two historical reads, about 8k gates (inference: small next to the kernels; see Assumptions). What the queries reveal to the wallet's node is in the privacy ledger.
@@ -254,7 +258,12 @@ Two planners computed these independently with viem during planning, and the sam
   - the ticket gains `depositor`, read from the router's `Deposit` event or the portal's new event field.
 - `return.ts`: builds an exit ticket for `withdraw(depositor, amount, 0)` and reuses the exit resume and finish machinery.
 - `merchants.ts`: the list, synced in bulk from the token's events, and the side capsule for every restricted call.
-- `payments.ts` (open, pay, `isStamped`) and `stamp.ts`. Upstream completion is not single-use, and the recipient discovers only the first completion, so a second payment into the same request is lost (`uint_note.nr:183-188`). `pay` therefore refuses a commitment it has already paid or is paying: a persisted record per commitment, claimed before simulation under a lock. Two devices paying the same request remain a documented residual.
+- `payments.ts` (open, pay, `isStamped`) and `stamp.ts`. Upstream completion is not single-use, and the recipient discovers only the first completion, so a second payment into the same request is lost (`uint_note.nr:183-188`). So `pay` refuses a commitment it has already paid or is paying, with one record per commitment:
+  - `reserved`, claimed under an exclusive lock before simulation; a failure before proving releases it;
+  - `sent`, with the tx hash and expiry recorded after proving and before the send. It is reconciled by that hash, and released only once the expiry passes without inclusion, so an uncertain send never allows a second one;
+  - `paid`, once the tx is finalized.
+
+  The store is injected: `localStorage` under Web Locks in the showcase, and the smoke's locked state directory in the CLI. Tests cover a reload mid-payment and two tabs. Galactica's own x402 client doesn't go through `payments.ts` and needs the same guard, as `integration.md` says. Two devices paying the same request remain a residual.
 - `rules.ts`: the refusal strings, plus a mapper from simulation errors to rule ids.
 - Preflights, before any signing or proving:
   - a public deposit's recipient must be a merchant;
@@ -269,7 +278,7 @@ Two planners computed these independently with viem during planning, and the sam
 **`packages/demo`** (`@inference-money/demo`, browser-safe, shared by the deployer and the showcase)
 - `cast.ts`: `alice` and `bob` are users; `galactica` and `supplier` are merchants. Every key is public, because the page ships it.
   - The merchants' Aztec secrets and all L1 keys derive from the deployment: `sha256("inference-money/demo/<bridge>/<actor>/aztec|ethereum")`, reduced into the field or [1, n). A_demo is alice's L1 key and B_demo is bob's.
-  - The users' Aztec secrets also take a random tag: `sha256("inference-money/demo/<bridge>/<tag>/<actor>/aztec")`. `demo setup` draws the tag, binds alice to A_demo and bob to B_demo with their first claims, and only then writes the tag to `deployments/testnet-demo.json` (on local, the run's directory). So nobody can bind a user account before the demo does, and a rotation (`demo setup --rotate`) draws a tag nobody can predict.
+  - The users' Aztec secrets also take a random tag: `sha256("inference-money/demo/<bridge>/<tag>/<actor>/aztec")`. `demo setup` draws the tag and binds alice to A_demo and bob to B_demo with their first claims. It waits until both claims are finalized (`waitClaimFinalized`), because a pruned binding could be re-bound by anyone once the tag is public, and only then writes the tag to `deployments/testnet-demo.json` (on local, the run's directory). Until then its state stays private and resumable. So nobody can bind a user account before the demo does, and a rotation (`demo setup --rotate`) draws a tag nobody can predict.
   - Signing keys: `signingKeyFor`.
 - `tour.ts`: the zod schema for `deployments/testnet-tour.json`:
 
@@ -287,13 +296,14 @@ Two planners computed these independently with viem during planning, and the sam
 | `deploy <local\|testnet> [--merchant-delay <s>]` | `TESTNET_L1_PRIVATE_KEY`, `TESTNET_DEPLOYER_SECRET`, `SEPOLIA_RPC_URL`; plain `TESTNET_ADMIN_ADDRESS` | deploy L1 then L2, wire them, propose both handovers, write the manifest |
 | `admin address` | `TESTNET_ADMIN_SECRET` | print the admin account's address |
 | `admin accept <manifest>` | admin | deploy the admin account through the sponsor if needed, then accept bridge ownership and the merchant admin role |
-| `merchants add <manifest> <acct…>`, `off`, `on`, `delay <s>`, `guardian <addr>` | admin | list operations; `delay` sets the value and syncs every added merchant in the same tx (as few txs as the per-tx call limit allows), so the entries share one change time instead of each carrying its own |
+| `merchants add <manifest> <acct…>`, `off`, `on`, `delay <s>`, `guardian <addr>` | admin | list operations; `delay` sets the value and syncs every added merchant in as few txs as the per-tx call limit allows. Up to that limit the entries share one change time; beyond it they fall into a few cohorts instead of one per merchant |
 | `merchants cancel <manifest> <acct>` | admin or guardian | cancel a pending change |
 | `merchants list <manifest>` | none | status of every added merchant, from `MerchantAdded` events |
 | `pause <manifest> <on\|off>` | admin | bridge pause |
 | `verify <manifest> [--tour <file>] [--node <url>] [--l1-rpc <url>]` | none | strict read-back (below); `--tour` also checks the tour's schema and identity |
 | `smoke <manifest> [--record <file>]` | none (the demo cast) | the acceptance run, including refusals |
 | `export <manifest> --out <dir>` | none | the integration bundle |
+| `manifest-path local` | none | print this `RUN_ID`'s manifest path (run ids carry a checkout hash, `handle.ts:22-26`) |
 | `demo setup [--rotate]` / `status` / `reset <manifest>` | none | `setup`: draw the users' tag (`--rotate`: a new one), deploy the cast's accounts, bind both users, and seed the L2 float with keyless A_demo deposits (a private deposit Alice claims, a public one Galactica claims). On local it first funds A_demo and B_demo from anvil's public dev account and lists the merchants. `status`: the floats and the cast's addresses. `reset`: rebalance with merchant→user refunds |
 | `demo fund <manifest>` | `TESTNET_L1_PRIVATE_KEY`, `SEPOLIA_RPC_URL` | refill A_demo's and B_demo's ETH and USDC, approve Permit2, top up the sponsor |
 | `probe testnet`, `scan secrets` | as today | as today |
@@ -320,13 +330,12 @@ Two planners computed these independently with viem during planning, and the sam
 
 The deploy run never sees the admin secret, and the admin run never sees the L1 key.
 
-**Keyed worktree.** env-exec runs the command in the checkout that filed the request, and accepts any commit that is a branch tip on the remote (its `keyed_pin`). So keyed runs execute from a dedicated worktree, never the working checkout, and later edits or pushes can't reach an approved run. `scripts/keyed-worktree.sh` (P8) has two commands:
-- `sync` moves a detached worktree at `~/.cache/inference-money/keyed` to the current pushed HEAD, pushes that commit as branch `keyed/testnet`, and installs keylessly with `bun install --frozen-lockfile --ignore-scripts`. So no install script, root `prepare` included, ever runs with a secret in its environment.
-- `remove` deletes the worktree and the branch.
-
-Every chain has the shape `bash -c 'trap "s=\$?; bun run secrets:scan || s=1; exit \$s" EXIT; <commands>'`. The scan takes its needles from the environment and runs even when a command failed.
-
-While a keyed run is live, this session installs, builds and tests nothing, because those run third-party code as the same user, which can read the run's environment. It may still edit and commit. Other same-user processes on the host can read it as well; that residual is accepted for testnet keys, and production keys never run on a shared host.
+**The keyed-run recipe** (the one authoritative copy; P9, P15 and the seeds follow it). env-exec runs the command in the checkout that filed the request, and accepts any commit that is a branch tip on the remote (its `keyed_pin`). So keyed runs execute from a dedicated worktree, never the working checkout, and later edits or pushes can't reach an approved run.
+1. Commit, `gh stack push`, then `bash scripts/keyed-worktree.sh sync` (P8). It moves a detached worktree at `~/.cache/inference-money/keyed` to the pushed HEAD, pushes that commit as branch `keyed/testnet`, and installs keylessly with `bun install --frozen-lockfile --ignore-scripts`. So no install script, root `prepare` included, ever runs with a secret in its environment. `keyed-worktree.sh remove` deletes the worktree and the branch.
+2. File `env-exec request` from that worktree. Every chain has the shape `bash -c '<scan-trap>; <commands>'`, where `<scan-trap>` is `trap "s=\$?; bun run secrets:scan || s=1; exit \$s" EXIT`. The scan takes its needles from the environment and runs even when a command failed.
+3. Start `env-exec wait <id>` in the background and print the exact `op-remote <host> <id>` line for the owner.
+4. While the run is live, this session only edits files. It installs, builds, tests and commits nothing, because all of those run third-party code as the same user (the git hooks run Biome and commitlint through `bunx`), and that code can read the run's environment. Other same-user processes on the host can read it as well; that residual is accepted for testnet keys, and production keys never run on a shared host.
+5. Once the run ends, copy its outputs into the working checkout and commit them.
 
 **Showcase** (`apps/showcase`, design F)
 - **Layout.** A header with the two modes. On the left, a composer (ACT AS / ACTION / TO / USDC / Try it, plus the Happy path and Try to cheat chips) and a stage: an Ethereum lane, four wallet cards and the coin. A verdict banner steps through Simulate, Prove, Send, Settle. On the right, the dark "What the world sees" feed.
@@ -527,7 +536,8 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 **Privacy ledger** (documented in `docs/integration.md`, not fixed)
 - **Visible:**
   - Ethereum shows that A deposited and later withdrew, with amounts.
-  - Aztec shows claim, withdraw and return amounts (total-supply writes) and payment-request amounts (completion logs).
+  - Aztec shows claim and withdrawal amounts (total-supply writes) and payment-request amounts (completion logs).
+  - A return mints nothing and shows no amount on Aztec, but its redemption on Ethereum shows recipient and amount, which a public deposit links back to.
   - The merchant list is public.
   - Enqueued pause checks reveal bridge use.
   - A first claim is distinguishable.
@@ -538,7 +548,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **Linkable:**
   - A pending change links that merchant's txs until it takes effect.
   - With D = 1 h, merchant-proving txs are recognisable by expiry.
-  - Delay syncs spread over several blocks would give each merchant its own expiry for up to 23 h, which is why the CLI batches them.
+  - Delay syncs spread over several blocks would give each merchant its own expiry for up to 23 h. The CLI batches them, which leaves one cohort up to the per-tx call limit and a few beyond it.
 - **Your node**, the one your wallet queries, learns which merchant each proof reads (its register nullifier and switch-off slot) and, when you pay a request, its stamp.
   - With the SDK's capsule, the merchant check tells it nothing about your own address.
   - A wallet without the capsule probes the counterparty first, which can reveal the user on the other side of a merchant's transfer.
@@ -570,7 +580,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **Secrets:** a missing variable is reported by name only.
 
 **Domain risks**
-- **Reorg or prune:** a pruned claim takes its binding with it, and re-claiming binds the same depositor.
+- **Reorg or prune:** a pruned claim takes its binding with it, and the owner's re-claim binds the same depositor. Demo accounts are the exception, since anyone holding their public keys could claim first, which is why `demo setup` waits for finality.
 - **Replay:** stopped by message nullifiers, single-use Outbox consumption, per-commitment stamps and `authorize_once`.
 - **A blacklisted or lost funding address:** only a merchant cash-out route remains (documented).
 - **A rollup upgrade** strands the portal (existing follow-up).
@@ -628,7 +638,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **I9 (P9):** the testnet SponsoredFPC can be topped up through the FeeAssetHandler faucet (lessons.md).
 - **I10 (P10):** in-browser proving meets P10's thresholds. If not, live mode simulates and shows the recorded proof.
 - **I11 (P13):** Workers Builds deploys only after a successful build. While `main` still has `apps/web`, its builds fail once the root directory points at `apps/showcase`, and the last good deployment stays live.
-- **I12 (P8):** an install with `--ignore-scripts` still runs the deployer and its PXE, because the native addons ship prebuilt. P8's gate runs `verify` from the keyed worktree to prove it.
+- **I12 (P8):** an install with `--ignore-scripts` still runs the deployer, its PXE and real proving, because the native addons and `bb` ship prebuilt. P8's gate proves it from the keyed worktree with `verify`, `demo status` and one real-proof tx, before any secret is requested.
 - **I13 (P3):** the PXE serves a tx's transient capsules to the token when an account entrypoint calls it. P3's integration exercises the capsule path end to end.
 
 **Asks** (resolved at the approval gate; recommendation first)
@@ -698,7 +708,7 @@ Layers: Noir TXE, artifact identity.
 
 **P2. Merchant list, rules, stamp.**
 
-Work: build the token section in full, plus `merchant_stamp`, and list every change in the provenance header.
+Work: build the token section in full, plus `merchant_stamp`, and summarize the delta in the provenance header.
 
 Tests (TXE):
 - **The upstream suite:** its setup lists the accounts it creates as merchants; any other edit is logged.
@@ -748,7 +758,7 @@ Work:
   - `verify` reads slots from the artifact's storage layout, not literals.
 - **Integration:**
   - `merchants.test.ts` [A20];
-  - `transfers.test.ts` [A21]: kernel-validated refusals; the capsule path end to end (I13) and a call without one; expiry parity with a non-reading tx at the same anchor; `change − 1` while a switch-off is pending;
+  - `transfers.test.ts` [A21]: kernel-validated refusals; the capsule path end to end (I13), a call without one, and a forged capsule failing at the kernel; expiry parity with a non-reading tx at the same anchor; `change − 1` while a switch-off is pending;
   - `requests.test.ts` [A22]: a missing stamp is refused; stamp and pad publish equal nullifier counts; a second payment into one request lands on-chain and never reaches the recipient (pinned), and `payments.ts` refuses to send it.
 - **Docs:**
   - A20–A22 and A27 (ABI superset) in the assurance map;
@@ -838,6 +848,7 @@ Pass:
 Work:
 - Build the bridge section, guard v2 and the `claim_secret` comment.
 - Pass `token` in `deploy-l2.ts` and re-pin the bridge's class id.
+- Adapt the TS call sites to the new signatures, so bridge-core's unit tests still encode valid calls: `claimCall` passes `bind` and the exit passes `as_merchant` (`claim.ts:92`, `exit.ts:78`). The flows' logic waits for P7.
 
 Tests:
 - Rewrite `claims.nr`: a relayed public claim still credits a merchant; a user recipient is refused.
@@ -905,7 +916,8 @@ Work:
   - It asserts deltas, so a repeat run on the same cast works.
 - On local, every command that consumes an L1→L2 message (`demo setup`, `smoke`) runs its own block heartbeat (`startBlockHeartbeat`, `local-actors.ts:20-33`), since messages don't become claimable without traffic. Each beats from an account of its own, so heartbeats never race.
 - `deploy local` hands over to the fixed public local admin and accepts it in the same command.
-- The `demo *` commands.
+- `BRIDGE_PROVE=1` makes local commands prove for real (the local wallet doesn't by default, `local.ts:35`), so a keyed worktree's install can be proven before any secret is requested.
+- The `demo *` commands and `manifest-path`.
 - `packages/demo`; `signingKeyFor` moves to bridge-core.
 - CI: `.github/workflows/demo.yml` in the per-package pattern; `packages/demo/**` joins the `deployer.yml` and `_e2e.yml` path filters.
 - Update `budget.ts` and the probe.
@@ -924,17 +936,18 @@ Tests:
 - `verify` against each injected drift on local.
 - An `export` round-trip into a fresh wallet.
 - The tour schema and the world-view decoder.
+- `demo setup` writes no tag until both binding claims report finalized (a stubbed status).
 - Integration of `smoke --record` on local.
 
 Validation gate:
 ```
 bun run --cwd contracts/evm build && bun run lint && bun run typecheck && bun run test && bun run test:integration
 gh stack push && bash scripts/keyed-worktree.sh sync
-m="$PWD/deployments/local/p8/manifest.json"
-RUN_ID=p8 bun run net:up && RUN_ID=p8 bun run bridge deploy local && RUN_ID=p8 bun run bridge demo setup local && RUN_ID=p8 bun run bridge smoke local --record deployments/local/p8/tour.json && RUN_ID=p8 bun run bridge smoke local && RUN_ID=p8 bun run bridge verify local --tour deployments/local/p8/tour.json && RUN_ID=p8 bun run bridge export local --out deployments/local/p8/export && bun run --cwd ~/.cache/inference-money/keyed bridge verify "$m" && bun run --cwd ~/.cache/inference-money/keyed bridge demo status "$m"; s=$?; RUN_ID=p8 bun run net:down; test $s -eq 0
+k=~/.cache/inference-money/keyed
+RUN_ID=p8 bun run net:up && RUN_ID=p8 bun run bridge deploy local && m="$(RUN_ID=p8 bun run --silent bridge manifest-path local)" && d="$(dirname "$m")" && RUN_ID=p8 bun run bridge demo setup local && RUN_ID=p8 bun run bridge smoke local --record "$d/tour.json" && RUN_ID=p8 bun run bridge smoke local && RUN_ID=p8 bun run bridge verify local --tour "$d/tour.json" && RUN_ID=p8 bun run bridge export local --out "$d/export" && bun run --cwd "$k" bridge verify "$m" && bun run --cwd "$k" bridge demo status "$m" && BRIDGE_PROVE=1 bun run --cwd "$k" bridge pause "$m" on && bun run --cwd "$k" bridge pause "$m" off; s=$?; RUN_ID=p8 bun run net:down; test $s -eq 0
 bun run secrets:scan
 ```
-`demo status` reads private balances, so it runs a PXE. The last line is keyless, so it checks only that no wallet store was left on disk.
+From the keyed worktree, `demo status` reads private balances, so it runs a PXE, and the `pause on` is a real-proof tx signed by the keyless local admin. The last line is keyless, so it checks only that no wallet store was left on disk.
 
 Pass:
 - the acceptance run settles, including the L1 payout, and a repeat run on the same cast settles too;
@@ -942,13 +955,13 @@ Pass:
 - the tour validates;
 - the export round-trips;
 - every drift is caught;
-- `verify` and `demo status` pass from the keyed worktree, whose install skipped scripts (I12).
+- `verify`, `demo status` and a real-proof tx pass from the keyed worktree, whose install skipped scripts (I12).
 
 Layers: unit, integration, local end to end.
 
 **P9. Testnet, through keyed runs the owner approves one by one.**
 
-Before each request: commit, `gh stack push`, then `bash scripts/keyed-worktree.sh sync`. Every request is filed from `~/.cache/inference-money/keyed`. In the chains below, `<scan-trap>` stands for `trap "s=\$?; bun run secrets:scan || s=1; exit \$s" EXIT`. The agent runs `env-exec wait` in the background, prints the exact `op-remote <host> <id>` line, and installs, builds and tests nothing until the run ends.
+Each request follows the keyed-run recipe (Off-chain surfaces); `<scan-trap>` is defined there.
 
 1. Request the admin address:
    ```
@@ -1053,8 +1066,8 @@ Work:
 - `e2e/agent.sh`, in order:
   1. ports;
   2. `net:up`;
-  3. the heartbeat sidecar, for the claims the browser makes;
-  4. `bridge deploy local`;
+  3. `bridge deploy local`;
+  4. the heartbeat sidecar, for the claims the browser makes; it reads the manifest at startup (`sidecar.ts:97`), so it follows the deploy;
   5. `bridge demo setup local`, which runs its own heartbeat;
   6. build with the fixture tour and the bundle assertions (no smoke run: `try-happy` covers the same legs, within CI's 90 min);
   7. Playwright;
@@ -1123,7 +1136,7 @@ bun run --cwd apps/showcase test:components && bun run test:e2e
 
 If deployed bytes changed, run the redeploy chain:
 1. settle the old deployment's open tickets with the current CLI; record any left over with their `sourceCommit`;
-2. the P9 keyed runs, from the keyed worktree;
+2. the P9 keyed runs, by the keyed-run recipe;
 3. `demo setup`, then `smoke --record`;
 4. `verify --tour`;
 5. commit the manifest, the demo tag and the tour;
@@ -1215,11 +1228,11 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 | 25 | The showcase goes live on a hosted Workers preview before hardening; production switches at merge | C | Local `vite preview` in P13 (M, F): not "live on Workers" before hardening, as the user ordered | agreed |
 | 26 | A duplicate-nullifier failure reconciles the original submission before any retry | C | Blind retry once (F, M): could repeat a payment, burn or deposit that landed | agreed |
 | 27 | CI e2e before merge by dispatching `_e2e.yml` on the branch | M | No pre-merge CI e2e (F): `_e2e.yml` carries `workflow_dispatch` on `main` | agreed |
-| 28 | The merchant side reaches the token as a global-scope transient capsule, computed from the bulk-synced list; generic wallets fall back to a counterparty-first probe | F (double audit) | Probing both parties on every call (consolidated plan): tells the node the prover's own address. An explicit side parameter: breaks the ABI superset | agreed |
+| 28 | The merchant side reaches the token as a global-scope transient capsule, computed from the bulk-synced event feed under three rules (keep any eligible side; stamp a merchant recipient; else the longest horizon); generic wallets fall back to a counterparty-first probe | F (double audit), C (final pass: the rules) | Probing both parties on every call (consolidated plan): tells the node the prover's own address. An explicit side parameter: breaks the ABI superset | agreed |
 | 29 | The constructors raise the guardian slot's delay to the setting | C, F (double audit) | – | agreed |
-| 30 | Keyed runs execute from a dedicated worktree installed keylessly with `--ignore-scripts`; the scan runs in an EXIT trap; this session installs, builds and tests nothing while a run is live | C, F (double audit) | Installing inside the chain (consolidated plan): install scripts saw the secrets. No host work at all (F): editing and committing are harmless, and other same-user processes stay a documented residual | agreed |
-| 31 | Users' demo secrets take a random tag drawn and bound in `demo setup`; merchants and L1 keys derive from the deployment | F (double audit) | Fixed labels with a `v1`→`v2` rotation (consolidated plan): a griefer can pre-bind every future cast | agreed |
-| 32 | `payments.ts` refuses a commitment it has paid or is paying; upstream's repeatable completion stays | C (double audit) | On-chain single-use requests: changes an upstream function's behaviour and adds a nullifier to every payment | agreed |
+| 30 | Keyed runs execute from a dedicated worktree installed keylessly with `--ignore-scripts`; the scan runs in an EXIT trap; this session installs, builds, tests and commits nothing while a run is live | C, F (double audit), C (final pass: commits) | Installing inside the chain (consolidated plan): install scripts saw the secrets. No host work at all (F): editing is harmless, and other same-user processes stay a documented residual | agreed |
+| 31 | Users' demo secrets take a random tag drawn and bound in `demo setup`, published only after both bindings finalize; merchants and L1 keys derive from the deployment | F (double audit), C (final pass: finality) | Fixed labels with a `v1`→`v2` rotation (consolidated plan): a griefer can pre-bind every future cast | agreed |
+| 32 | `payments.ts` refuses a commitment it has paid or is paying, through a reserved → sent → paid record reconciled by tx hash; upstream's repeatable completion stays | C (double audit, final pass) | On-chain single-use requests: changes an upstream function's behaviour and adds a nullifier to every payment | agreed |
 | 33 | Manifest `sourceCommit`, `bytecode_hash = "none"`, settle old tickets before a redeploy | C, F (double audit) | A git tag per deployment (F): a tag is a release action; the manifest carries the commit | agreed |
 | 34 | Local e2e embeds a fixture tour; only testnet records one | F (double audit) | A recorded local smoke inside CI e2e (consolidated plan): a second full run inside the 90 min budget | agreed |
 | 35 | `merchants delay` syncs every entry in the same tx | F (double audit) | One sync tx per merchant (consolidated plan): each merchant carries its own expiry for up to 23 h | agreed |
@@ -1290,6 +1303,25 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 
 **Still disputed:** ledger 24 (C), now Ask 9.
 
+### Final pass (codex, fresh session): conditional approve
+
+Verdict: "conditional approve (with conditions: close keyed-run execution gaps, repair validation gates, and specify hint, demo-tag, and payment recovery semantics)". Every condition was applied, without a re-review; the per-arc codex loops review the code.
+
+**Adopted**
+- **Commits during a keyed run execute the git hooks' third-party code (high):** the recipe now forbids commits while a run is live, and it is the one authoritative copy (ledger 30).
+- **Three gates that couldn't pass:** P6 adapts the TS call sites to the new signatures; P8 resolves the hashed run directory through `bridge manifest-path`; P12 deploys before starting the sidecar.
+- **Returns were listed as supply writes:** the privacy ledger now says what a return shows, and where.
+- **The demo tag was published before the bindings were final:** `demo setup` waits for finalized claims (ledger 31).
+- **The hint conflated eligibility, expiry and stamping:** three explicit rules, and every entry change now emits an event, so the SDK's feed is complete; a forged capsule is tested at the kernel (ledger 28).
+- **The payment guard had no recovery lifecycle:** reserved → sent → paid, reconciled by tx hash, with reload and two-tab tests (ledger 32).
+- **I12's gate proved PXE startup, not proving:** one real-proof tx from the keyed worktree (`BRIDGE_PROVE=1`).
+- **Two residuals to state:** Galactica's own x402 client needs the same reuse guard, and batching beyond the call limit leaves cohorts.
+- **The provenance header as a changelog:** it summarizes the delta; the diff against P1's verbatim copy is the record.
+
+**Rejected**
+- **A test that forces a real prune before the tag is published:** a unit test pins the finality barrier instead. Forcing a prune on demand isn't something the local harness does.
+- **One copy of the review and delivery steps:** the seeds keep theirs, because a fresh session runs a seed before reading the whole plan. The keyed-run recipe, where the drift was, is now a single copy.
+
 ## Seeds (draft; finalized after approval)
 
 ELI5 companion: to be published (Artifact URL and source path recorded here).
@@ -1303,7 +1335,7 @@ Alternative: `/loop`
 ```
 /loop 15m Drive implementations-plan/galactica-compliant-usdc forward. Never idle waiting for my input. Each firing:
 1. **Reality check**: read implementations-plan/galactica-compliant-usdc/plan.md and lessons/ (authoritative state — not the chat), including its Outcome & Quality Bar section: every step is judged against those criteria, not just against "it runs". On a stack, read them from the TOP layer (`gh stack view` names it; `git show <top-branch>:<path>`), never from a lower arc's checkout. If that path is gone, the close-out has run: `git fetch -q origin && git cat-file -e origin/main:implementations-plan/archive/galactica-compliant-usdc/plan.md` succeeds → it merged and the plan is done: STOP and say so. Fails → delivered and awaiting my merge: babysit only (CI per step 2, fixes on the arc they belong to then `gh stack sync`, keep the Outcome true); once every PR is green, report that and STOP. A live plan.md that already carries an `## Outcome` block means a close-out was interrupted: finish it. Otherwise, native task list empty (fresh session)? rebuild it from plan.md, one task per remaining step; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (multi-arc: `gh stack view`). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
-2. **Waiting on CI or a keyed run is fine** — confirm it's progressing (`gh run watch <run-id>` up to 10 minutes; `env-exec status <id>`). A step that needs a keyed run: commit and push, `bash scripts/keyed-worktree.sh sync`, file `env-exec request` from `~/.cache/inference-money/keyed`, start `env-exec wait <id>` in the background, print the exact `op-remote <host> <id>` line for me, and meanwhile only edit and commit: no installs, builds or tests until the run ends.
+2. **Waiting on CI or a keyed run is fine** — confirm it's progressing (`gh run watch <run-id>` up to 10 minutes; `env-exec status <id>`). A step that needs a keyed run: follow plan.md's keyed-run recipe exactly (it prints the `op-remote <host> <id>` line for me); while the run is live, only edit files: no installs, builds, tests or commits.
 3. **No task in hand?** Pick the next pending step from plan.md and start it. After each meaningful edit, run `bun run lint` + the touched packages' tests. Then commit → push (`gh stack push`; `gh stack sync` if main or a lower arc moved).
 4. **Stuck, or facing a decision you'd normally bring to me?** Call `/codex high` with full context until you reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never push to main, never publish or deploy outside the approved keyed runs — except the keyless demo-cast actions plan.md runs with the public demo keys (P9 step 5, P13) — never create or handle secrets outside keyed runs, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
 5. **Same step failed 5 times?** Stop retrying; reassess with codex, then continue down the agreed path.
