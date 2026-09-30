@@ -2,7 +2,26 @@
 
 ## Status
 
-The code is in place: `deploy:testnet`, `verify:testnet`, `smoke:testnet` and `secrets:scan`, with the sponsor top-up rehearsed locally in `packages/integration/test/sponsor.test.ts`. The run itself is **blocked**. The throwaway L1 key (`0xFcc2…F6F5`) holds 4.38 Sepolia ETH but 0 Circle USDC, and the smoke needs at least 2 USDC plus margin (5 requested). The user has been notified. Per the plan, the agent surfaces this and holds; it never creates or swaps operational keys.
+**Done on Aztec 6.0.0-rc.1** (arc 4, after the Phase 11 re-pin). The arc-2 blockers are gone: the L1 key now holds 31.7 Circle Sepolia USDC and 4.38 ETH, and Sepolia's canonical rollup (`2914217885`) runs v6.
+
+## Arc 4 run (v6 testnet, 2026-09-29)
+
+- `probe:testnet`: 18/18. The fee budget now also counts the six standard-contract publishes: 213 FJ against a 1000 FJ faucet mint.
+- `deploy:testnet` took about 12 min with real proofs, most of it waiting for the Fee Juice bridge (1000 FJ) to become consumable. It published AuthRegistry, PublicChecks and HandshakeRegistry, since v6 testnet had none of them, and verified every read-back.
+  - L1: portal `0x1CfC6f52…e068`, router `0x29B3298E…4390`. Their runtime bytecode equals a fresh forge build (immutables masked).
+  - L2: bridge `0x18ca27aa…3a27`, token `0x23cbbf3f…c555`, proxy `0x032ebe67…df4a`, owner `0x2341325d…008d`.
+  - Sponsor: the canonical SponsoredFPC `0x06a9fa02…924b`, whose instance is published.
+- `verify:testnet`: every check passed.
+- `smoke:testnet` took 2 h 03 min, all four legs settled, each at +1.000000 USDC:
+  - public deposit → claim, paid by the deployer; it waited for finality;
+  - private deposit → claim, whose fee payer is the SponsoredFPC, topped up by 1000 FJ first;
+  - public exit → withdraw on L1;
+  - private exit → withdraw on L1.
+- `secrets:scan`: `found=false`, `walletDirs=0`.
+- `deployments/testnet.json` is committed. Its `l2.nodeUrl` is the dRPC endpoint, public config by the user's decision ([D29]).
+- Pause-key reminder passed to the user: the L2 owner (pause/unpause) is `TESTNET_AZTEC_SECRET_KEY` in `.env.testnet`.
+
+**Finality dominates the smoke.** A claim is done at `finalized`, and the testnet's finalized tip trailed the proven tip by about 30 blocks: the first claim was proven at block 1773 while finalized sat at 1771.
 
 ## Arc 2 codex loop
 

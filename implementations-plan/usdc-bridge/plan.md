@@ -649,7 +649,7 @@ A per-run local network (node 5.0.0) + deploy in global setup. Specs:
 - Commands: `bun run test:integration`
 - Pass: all specs green against node 5.0.0 with JS 5.2.0 (or the fallback pin, applied and logged); no owned processes left.
 
-#### Phase 7 — Testnet deploy + Node smoke (moved to arc 4, [D26])
+#### Phase 7 — Testnet deploy + Node smoke (moved to arc 4, [D26]) ✓
 - **Precondition:** `.env.testnet` exists with mode 0600 (provisioned), and the L1 address holds ≥ 5 Circle Sepolia USDC (user funds it). If either is missing, surface and hold. Never create or rotate operational keys autonomously.
 - The deploy and smoke use ephemeral wallets/PXEs only. [D24] The deploy pays with self-funded Fee Juice; immediately before the private smoke legs, bridge ≥ 100 FJ to the canonical SponsoredFPC (a public claim anyone may make) and re-check its balance covers the two private legs.
 - Commit `deployments/testnet.json`. Pass the user the pause-key reminder (accepted: they keep the key).
@@ -781,7 +781,7 @@ The public testnet node runs `6.0.0-rc.1` on rollup `2914217885`, which is now S
 
 Phase 7 (above) then runs against the v6 pins.
 
-#### Phase 12 — Testnet build
+#### Phase 12 — Testnet build ✓
 - Commit `deployments/testnet.json` from Phase 7. Its `nodeUrl` is the dRPC URL ([D29]).
 - `web.yml` goes back to `build:testnet`; the fixture build and its guard are removed.
 
