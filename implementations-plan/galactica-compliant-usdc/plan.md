@@ -1114,9 +1114,13 @@ Layers: live-testnet browser.
 
 **P14. `/harden security medium` on `contracts/`, EVM and Noir.**
 
-Deliver the stakeholder report as an Artifact.
+Deliver the stakeholder report as an Artifact. The skill's `audit/` output is a vulnerability inventory, so it stays out of git (`audit/` goes in `.git/info/exclude`); the triage below is the committed record.
 
-Gate: the report exists, and every finding is triaged (accepted or rejected, with its reason) in `lessons/phase-14.md` and in this plan.
+Validation gate:
+```
+test -s audit/security/<run-id>/report.md && test -s audit/security/<run-id>/findings/verified.md
+```
+Pass: the report's Artifact URL is recorded here, and every finding in `verified.md` is triaged, accepted or rejected with its reason, in `lessons/phase-14.md` and in this plan.
 
 **P15. Fix the accepted findings.**
 
@@ -1324,7 +1328,7 @@ Verdict: "conditional approve (with conditions: close keyed-run execution gaps, 
 
 ## Seeds (draft; finalized after approval)
 
-ELI5 companion: to be published (Artifact URL and source path recorded here).
+ELI5 companion: https://claude.ai/artifact/LMk9CwqFzePvgSSaL6HAF6, published from `implementations-plan/galactica-compliant-usdc/eli5.html` (gitignored). Republishing that file keeps the URL.
 
 Recommended: `/goal`
 ```
