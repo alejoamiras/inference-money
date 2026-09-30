@@ -13,7 +13,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
 | `apps/web` | The React app: wagmi L1, the Aztec wallet-sdk session, a build-embedded manifest; `e2e/` holds the browser harness |
-| `implementations-plan/` | Plans and per-phase lessons; `usdc-bridge/plan.md` is the active plan |
+| `implementations-plan/` | Plans: `index.md` lists the active ones, `lessons.md` and `follow-ups.md` are the curated layer, closed plans live under `archive/` |
 
 ## Commands
 
