@@ -29,6 +29,7 @@ Status: **done** (gate green, codex loop converged).
    - On testnet a checkpoint takes up to a 72 s slot, so most web claims would have hit the same spurious re-claim.
    - **Fix.** `claim()` sends with `NO_WAIT` and waits for `CHECKPOINTED` on the node itself, as exits already did. The new unit test feeds a proposed-then-checkpointed receipt and fails on the old code.
    - Deployed bytes are unchanged, so the testnet deploy stands. The smoke's claims ran in-process, where the wait was always honoured.
+   - After the fix: integration 16/16, then e2e 18/18 twice in a row (8.2 and 8.3 min); teardown clean.
    - This was the first CI e2e run: `web.yml` runs it on the `e2e` label, which does not exist in the repo, so it ran here through a manual dispatch.
 
 ## Validation
@@ -58,3 +59,10 @@ It also raised three Low comment fixes. All three were accepted:
 ### Round 2 — resumed on `d6a9c64`
 
 Verdict: **No new material findings.** The three comment fixes are accurate, and no further issue was found in the re-pin. The loop has converged.
+
+### Round 3 — resumed on `51229e8` (the claim-wait fix, found by CI e2e)
+
+Verdict: **No new material findings.** It confirmed:
+- every production web send uses `NO_WAIT`, and every wallet-managed wait left runs in an in-process wallet;
+- a revert, a dropped tx, an RPC error and a sponsor failure each keep the claim secret;
+- "already nullified" at simulation still needs the checkpointed nullifier before it reports the claim consumed.
