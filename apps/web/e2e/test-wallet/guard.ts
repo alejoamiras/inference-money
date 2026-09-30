@@ -3,7 +3,7 @@
  * was granted, and anything outside it is refused before it reaches the PXE. Without this the suite could not tell an
  * app that asks for the right grant from one that merely works against a permissive wallet.
  */
-import { computeContractAddressFromInstance } from "@aztec/stdlib/contract"
+import { computeContractAddressFromInstance } from "@aztec-labs/stdlib/contract"
 
 type Named = { toString(): string }
 type ScopeEntry = { contract?: Named | string; function?: string }

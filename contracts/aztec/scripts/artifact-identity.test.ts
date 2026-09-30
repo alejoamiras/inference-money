@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { NoirCompiledContract } from "@aztec/stdlib/noir"
+import type { NoirCompiledContract } from "@aztec-labs/stdlib/noir"
 import { artifactIdentity, identityDiff } from "./artifact-identity"
 
 const BRIDGE = new URL("../token_bridge/target/token_bridge_contract-TokenBridge.json", import.meta.url).pathname

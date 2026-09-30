@@ -1,4 +1,4 @@
-import { GasFees, ManaUsageEstimate } from "@aztec/stdlib/gas"
+import { GasFees, ManaUsageEstimate } from "@aztec-labs/stdlib/gas"
 
 export interface MinFeeNode {
 	getPredictedMinFees?: (manaUsage?: ManaUsageEstimate) => Promise<GasFees[]>

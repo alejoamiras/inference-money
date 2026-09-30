@@ -63,10 +63,7 @@ fn claim_secret_vectors_match_ts() {
 
 #[test]
 fn claim_secret_hash_vectors_match_ts() {
-    // compute_secret_hash([derive_claim_secret(...)]) — the value L1 commits into the message. 5.0.1's
-    // compute_secret_hash is generic over the array length (`[Field; N]`); a single secret is `[secret]`.
-    // For N=1 it is still `poseidon2_hash_with_separator([secret], DOM_SEP__SECRET_HASH)`.
-    // The array form only made the single-secret case explicit in the signature.
+    // L1 commits to poseidon2_hash_with_separator([derive_claim_secret(salt, recipient)], DOM_SEP__SECRET_HASH).
     let h0 = compute_secret_hash([derive_claim_secret(0, AztecAddress::from_field(0))]);
     assert(h0 == 0x087647b3c1976bde1cf12bfa5213c1d619f4f0b9a0bae6e1000d7030fcb9d5fc);
     let h1 = compute_secret_hash([derive_claim_secret(1, AztecAddress::from_field(2))]);

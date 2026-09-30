@@ -1,6 +1,6 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { Fr } from "@aztec/aztec.js/fields"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import type { Fr } from "@aztec-labs/aztec.js/fields"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { tokenBridgeArtifact } from "./artifacts"
 import type { BridgeManifest } from "./manifest"
 

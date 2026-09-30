@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { describe, expect, it } from "vitest"
 import { grantFrom, violation } from "./guard"
 

@@ -1,5 +1,5 @@
-import type { ChainInfo } from "@aztec/aztec.js/account"
-import { Fr } from "@aztec/aztec.js/fields"
+import type { ChainInfo } from "@aztec-labs/aztec.js/account"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { type BridgeManifest, parseManifest } from "@inference-money/bridge-core/manifest"
 import { type Chain, defineChain } from "viem"
 

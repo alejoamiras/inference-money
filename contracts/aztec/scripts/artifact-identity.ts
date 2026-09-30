@@ -7,9 +7,9 @@
 //
 //   bun scripts/artifact-identity.ts <artifact.json>            print the identity as JSON
 //   bun scripts/artifact-identity.ts compare <want.json> <got.json>   exit 1 on any difference
-import { type ContractArtifact, FunctionSelector, loadContractArtifact } from "@aztec/stdlib/abi"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
-import type { NoirCompiledContract } from "@aztec/stdlib/noir"
+import { type ContractArtifact, FunctionSelector, loadContractArtifact } from "@aztec-labs/stdlib/abi"
+import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
+import type { NoirCompiledContract } from "@aztec-labs/stdlib/noir"
 
 export type ArtifactIdentity = { classId: string; abi: string }
 

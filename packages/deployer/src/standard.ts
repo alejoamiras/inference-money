@@ -1,14 +1,14 @@
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
-import { publishContractClass, publishInstance } from "@aztec/aztec.js/deployment"
-import type { FeePaymentMethod } from "@aztec/aztec.js/fee"
-import type { AztecNode } from "@aztec/aztec.js/node"
-import type { Wallet } from "@aztec/aztec.js/wallet"
-import { getPublishableStandardContracts } from "@aztec/standard-contracts"
+import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { publishContractClass, publishInstance } from "@aztec-labs/aztec.js/deployment"
+import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import { getPublishableStandardContracts } from "@aztec-labs/standard-contracts"
 
 /**
- * Publishes the standard contracts aztec-nr 5.0.1 reaches in public (AuthRegistry, PublicChecks, HandshakeRegistry)
- * wherever the node lacks them. Testnet has them; a 5.0.0 local network seeds only its own release's, so without this
- * a public authwit, which the public exit's burn consumes, could never be checked locally.
+ * Publishes the standard contracts aztec-nr reaches in public (AuthRegistry, PublicChecks, HandshakeRegistry) wherever
+ * the node lacks them: neither a local network (AuthRegistry only) nor testnet seeds them all, and without them a
+ * public authwit, which the public exit's burn consumes, could never be checked.
  */
 export async function ensureStandardContracts(
 	wallet: Wallet,

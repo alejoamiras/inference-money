@@ -4,13 +4,13 @@
  * cancel that does NOT close the stream: the epoch checks, not cancellation, must be the correctness boundary.
  */
 
-import type { ChainInfo } from "@aztec/aztec.js/account"
+import type { ChainInfo } from "@aztec-labs/aztec.js/account"
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest"
 
 vi.mock("./emoji", () => ({ hashToEmoji: () => "🟢🔵🟡🟣🔴⚪⚫🟠🟤" }))
 
 const mockGetAvailableWallets = vi.fn()
-vi.mock("@aztec/wallet-sdk/manager", () => ({
+vi.mock("@aztec-labs/wallet-sdk/manager", () => ({
 	WalletManager: { configure: vi.fn(() => ({ getAvailableWallets: mockGetAvailableWallets })) },
 }))
 

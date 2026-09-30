@@ -1,5 +1,5 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { MANIFEST } from "@/config/network"
 import { l1Context } from "@/wallet/l1"
 import { aztecSession } from "@/wallet/session"

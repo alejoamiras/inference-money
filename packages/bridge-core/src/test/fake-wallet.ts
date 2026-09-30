@@ -1,8 +1,8 @@
-import { NO_WAIT } from "@aztec/aztec.js/contracts"
-import { Fr } from "@aztec/aztec.js/fields"
-import { TxHash } from "@aztec/aztec.js/tx"
-import type { Wallet } from "@aztec/aztec.js/wallet"
-import type { ExecutionPayload } from "@aztec/stdlib/tx"
+import { NO_WAIT } from "@aztec-labs/aztec.js/contracts"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { TxHash } from "@aztec-labs/aztec.js/tx"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import type { ExecutionPayload } from "@aztec-labs/stdlib/tx"
 import { MANIFEST } from "./fixtures"
 
 /** What an aztec.js interaction hands the wallet; `feePayer` is set only by a payment method that names one. */

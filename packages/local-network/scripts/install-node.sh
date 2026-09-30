@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Installs toolchain.json's Aztec node where the local network finds it through AZTEC_NODE_HOME, without aztec-up
-# (unpinned remote scripts, an unlocked npm install): the node from toolchain/'s frozen lockfile, migrated from
-# aztec-up's own npm lock so both run the same tree, and the Foundry release that node ships with, checked against
-# its pinned digest. linux-x64 only.
+# (unpinned remote scripts, an unlocked npm install): the node from toolchain/'s frozen lockfile and the Foundry release
+# that node ships with, checked against its pinned digest. linux-x64 only.
 #
 #   bash packages/local-network/scripts/install-node.sh <dir> && export AZTEC_NODE_HOME=<dir>
 set -euo pipefail
@@ -19,7 +18,7 @@ pins="$here/toolchain/foundry-$foundry.sha256"
 }
 
 (cd "$here/toolchain" && bun install --frozen-lockfile)
-installed="$(jq -er .version "$here/toolchain/node_modules/@aztec/aztec/package.json")"
+installed="$(jq -er .version "$here/toolchain/node_modules/@aztec-labs/aztec/package.json")"
 [ "$installed" = "$node_version" ] || {
   echo "toolchain/ locks aztec $installed, toolchain.json says $node_version" >&2
   exit 1

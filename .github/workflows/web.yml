@@ -62,12 +62,8 @@ jobs:
       - run: bunx biome ci apps/web
       - run: bun run --cwd apps/web typecheck
       - run: bun run --cwd apps/web test:components
-      # Until deployments/testnet.json is committed, build against the test fixture (still exercising the bundle and
-      # _headers). The guard fails once it lands, so build:testnet and its identity check must replace this step.
-      - run: test ! -e deployments/testnet.json
-      - run: bun run --cwd apps/web build
-        env:
-          BRIDGE_MANIFEST: apps/web/src/test/manifest.fixture.json
+      # The shipped artifact: the committed testnet manifest and nothing else, with its generated _headers.
+      - run: bun run --cwd apps/web build:testnet
       - run: test -s apps/web/dist/_headers
 
   # The browser suite runs only on request, and then whatever the PR touches: it deploys the contracts too, so no

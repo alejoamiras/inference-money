@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { OutboxAbi } from "@aztec/l1-artifacts/OutboxAbi"
-import { RegistryAbi } from "@aztec/l1-artifacts/RegistryAbi"
-import { RollupAbi } from "@aztec/l1-artifacts/RollupAbi"
+import { OutboxAbi } from "@aztec-foundation/l1-artifacts/OutboxAbi"
+import { RegistryAbi } from "@aztec-foundation/l1-artifacts/RegistryAbi"
+import { RollupAbi } from "@aztec-foundation/l1-artifacts/RollupAbi"
 import { OUTBOX_ABI, PERMIT2_DEPOSIT_ROUTER_ABI, REGISTRY_ABI, ROLLUP_ABI, TOKEN_PORTAL_ABI } from "./abi"
 
 type Param = { name?: string; type: string; indexed?: boolean; components?: readonly Param[] }

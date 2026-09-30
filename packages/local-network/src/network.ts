@@ -30,7 +30,7 @@ interface Toolchain {
 
 /**
  * The node version the testnet runs, from `toolchain.json`, installed at `AZTEC_NODE_HOME` (`install-node.sh`) or else
- * by aztec-up. Only a complete install of exactly that version is accepted: `@aztec/ethereum` resolves forge/anvil
+ * by aztec-up. Only a complete install of exactly that version is accepted: `@aztec-labs/ethereum` resolves forge/anvil
  * from `~/.aztec/current` before PATH, so a partial one would deploy L1 with whatever version another agent last
  * pointed that symlink at.
  */
@@ -56,7 +56,7 @@ export function resolveToolchain(root = REPO_ROOT, env = process.env): Toolchain
 			`aztec ${version} toolchain is incomplete (missing ${missing.join(", ")}); run: aztec-up install ${version}, or packages/local-network/scripts/install-node.sh <dir> with AZTEC_NODE_HOME=<dir>`,
 		)
 	const installed = (
-		JSON.parse(readFileSync(join(base, "node_modules", "@aztec", "aztec", "package.json"), "utf8")) as { version: string }
+		JSON.parse(readFileSync(join(base, "node_modules", "@aztec-labs", "aztec", "package.json"), "utf8")) as { version: string }
 	).version
 	if (installed !== version) throw new Error(`${base} holds aztec ${installed}, not toolchain.json's ${version}`)
 	return t

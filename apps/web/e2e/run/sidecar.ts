@@ -12,9 +12,9 @@
  * POST /balance {"address", "kind"} → {"balance"}: an actor's USDC on Aztec, read through this process's own wallet,
  *   which holds every actor's keys, so neither the app nor the page's wallet takes part.
  */
-import { Fr } from "@aztec/aztec.js/fields"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
-import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { type BridgeManifest, l2UsdcBalance, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
 import {
 	enterOwnedTmpDir,

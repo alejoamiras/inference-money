@@ -3,11 +3,11 @@
  * (which holds every actor it created): Fee Juice for actors whose public txs their wallet pays, a public USDC balance,
  * and a public exit to finish from the page.
  */
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Fr } from "@aztec/aztec.js/fields"
-import type { AztecNode } from "@aztec/aztec.js/node"
-import { FeeJuiceContract } from "@aztec/aztec.js/protocol"
-import type { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
+import { FeeJuiceContract } from "@aztec-labs/aztec.js/protocol"
+import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	type BridgeManifest,
 	claim,
