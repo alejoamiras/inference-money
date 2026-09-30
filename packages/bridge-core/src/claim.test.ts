@@ -1,11 +1,20 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
-import { claim, L2_DONE, type NullifierNode, registerSponsor, SponsorUnavailableError, waitClaimable, waitClaimFinalized } from "./claim"
+import {
+	type ClaimNode,
+	claim,
+	type NullifierNode,
+	registerSponsor,
+	SponsorUnavailableError,
+	waitClaimable,
+	waitClaimFinalized,
+} from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { fakeWallet } from "./test/fake-wallet"
-import { f, MANIFEST as M } from "./test/fixtures"
+import { f, MANIFEST as M, receiptAt } from "./test/fixtures"
 
 let recipient: AztecAddress
 beforeAll(async () => {
@@ -19,7 +28,8 @@ const ticket = async (kind: "public" | "private"): Promise<ClaimTicket> => ({
 const fail = (message: string) => () => {
 	throw new Error(message)
 }
-const NO_NULLIFIER: NullifierNode = { findLeavesIndexes: async (_b, _t, leaves) => leaves.map(() => undefined) }
+const CHECKPOINTED = async () => receiptAt(TxStatus.CHECKPOINTED) as never
+const NO_NULLIFIER: ClaimNode = { findLeavesIndexes: async (_b, _t, leaves) => leaves.map(() => undefined), getTxReceipt: CHECKPOINTED }
 
 describe("registerSponsor", () => {
 	const SPONSOR = "0x06a9fa0208c78509921b0487a6b5cd5c2e93baf17de1a18d310f65a3cc1d924b" as const
@@ -40,7 +50,6 @@ describe("claim", () => {
 		const priv = fakeWallet()
 		expect(await claim(await ticket("private"), NO_NULLIFIER, priv.wallet, M, { from: recipient })).toBe("claimed")
 		expect(priv.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_private"], feePayer: M.l2.sponsoredFpc })
-		expect(priv.sent[0]?.wait, "answered only once checkpointed, never at a proposed block").toEqual(L2_DONE)
 
 		const pub = fakeWallet()
 		await claim(await ticket("public"), NO_NULLIFIER, pub.wallet, M, { from: recipient })
@@ -55,12 +64,21 @@ describe("claim", () => {
 		expect(sponsoredPublic.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_public"], feePayer: M.l2.sponsoredFpc })
 	})
 
+	it("returns only once the node reports the claim checkpointed, whatever the wallet would wait for", async () => {
+		const statuses = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED]
+		const node: ClaimNode = { ...NO_NULLIFIER, getTxReceipt: async () => receiptAt(statuses.shift() ?? TxStatus.CHECKPOINTED) as never }
+		const w = fakeWallet()
+		expect(await claim(await ticket("public"), node, w.wallet, M, { from: recipient })).toBe("claimed")
+		expect(statuses).toEqual([])
+	})
+
 	it("reports already-consumed only when this ticket's nullifier is on L2; any other nullifier error stays retryable", async () => {
 		for (const kind of ["public", "private"] as const) {
 			const t = await ticket(kind)
 			const { wallet } = fakeWallet({ send: fail("Assertion failed: L1-to-L2 message is already nullified") })
 			const queried: Fr[] = []
-			const nullified: NullifierNode = {
+			const nullified: ClaimNode = {
+				getTxReceipt: CHECKPOINTED,
 				findLeavesIndexes: async (block, tree, leaves) => {
 					expect(block, "a proposed nullifier can still be re-orged out").toBe("checkpointed")
 					expect(tree).toBe(MerkleTreeId.NULLIFIER_TREE)
@@ -70,7 +88,7 @@ describe("claim", () => {
 			}
 			expect(await claim(t, nullified, wallet, M, { from: recipient })).toBe("already-consumed")
 			await expect(claim(t, NO_NULLIFIER, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
-			const unreachable: NullifierNode = { findLeavesIndexes: fail("503") as never }
+			const unreachable: ClaimNode = { findLeavesIndexes: fail("503") as never, getTxReceipt: CHECKPOINTED }
 			await expect(claim(t, unreachable, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
 			expect(queried).toHaveLength(1)
 		}

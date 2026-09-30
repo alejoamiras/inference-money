@@ -22,6 +22,14 @@ Status: **done** (gate green, codex loop converged).
 4. **`compile.sh --check` before commit.** It compares against HEAD's artifacts, which are still 5.x until the rebuild is committed. v6 stdlib cannot parse their storage export (`storageExport.kind`), so the check reports drift until then; rerun after committing.
 5. **Brillig coverage warnings.** Every "Brillig call … not sufficiently constrained" warning sits in aztec-nr (`history/storage.nr`, `context/returns_hash.nr`, `oracle/get_contract_instance.nr`, …). Our `src/main.nr` appears only as the caller in their call stacks.
 6. **A dropped proxy deploy on the first reused network (unexplained).** On `v6a`, after the first attached run hit the account bug, the second attached run's proxy deploy was accepted by the node and then failed in the block builder with 0 gas ("Tx dropped by P2P node"). Two follow-ups did not reproduce it: two `deploy:local` runs on one fresh network (`v6b`), then the attached suite on that reused network (16/16). A tx-expiry theory does not fit: `MAX_TX_LIFETIME` is 86400 s, and the time warp was about 19 min. Revisit if it recurs.
+7. **The web claim answered at a proposed block (found by CI e2e, after the gate).** On the CI runner, the public-deposit spec ended on "This deposit was already claimed." instead of "Done": the funds had arrived exactly once. The Playwright trace's node calls show the sequence:
+   - the claim receipt is `proposed` (block 44; checkpointed tip 43);
+   - the flow's `checkpointed` nullifier read misses, so it judges the claim "dropped", re-claims, and gets "already nullified".
+   - **Cause.** v6's wallet-sdk `WaitOptsSchema` has no `waitForStatus`, and zod strips unknown keys. The app's `wait: L2_DONE` therefore reaches the iframe wallet without its status, and `EmbeddedWallet` then defaults to `PROPOSED`. In-process wallets (deployer, integration, smoke) pass the option directly and were never affected. Locally a block is checkpointed almost at once, which hid it.
+   - On testnet a checkpoint takes up to a 72 s slot, so most web claims would have hit the same spurious re-claim.
+   - **Fix.** `claim()` sends with `NO_WAIT` and waits for `CHECKPOINTED` on the node itself, as exits already did. The new unit test feeds a proposed-then-checkpointed receipt and fails on the old code.
+   - Deployed bytes are unchanged, so the testnet deploy stands. The smoke's claims ran in-process, where the wait was always honoured.
+   - This was the first CI e2e run: `web.yml` runs it on the `e2e` label, which does not exist in the repo, so it ran here through a manual dispatch.
 
 ## Validation
 
