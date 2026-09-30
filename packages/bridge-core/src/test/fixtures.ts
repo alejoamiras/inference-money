@@ -1,4 +1,15 @@
+import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { BridgeManifest } from "../manifest"
+
+/** A successful receipt at `status`, as `waitForTx` reads it. */
+export const receiptAt = (status: TxStatus) => ({
+	status,
+	isPending: () => false,
+	isDropped: () => false,
+	isMined: () => status !== TxStatus.PENDING,
+	hasExecutionSucceeded: () => true,
+	hasExecutionReverted: () => false,
+})
 
 export const f = (n: number) => `0x${n.toString(16).padStart(64, "0")}` as const
 export const a = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as const

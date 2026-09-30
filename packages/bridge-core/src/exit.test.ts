@@ -17,7 +17,7 @@ import {
 } from "./exit"
 import { fakeEpoch } from "./test/fake-epoch"
 import { fakeWallet } from "./test/fake-wallet"
-import { a, MANIFEST as M } from "./test/fixtures"
+import { a, MANIFEST as M, receiptAt } from "./test/fixtures"
 
 const RECIPIENT = getAddress(a(0xe1))
 const AMOUNT = 7_000_000n
@@ -30,14 +30,7 @@ beforeAll(async () => {
 })
 
 const intent = (o: Partial<ExitIntent> = {}): ExitIntent => ({ kind: "private", from, recipientL1: RECIPIENT, amount: AMOUNT, ...o })
-const CHECKPOINTED = {
-	status: TxStatus.CHECKPOINTED,
-	isPending: () => false,
-	isDropped: () => false,
-	isMined: () => true,
-	hasExecutionSucceeded: () => true,
-	hasExecutionReverted: () => false,
-}
+const CHECKPOINTED = receiptAt(TxStatus.CHECKPOINTED)
 const REVERTED = { ...CHECKPOINTED, executionResult: "reverted", hasExecutionSucceeded: () => false, hasExecutionReverted: () => true }
 const effectNode = (l2ToL1Msgs: Fr[], receipt: () => Promise<unknown> = async () => CHECKPOINTED) =>
 	({ getTxEffect: async () => ({ data: { l2ToL1Msgs } }), getTxReceipt: receipt }) as unknown as ExitNode

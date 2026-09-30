@@ -1,7 +1,8 @@
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import { Contract } from "@aztec-labs/aztec.js/contracts"
+import { Contract, NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
 import { Fr } from "@aztec-labs/aztec.js/fields"
+import { waitForTx } from "@aztec-labs/aztec.js/node"
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { getContractInstanceFromInstantiationParams } from "@aztec-labs/stdlib/contract"
@@ -39,8 +40,9 @@ export class SponsorUnavailableError extends Error {
 
 /**
  * How far an L2 tx must get before the bridge reads its outcome: published to L1 in a checkpoint. Wallets may return
- * at a proposed block, which is dropped if its proposer never publishes it. A checkpoint is still not permanent (an
- * unproven epoch can be pruned), so a claim's secret is kept until {@link waitClaimFinalized}.
+ * at a proposed block, which is dropped if its proposer never publishes it, and wallet-sdk's transport strips
+ * `waitForStatus`, so the bridge waits on the node itself. A checkpoint is still not permanent (an unproven epoch can
+ * be pruned), so a claim's secret is kept until {@link waitClaimFinalized}.
  */
 export const L2_DONE = { waitForStatus: TxStatus.CHECKPOINTED, timeout: 600 } as const
 
@@ -145,6 +147,7 @@ export async function waitClaimable(
 }
 
 export type NullifierNode = Pick<AztecNode, "findLeavesIndexes">
+export type ClaimNode = NullifierNode & Pick<AztecNode, "getTxReceipt">
 
 /**
  * Whether the bridge has nullified this ticket's message on L2. The nullifier is aztec-nr's
@@ -203,7 +206,7 @@ async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManif
  */
 export async function claim(
 	t: ClaimTicket,
-	node: NullifierNode,
+	node: ClaimNode,
 	wallet: Wallet,
 	m: BridgeManifest,
 	opts: { from: AztecAddress; fee?: FeeChoice },
@@ -211,7 +214,8 @@ export async function claim(
 	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
 	const sponsored = fee !== undefined
 	try {
-		await claimCall(t, wallet, m).send({ from: opts.from, fee, wait: L2_DONE })
+		const { txHash } = await claimCall(t, wallet, m).send({ from: opts.from, fee, wait: NO_WAIT })
+		await waitForTx(node as AztecNode, txHash, L2_DONE)
 		return "claimed"
 	} catch (e) {
 		if (ALREADY_CONSUMED.test(message(e)) && (await isClaimConsumed(t, node, m).catch(() => false))) return "already-consumed"
