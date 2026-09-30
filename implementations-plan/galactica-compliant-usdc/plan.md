@@ -7,7 +7,7 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); in progress: P1 ✓"
+status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); in progress: P1 ✓ P2 ✓"
 ---
 
 # galactica-compliant-usdc
@@ -726,7 +726,7 @@ Pass:
 
 Layers: Noir TXE, artifact identity.
 
-**P2. Merchant list, rules, stamp.**
+**P2. Merchant list, rules, stamp.** ✓ 2026-09-30 (fork class id 0x06b1fbd1…84a2; soundness fix in self-review; [lessons](lessons/phase-2.md))
 
 Work: build the token section in full, plus `merchant_stamp`, and summarize the delta in the provenance header.
 

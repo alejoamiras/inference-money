@@ -68,7 +68,7 @@ describe("the merchant token is an ABI superset of aztec-standards' Token", () =
 		const packedFields = (a: ContractArtifact) => {
 			const dispatch = a.functions.filter((f) => f.functionType === FunctionType.PUBLIC)
 			expect(dispatch.map((f) => f.name)).toEqual(["public_dispatch"])
-			return Math.ceil(dispatch[0].bytecode.length / 31) + 1
+			return Math.ceil(dispatch[0]!.bytecode.length / 31) + 1
 		}
 		expect(packedFields(upstream)).toBe(707)
 		expect(packedFields(fork)).toBeLessThanOrEqual(MAX_PUBLIC_BYTECODE_FIELDS)
