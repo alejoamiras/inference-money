@@ -7,7 +7,7 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "consolidated draft 2026-09-30: contradiction check, double audit and final codex pass (conditional approve) applied; awaiting approval"
+status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); not started"
 ---
 
 # galactica-compliant-usdc
@@ -295,7 +295,9 @@ Two planners computed these independently with viem during planning, and the sam
 |---|---|---|
 | `deploy <local\|testnet> [--merchant-delay <s>]` | `TESTNET_L1_PRIVATE_KEY`, `TESTNET_DEPLOYER_SECRET`, `SEPOLIA_RPC_URL`; plain `TESTNET_ADMIN_ADDRESS` | deploy L1 then L2, wire them, propose both handovers, write the manifest |
 | `admin address` | `TESTNET_ADMIN_SECRET` | print the admin account's address |
-| `admin accept <manifest>` | admin | deploy the admin account through the sponsor if needed, then accept bridge ownership and the merchant admin role |
+| `admin accept <manifest>` | admin | deploy the admin account through the sponsor if needed, then accept bridge ownership and the merchant admin role, and record it as the manifest's `l2.admin` |
+| `admin propose <manifest> <address>` | admin | propose both handovers to a new admin (the switch away from an interim admin) |
+| `disposable init` / `exec <command…>` / `destroy` | none; `exec` reads the disposable file | the P9 fallback (below): create the keys, run one `bridge` command with them, delete them |
 | `merchants add <manifest> <acct…>`, `off`, `on`, `delay <s>`, `guardian <addr>` | admin | list operations; `delay` sets the value and syncs every added merchant in as few txs as the per-tx call limit allows. Up to that limit the entries share one change time; beyond it they fall into a few cohorts instead of one per merchant |
 | `merchants cancel <manifest> <acct>` | admin or guardian | cancel a pending change |
 | `merchants list <manifest>` | none | status of every added merchant, from `MerchantAdded` events |
@@ -336,6 +338,20 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 3. Start `env-exec wait <id>` in the background and print the exact `op-remote <host> <id>` line for the owner.
 4. While the run is live, this session only edits files. It installs, builds, tests and commits nothing, because all of those run third-party code as the same user (the git hooks run Biome and commitlint through `bunx`), and that code can read the run's environment. Other same-user processes on the host can read it as well; that residual is accepted for testnet keys, and production keys never run on a shared host.
 5. Once the run ends, copy its outputs into the working checkout and commit them.
+
+**The disposable fallback** (the owner's decision of 2026-09-30, an exception to "no agent generates operational keys", for testnet only). It lets P9 run while the owner is away.
+- `bridge disposable init` (P8) generates an L1 deploy key (viem `generatePrivateKey`), an L2 deployer secret and an interim admin secret (`Fr.random`). They go into `~/.cache/inference-money/disposable/testnet.env`, mode 0600, outside every checkout, and are never printed, logged or passed on argv. It prints only the addresses: the owner funds the L1 one at the faucets, once, whenever convenient. It refuses to overwrite an existing file.
+- `bridge disposable exec <command…>` runs one `bridge` command with those values in the child's environment only. It uses the same redaction, the same `<scan-trap>` scan and the same rule of nothing else running while it's live, from the keyed worktree. It refuses a file that isn't 0600 and owned by this user. The agent never reads the file itself. The L1 RPC is the pinned public endpoint.
+- Deploy keys lose every role at deployment (Least privilege), so only the admin role outlives the fallback. The manifest marks it `l2.interimAdmin`, and `verify` warns while that holds.
+- **The switch**, once the owner is back:
+  1. the keyed `admin-address` run;
+  2. `bridge disposable exec admin propose deployments/testnet.json <owner admin>`;
+  3. the keyed `admin accept`;
+  4. `verify`;
+  5. `bridge disposable destroy`.
+
+  No redeploy. Delivery waits for the switch.
+- Residual: the file sits on disk until the switch, readable by any same-user process for that whole time, not just during one run. That is accepted for testnet keys holding test funds.
 
 **Showcase** (`apps/showcase`, design F)
 - **Layout.** A header with the two modes. On the left, a composer (ACT AS / ACTION / TO / USDC / Try it, plus the Happy path and Try to cheat chips) and a stage: an Ethereum lane, four wallet cards and the coin. A verdict banner steps through Simulate, Prove, Send, Settle. On the right, the dark "What the world sees" feed.
@@ -562,6 +578,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **Workers Builds** pulls from GitHub; no Cloudflare token lives in GitHub.
 - **Demo keys** never hold an admin or minting role, and are merchant-listed only on local and testnet deployments.
 - **The guardian** can only cancel.
+- **Disposable fallback keys** exist only if the owner is away at P9. They hold testnet funds and, until the switch, the interim admin role; then they are destroyed.
 
 **Cryptography**
 - Protocol primitives only: poseidon2, with separators derived like `claim_secret`'s; sha256 and keccak through the Aztec `Hash` library and the pinned noir-lang crates (sha256 v0.3.0, keccak256 v0.1.3); viem.
@@ -641,11 +658,11 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **I12 (P8):** an install with `--ignore-scripts` still runs the deployer, its PXE and real proving, because the native addons and `bb` ship prebuilt. P8's gate proves it from the keyed worktree with `verify`, `demo status` and one real-proof tx, before any secret is requested.
 - **I13 (P3):** the PXE serves a tx's transient capsules to the token when an account entrypoint calls it. P3's integration exercises the capsule path end to end.
 
-**Asks** (resolved at the approval gate; recommendation first)
+**Asks** (all answered 2026-09-30: 1–3, 5, 6 and 8 as recommended, the rest as marked)
 1. **Instant adds (your decision).** Keep them. For production, Galactica can put adds through its multisig review. Delayed adds would drop the register and a read per check, but onboarding would take D.
 2. **ABI superset instead of strict identity.** Every upstream function stays unchanged; merchant admin functions are added. Strict identity would cost one extra private call on every payment.
 3. **Merchants bind on private claims too.** A merchant funding from several treasuries uses public deposits.
-4. **A cancel-only guardian is built and left unset on testnet.** Without one, only the admin could cancel a malicious switch-off. Galactica can set one in production.
+4. **A cancel-only guardian is built and left unset on testnet.** Without one, only the admin could cancel a malicious switch-off. Galactica can set one in production. **Answered: keep; a deployed token couldn't gain it later without a new token.**
 5. **Testnet admin is one generated key.** Production uses Galactica's multisig account; `docs/operations.md` shows the handover.
 6. **Demo exposure.**
    - A_demo and B_demo together hold at most 0.02 ETH and 50 test USDC, and the L2 float is at most 50 test USDC.
@@ -657,6 +674,8 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
    - Import a funded Sepolia key holding test USDC, or fund a generated one.
    - Import `SEPOLIA_RPC_URL`.
    - Approve each keyed run with `op-remote`.
+
+   **Answered: yes, plus a disposable fallback for when you're away** (the owner's exception to "no agent generates operational keys"; see "The disposable fallback" and P9). Fund its printed address once, any time before P9.
 8. **You, before P13.** In Workers Builds:
    - point the root directory and build command at `apps/showcase`;
    - enable non-production branch builds, so the showcase branch gets a hosted preview URL.
@@ -918,7 +937,8 @@ Work:
 - On local, every command that consumes an L1→L2 message (`demo setup`, `smoke`) runs its own block heartbeat (`startBlockHeartbeat`, `local-actors.ts:20-33`), since messages don't become claimable without traffic. Each beats from an account of its own, so heartbeats never race.
 - `deploy local` hands over to the fixed public local admin and accepts it in the same command.
 - `BRIDGE_PROVE=1` makes local commands prove for real (the local wallet doesn't by default, `local.ts:35`), so a keyed worktree's install can be proven before any secret is requested.
-- The `demo *` commands and `manifest-path`.
+- The `demo *` commands, `manifest-path`, `admin propose`, and the `disposable` commands with the manifest's `l2.interimAdmin`.
+- Last: run `bun run bridge disposable init` and give the owner the printed L1 address to fund at the faucets (up to 0.1 Sepolia ETH and 60 test USDC, within the budget).
 - `packages/demo`; `signingKeyFor` moves to bridge-core.
 - CI: `.github/workflows/demo.yml` in the per-package pattern; `packages/demo/**` joins the `deployer.yml` and `_e2e.yml` path filters.
 - Update `budget.ts` and the probe.
@@ -926,7 +946,8 @@ Work:
   - `docs/operations.md`: every command; keyed-run recipes, including the keyed worktree; the 1 h option with its benefit and costs; the emergency path and what the pause can't reach; `verify` from the manifest's `sourceCommit` against your own endpoints; finishing an old deployment's tickets from its `sourceCommit`; demo refill and rotation (a new users' tag; merchants belong to the deployment, so nothing is re-listed);
   - AGENTS.md:
     - commands;
-    - the secrets rule, rewritten for keyed runs: they run from the keyed worktree, installs skip scripts, and nothing is installed, built or tested while one is live;
+    - the secrets rule, rewritten for keyed runs: they run from the keyed worktree, installs skip scripts, and nothing is installed, built, tested or committed while one is live;
+    - "no agent generates operational keys", with its one exception: the owner-authorized disposable testnet fallback of P9, generated in-process into a 0600 file outside every checkout, never printed, logged or passed on argv, and destroyed after the admin switch;
     - the demo-key carve-out: "derived in `packages/demo` from the deployment and a published users' tag, demo funds only, never an admin or minting role, merchant-listed only on local and testnet; agents may use them without a keyed run";
   - A28.
 
@@ -938,6 +959,7 @@ Tests:
 - An `export` round-trip into a fresh wallet.
 - The tour schema and the world-view decoder.
 - `demo setup` writes no tag until both binding claims report finalized (a stubbed status).
+- The disposable file: created 0600 outside the repo and never overwritten; `exec` refuses looser permissions or another owner; no value reaches argv or output; `destroy` removes it.
 - Integration of `smoke --record` on local.
 
 Validation gate:
@@ -969,24 +991,27 @@ Each request follows the keyed-run recipe (Off-chain surfaces); `<scan-trap>` is
    env-exec request --template deployments/testnet-admin.env.example --slug admin-address -- bash -c '<scan-trap>; bun run bridge admin address'
    ```
    Then commit `TESTNET_ADMIN_ADDRESS` into the deploy template and push.
-2. Deploy:
+2. Deploy, then fund A_demo and B_demo and top up the sponsor, which step 3's admin-account deployment relies on. It's one run, since both use the L1 key; the fund template stays for later refills:
    ```
-   env-exec request --template deployments/testnet-deploy.env.example --slug deploy -- bash -c '<scan-trap>; bun run probe:testnet && bun run bridge deploy testnet'
+   env-exec request --template deployments/testnet-deploy.env.example --slug deploy -- bash -c '<scan-trap>; bun run probe:testnet && bun run bridge deploy testnet && bun run bridge demo fund deployments/testnet.json'
    ```
    Then copy `deployments/testnet.json` into the working checkout, commit and push.
-3. Fund A_demo and B_demo, and top up the sponsor, which step 4's admin-account deployment relies on:
-   ```
-   env-exec request --template deployments/testnet-fund.env.example --slug demo-fund -- bash -c '<scan-trap>; bun run bridge demo fund deployments/testnet.json'
-   ```
-4. Deploy the admin account (sponsored), accept the handover, and list the demo merchants. Their addresses derive from the deployment, and the keyless `bun run bridge demo status deployments/testnet.json` prints them:
+3. Deploy the admin account (sponsored), accept the handover, and list the demo merchants. Their addresses derive from the deployment, and the keyless `bun run bridge demo status deployments/testnet.json` prints them:
    ```
    env-exec request --template deployments/testnet-admin.env.example --slug admin-accept -- bash -c '<scan-trap>; bun run bridge admin accept deployments/testnet.json && bun run bridge merchants add deployments/testnet.json <galactica> <supplier>'
    ```
-5. Keyless, in the background, from the keyed worktree so later edits can't reach it: `demo setup` draws the users' tag, binds both users and seeds the L2 float. Then the acceptance run follows (about 2 h, resumable):
+4. Keyless, in the background, from the keyed worktree so later edits can't reach it: `demo setup` draws the users' tag, binds both users and seeds the L2 float. Then the acceptance run follows (about 2 h, resumable):
    ```
    bun run bridge demo setup deployments/testnet.json && bun run bridge smoke deployments/testnet.json --record deployments/testnet-tour.json
    ```
    Then copy `deployments/testnet-demo.json` and the tour into the working checkout, commit and push, and run `bash scripts/keyed-worktree.sh remove`.
+
+**If the owner is away.** When step 1's request isn't approved within 2 hours and the disposable L1 address is funded, P9 switches to the disposable fallback:
+1. `bun run probe:testnet`, keyless;
+2. `bridge disposable exec` for `deploy testnet`, `demo fund`, `admin accept` and `merchants add`, in that order;
+3. step 4 as written.
+
+Nothing else is filed with env-exec in the meantime, so no stale deploy request can run later. A late approval of step 1 only prints an address, which the switch then uses. Without that funding, P9 holds.
 
 Validation gate (keyless):
 ```
@@ -998,7 +1023,8 @@ test -z "$(git status --porcelain)" && git fetch -q origin && test "$(git rev-pa
 Pass:
 - strict `verify` is green, the tour included;
 - the smoke exited 0 with every leg settled, including the L1 withdrawal, and both refusals refused;
-- the manifest, the demo tag and the tour are committed, and HEAD is pushed.
+- the manifest, the demo tag and the tour are committed, and HEAD is pushed;
+- if the fallback ran, `verify`'s only warning is the interim admin, and the switch is logged as pending in `lessons/phase-9.md`.
 
 Layers: live testnet with real proofs, cross-chain settlement.
 
@@ -1165,7 +1191,7 @@ If deployed bytes changed, run the redeploy chain:
 4. **Close-out**, as the stack's docs-only top layer:
    1. an `## Outcome` block right after this front matter: date, status, PRs, what was dropped and why, and a line retiring the seeds;
    2. promote the generalizable gotchas into `implementations-plan/lessons.md`, keeping it under about 8 KiB: deduplicate, and retire what the new entries supersede;
-   3. move the open follow-ups to `implementations-plan/follow-ups.md`: multisig tooling, delayed adds, mainnet fee path, rollup upgrade, sponsor strategy, demo rotation;
+   3. move the open follow-ups to `implementations-plan/follow-ups.md`: multisig tooling, delayed adds, a delayed admin handover (Ask 11), mainnet fee path, rollup upgrade, sponsor strategy, demo rotation;
    4. `git mv implementations-plan/galactica-compliant-usdc implementations-plan/archive/galactica-compliant-usdc` in its own commit, then repair the links;
    5. move the index line to `archive/index.md`.
 
@@ -1192,7 +1218,7 @@ If deployed bytes changed, run the redeploy chain:
 - `gh stack add <next-branch>` at each arc boundary, after that arc's loop converges.
 - Branches are pushed as checkpoints (`gh stack push`), and must be before every keyed run. Pushing opens no PR and runs no PR-gate CI.
 
-**Delivery**, after every loop converges:
+**Delivery**, after every loop converges, and after the admin switch if P9 ran on the disposable fallback:
 1. `gh stack sync` if `main` moved.
 2. `gh stack submit --auto --open` (without `--open`, `--auto` creates drafts, which `gh stack merge` skips), then `gh pr edit` each body. Bodies end with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
 3. Label the showcase and hardening PRs `e2e`, then `gh pr checks --watch`.
@@ -1241,6 +1267,7 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 | 33 | Manifest `sourceCommit`, `bytecode_hash = "none"`, settle old tickets before a redeploy | C, F (double audit) | A git tag per deployment (F): a tag is a release action; the manifest carries the commit | agreed |
 | 34 | Local e2e embeds a fixture tour; only testnet records one | F (double audit) | A recorded local smoke inside CI e2e (consolidated plan): a second full run inside the 90 min budget | agreed |
 | 35 | `merchants delay` syncs every entry in the same tx | F (double audit) | One sync tx per merchant (consolidated plan): each merchant carries its own expiry for up to 23 h | agreed |
+| 36 | P9 falls back to agent-generated disposable testnet keys when the owner is away, then switches the admin role to the owner's key | the user (approval gate) | Holding P9 until the owner approves (M, recommended): the owner preferred not to be a bottleneck, knowing a funded address and a written rule exception are still needed | decided by the user |
 
 ## Audit log (adopted vs rejected)
 
@@ -1327,13 +1354,17 @@ Verdict: "conditional approve (with conditions: close keyed-run execution gaps, 
 - **A test that forces a real prune before the tag is published:** a unit test pins the finality barrier instead. Forcing a prune on demand isn't something the local harness does.
 - **One copy of the review and delivery steps:** the seeds keep theirs, because a fresh session runs a seed before reading the whole plan. The keyed-run recipe, where the drift was, is now a single copy.
 
-## Seeds (draft; finalized after approval)
+### Approval gate (the user, 2026-09-30)
+
+Approved, with every Ask answered: 1–3, 5, 6 and 8 as recommended; 4 keep the guardian, unset on testnet; 7 yes, plus the disposable fallback (ledger 36); 9 apply delay increases at once; 10 one PXE; 11 keep the handover instant. Separately, the deploy and demo-funding runs were merged, since they use the same key, so the keyed path of P9 needs three approvals.
+
+## Seeds (final, approved 2026-09-30)
 
 ELI5 companion: https://claude.ai/artifact/LMk9CwqFzePvgSSaL6HAF6, published from `implementations-plan/galactica-compliant-usdc/eli5.html` (gitignored). Republishing that file keeps the URL.
 
 Recommended: `/goal`
 ```
-/goal All phases P1–P15 marked ✓ in implementations-plan/galactica-compliant-usdc/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/galactica-compliant-usdc/lessons/phase-N.md` in the transcript; plan.md's `code_review` is `off`, so `/code-review` was NOT run; the codex fix loop converged at each of the six arc boundaries and for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; every keyed run in P9 (and P15 if contracts changed) was approved by the owner and exited 0 (`env-exec wait` output in the transcript); the Delivery section's seven-PR stack exists on GitHub, created only AFTER all loops converged (`gh stack view` output in the transcript), including the close-out that archived the plan (`git show --stat` of the archive-move commit in the transcript); `bun run test` and `bun run lint` both report exit 0 in the transcript.
+/goal All phases P1–P15 marked ✓ in implementations-plan/galactica-compliant-usdc/plan.md (the per-phase headers in the file — not the chat, not the task list), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/galactica-compliant-usdc/lessons/phase-N.md` in the transcript; plan.md's `code_review` is `off`, so `/code-review` was NOT run; the codex fix loop converged at each of the six arc boundaries and for the final cross-arc pass, each convergence evidenced by a resumed codex pass reporting no new material findings, quoted in the transcript; every command that needed keys in P9 (and P15 if contracts changed) exited 0, either as a keyed run the owner approved (`env-exec wait` output in the transcript) or through P9's disposable fallback, in which case the admin switch also completed (a `verify` run without the interim-admin warning, quoted); the Delivery section's seven-PR stack exists on GitHub, created only AFTER all loops converged (`gh stack view` output in the transcript), including the close-out that archived the plan (`git show --stat` of the archive-move commit in the transcript); `bun run test` and `bun run lint` both report exit 0 in the transcript.
 ```
 
 Alternative: `/loop`
@@ -1342,7 +1373,7 @@ Alternative: `/loop`
 1. **Reality check**: read implementations-plan/galactica-compliant-usdc/plan.md and lessons/ (authoritative state — not the chat), including its Outcome & Quality Bar section: every step is judged against those criteria, not just against "it runs". On a stack, read them from the TOP layer (`gh stack view` names it; `git show <top-branch>:<path>`), never from a lower arc's checkout. If that path is gone, the close-out has run: `git fetch -q origin && git cat-file -e origin/main:implementations-plan/archive/galactica-compliant-usdc/plan.md` succeeds → it merged and the plan is done: STOP and say so. Fails → delivered and awaiting my merge: babysit only (CI per step 2, fixes on the arc they belong to then `gh stack sync`, keep the Outcome true); once every PR is green, report that and STOP. A live plan.md that already carries an `## Outcome` block means a close-out was interrupted: finish it. Otherwise, native task list empty (fresh session)? rebuild it from plan.md, one task per remaining step; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (multi-arc: `gh stack view`). Without a PR, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
 2. **Waiting on CI or a keyed run is fine** — confirm it's progressing (`gh run watch <run-id>` up to 10 minutes; `env-exec status <id>`). A step that needs a keyed run: follow plan.md's keyed-run recipe exactly (it prints the `op-remote <host> <id>` line for me); while the run is live, only edit files: no installs, builds, tests or commits.
 3. **No task in hand?** Pick the next pending step from plan.md and start it. After each meaningful edit, run `bun run lint` + the touched packages' tests. Then commit → push (`gh stack push`; `gh stack sync` if main or a lower arc moved).
-4. **Stuck, or facing a decision you'd normally bring to me?** Call `/codex high` with full context until you reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never push to main, never publish or deploy outside the approved keyed runs — except the keyless demo-cast actions plan.md runs with the public demo keys (P9 step 5, P13) — never create or handle secrets outside keyed runs, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
+4. **Stuck, or facing a decision you'd normally bring to me?** Call `/codex high` with full context until you reach a defensible decision, then act on it. Log every consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, never push to main, never publish or deploy outside the approved keyed runs — except the keyless demo-cast actions plan.md runs with the public demo keys (P9 step 4, P13) and P9's disposable fallback exactly as plan.md defines it — never create or handle secrets outside keyed runs and that fallback, never expand scope beyond plan.md; if a decision requires crossing one, surface it and hold.
 5. **Same step failed 5 times?** Stop retrying; reassess with codex, then continue down the agreed path.
 6. **Phase green?** "Green" means the phase's validation gate as written in plan.md passes. Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print `LESSONS_FILE=implementations-plan/galactica-compliant-usdc/lessons/phase-N.md`, advance. Arc boundary crossed (per the Delivery table)? Run the arc's codex loop FIRST (`code_review` is off: no /code-review) with the arc map and the plan's no-over-engineering + comment-quality rules until a round yields nothing material — THEN `gh stack add <next-arc-branch>`.
 7. **All phases ✓?** Run the final cross-arc pass (fresh codex, net diff from e1103f8, seams / duplication / plan drift, same rules, loop until clean). Then Delivery per plan.md — the FIRST time any PR is opened: `gh stack sync`, `gh stack submit --auto --open`, `gh pr edit` bodies, `e2e` labels; then the close-out layer (`gh stack add galactica-compliant-usdc-close-out`, its commits, `gh stack submit --auto --open`), then `gh pr checks --watch`. Then write the wrap-up: what shipped, every contentious decision codex and I debated — each with ELI5 context (the question, the options, why we picked ours) — and open items. Surface and stop — merging is my call.
