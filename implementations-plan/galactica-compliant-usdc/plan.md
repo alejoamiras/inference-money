@@ -662,11 +662,12 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
    - enable non-production branch builds, so the showcase branch gets a hosted preview URL.
 
    P13 and the hardening arc run against that hosted preview. Production switches at merge. If branch protection names `web-status`, rename it to `showcase-status`.
-9. **Delay increases apply at once**, which is upstream's rule and contradicts the explainer's "never instant". Recommendation: keep it. A higher delay only slows later switch-offs, and it can't exceed 24 h. The alternative, a propose-then-apply step that waits the current delay, is about 10 lines of Noir plus tests; codex prefers it.
-10. **One wallet engine (PXE) for the four demo accounts**, where the brief said one per actor. Recommendation: one. Four would mean four syncs, four provers and four times the memory in a visitor's tab.
+9. **Delay increases apply at once**, which is upstream's rule and contradicts the explainer's "never instant". Recommendation: keep it. A higher delay only slows later switch-offs, and it can't exceed 24 h. The alternative, a propose-then-apply step that waits the current delay, is about 10 lines of Noir plus tests; codex prefers it. **Answered 2026-09-30: apply at once.**
+10. **One wallet engine (PXE) for the four demo accounts**, where the brief said one per actor. Recommendation: one. Four would mean four syncs, four provers and four times the memory in a visitor's tab. **Answered 2026-09-30: one.**
 11. **The admin handover is instant** once the new admin accepts, and the guardian can't cancel it. Recommendation: keep it for this delivery, and list a delayed handover as a production follow-up.
     - A delayed handover the guardian can cancel is small (both the token's and the bridge's two-step handovers). It helps against a one-off compromise, such as one malicious transaction signed by the multisig, which today can move the role for good.
     - It doesn't help against a lasting compromise, which already controls everything the role does, the pause included.
+    - **Answered 2026-09-30: keep instant; the delayed handover is a production follow-up.**
 
 Already accepted, recorded for the audit trail: a request stamped while its recipient was a merchant stays payable after a switch-off. The explainer states this, and the user accepted it on 2026-09-30.
 
@@ -1218,7 +1219,7 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 | 11 | Content formats `(amount, depositor)` / `(to, amount, depositor)` | M, F | `(depositor, amount)` ordering (C): no benefit; F's vectors were verified | agreed |
 | 12 | Public deposits survive, claimable only by merchants | C, F, M | Dropping them (none) | agreed |
 | 13 | Live Ethereum lane with a bounded public A_demo key and a replay fallback | C, F | Recorded-only lane (M): loses the live L1 story; the exposure is testnet assets | agreed |
-| 14 | One PXE hosting four accounts | F | One PXE per actor (C, brief): 4× memory and sync | agreed; departs from the brief (Ask 10) |
+| 14 | One PXE hosting four accounts | F | One PXE per actor (C, brief): 4× memory and sync | agreed; the user chose one PXE over the brief's one per actor (Ask 10) |
 | 15 | `packages/demo`, shared by the deployer and the showcase; `signingKeyFor` in bridge-core | F (C: shared browser-safe module) | Cast inside the app (M): the deployer's smoke and funding need it too | agreed |
 | 16 | Keyed runs split by role (deploy / admin / fund); separate generated admin key; keyless `smoke` via the demo cast | F, C (separate admin account) | One key for everything (M): no handover rehearsal, broader exposure | agreed |
 | 17 | Keyless strict `verify`; `protocolVersion`; `consumed-unknown` | C, F | – | agreed |
@@ -1228,7 +1229,7 @@ Sources: **M** is the main draft, **C** is codex (GPT-6 Astra, high), **F** is t
 | 21 | Don't push planning commits to `main` | M | "Push the planning root to main first" (F, citing precedent): violates never pushing to main; merging is the user's call | agreed |
 | 22 | Hardening after testnet goes live | brief (user) | Harden before deploy (none): the user fixed the order | agreed |
 | 23 | `try_prove_merchant` returns `bool`, so the bridge refuses with its own rule text | F | An asserting view (M): the user would see the token's message instead of the exit rule | agreed |
-| 24 | Delay increases apply at once (upstream's rule); the docs and ELI5 correct the explainer's "never instant" | M, F | An on-chain notice period for increases (C): an increase only slows switch-offs, and it's bounded at 86400 | disputed (C); put to the user (Ask 9) |
+| 24 | Delay increases apply at once (upstream's rule); the docs and ELI5 correct the explainer's "never instant" | M, F | An on-chain notice period for increases (C): an increase only slows switch-offs, and it's bounded at 86400 | resolved by the user 2026-09-30: apply at once (Ask 9) |
 | 25 | The showcase goes live on a hosted Workers preview before hardening; production switches at merge | C | Local `vite preview` in P13 (M, F): not "live on Workers" before hardening, as the user ordered | agreed |
 | 26 | A duplicate-nullifier failure reconciles the original submission before any retry | C | Blind retry once (F, M): could repeat a payment, burn or deposit that landed | agreed |
 | 27 | CI e2e before merge by dispatching `_e2e.yml` on the branch | M | No pre-merge CI e2e (F): `_e2e.yml` carries `workflow_dispatch` on `main` | agreed |
