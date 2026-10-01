@@ -1,0 +1,172 @@
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { type AztecNode, waitForTx } from "@aztec-labs/aztec.js/node"
+import type { TxHash } from "@aztec-labs/aztec.js/tx"
+import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import {
+	type BridgeManifest,
+	type ClaimTicket,
+	type ClaimWait,
+	claim,
+	confirmDeposit,
+	type DepositDraft,
+	type DepositKind,
+	type DepositStage,
+	ensurePermit2Allowance,
+	isClaimConsumed,
+	type L1Ctx,
+	L2_DONE,
+	prepareDeposit,
+	reconcileDeposit,
+	sponsoredPayment,
+	submitDeposit,
+	syncMerchantList,
+	transferPrivate,
+	waitClaimable,
+} from "@inference-money/bridge-core"
+import {
+	type Account,
+	type Address,
+	type Chain,
+	createPublicClient,
+	createWalletClient,
+	defineChain,
+	erc20Abi,
+	http,
+	maxUint256,
+	type PublicClient,
+	type WalletClient,
+} from "viem"
+import { privateKeyToAccount } from "viem/accounts"
+import type { User } from "./actors"
+import { DEMO_SEED } from "./amounts"
+import { ethereumKey } from "./keys"
+
+/** What a demo flow needs of a session: a wallet holding the cast's accounts, its node, and the deployment. */
+export interface DemoSession {
+	wallet: Wallet
+	node: AztecNode
+	m: BridgeManifest
+}
+
+/** One signing Ethereum account: each send awaits its receipt before the next. */
+export interface DemoL1 {
+	publicClient: PublicClient
+	walletClient: WalletClient
+	account: Account
+	chain: Chain
+}
+
+/** A_demo (alice's) or B_demo (bob's). Their keys are public: anyone may sign as them. */
+export function demoL1(rpcUrl: string, m: BridgeManifest, user: User): DemoL1 {
+	const chain = defineChain({
+		id: m.l1.chainId,
+		name: `chain-${m.l1.chainId}`,
+		nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+		rpcUrls: { default: { http: [rpcUrl] } },
+	})
+	const account = privateKeyToAccount(ethereumKey(m.l2.bridge.address, user))
+	const transport = http(rpcUrl)
+	return {
+		publicClient: createPublicClient({ chain, transport }) as PublicClient,
+		walletClient: createWalletClient({ chain, transport, account }),
+		account,
+		chain,
+	}
+}
+
+export const l1CtxOf = (s: DemoL1): L1Ctx => ({ publicClient: s.publicClient, walletClient: s.walletClient, account: s.account.address })
+
+export const usdcOf = (l1: Pick<DemoL1, "publicClient">, m: BridgeManifest, who: Address): Promise<bigint> =>
+	l1.publicClient.readContract({ address: m.l1.usdc, abi: erc20Abi, functionName: "balanceOf", args: [who] })
+
+/** Lets Permit2 pull `signer`'s USDC: one unlimited approval, sent only while the allowance is below `needed`. */
+export async function approvePermit2(signer: DemoL1, m: BridgeManifest, needed: bigint): Promise<void> {
+	const owner = signer.account.address
+	await ensurePermit2Allowance({
+		allowance: () =>
+			signer.publicClient.readContract({ address: m.l1.usdc, abi: erc20Abi, functionName: "allowance", args: [owner, m.l1.permit2] }),
+		approveMax: () =>
+			signer.walletClient.writeContract({
+				address: m.l1.usdc,
+				abi: erc20Abi,
+				functionName: "approve",
+				args: [m.l1.permit2, maxUint256],
+				account: signer.account,
+				chain: signer.chain,
+			}),
+		waitReceipt: (hash) => signer.publicClient.waitForTransactionReceipt({ hash }),
+		needed,
+	})
+}
+
+/** The sponsor pays every demo tx: the demo accounts hold no fee juice. */
+export const sponsoredFee = (m: BridgeManifest) => ({ paymentMethod: sponsoredPayment(m) })
+
+export interface DepositPlan {
+	/** A_demo (alice's) or B_demo (bob's). */
+	from: User
+	to: AztecAddress
+	kind: DepositKind
+	amount: bigint
+}
+
+/**
+ * Deposits from a demo Ethereum account, handing the draft to `persist` once it may be broadcast, so a crash after that
+ * point recovers it (`prior`) instead of depositing twice. A prior draft that provably never landed is deposited anew.
+ */
+export async function castDeposit(
+	s: DemoSession,
+	signer: DemoL1,
+	p: DepositPlan,
+	prior: DepositDraft | undefined,
+	persist: (d: DepositDraft) => void,
+	on?: (stage: DepositStage) => void,
+): Promise<ClaimTicket> {
+	const l1 = l1CtxOf(signer)
+	if (prior) {
+		const found = await reconcileDeposit(prior, l1, s.m)
+		if (found === "pending") throw new Error("A stored deposit is not readable on Ethereum yet; try again in a few minutes.")
+		if (found !== "not-deposited") return found
+	}
+	await approvePermit2(signer, s.m, p.amount)
+	const tip = (await l1.publicClient.getBlock()).timestamp
+	const d = await prepareDeposit({ amount: p.amount, recipient: p.to, kind: p.kind }, s.m, () => tip)
+	await submitDeposit(d, l1, s.m, s.node, (stage) => {
+		if (stage === "depositing") persist(d)
+		on?.(stage)
+	})
+	return confirmDeposit(d, l1, s.m, on)
+}
+
+const CLAIMABLE = { pollMs: 5_000, attempts: 720 }
+
+/**
+ * Claims `t` once its message is consumable, as its recipient (a private claim must be; a public one goes through the
+ * sponsor). "already" when its message was consumed before, by this claim or anyone's.
+ */
+export async function castClaim(s: DemoSession, t: ClaimTicket, onWait?: (w: ClaimWait) => void): Promise<"claimed" | "already"> {
+	if (await isClaimConsumed(t, s.node, s.m)) return "already"
+	const from = t.draft.intent.recipient
+	await waitClaimable(t, s.node, s.wallet, s.m, from, onWait, CLAIMABLE)
+	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored" })
+	return result === "claimed" ? "claimed" : "already"
+}
+
+/**
+ * A private transfer with the side capsule the merchant list implies. User to user is refused before anything is
+ * proven, with the token's own refusal text.
+ */
+export async function sendPrivate(s: DemoSession, from: AztecAddress, to: AztecAddress, amount: bigint): Promise<TxHash> {
+	const token = AztecAddress.fromStringUnsafe(s.m.l2.token.address)
+	const list = await syncMerchantList(s.node, token)
+	const txHash = await transferPrivate(s.wallet, token, { from, to, amount }, { list, fee: sponsoredFee(s.m) })
+	await waitForTx(s.node, txHash, L2_DONE)
+	return txHash
+}
+
+/** What `demo reset` refunds alice: back up to her seed, as far as galactica's private balance goes; 0 when nothing. */
+export function resetAmount(alice: bigint, galactica: bigint): bigint {
+	const short = DEMO_SEED.alice - alice
+	if (short <= 0n) return 0n
+	return short < galactica ? short : galactica
+}

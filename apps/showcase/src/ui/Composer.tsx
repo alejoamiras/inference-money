@@ -69,20 +69,21 @@ export function SceneChips({ scenes, active, onPick }: { scenes: readonly Scene[
 	)
 }
 
-/** The "inside the wallets" panel: who acts, what they do, to whom, how much; then the scene chips. */
-export function Composer({
-	hint,
-	aside,
-	fields,
-	action,
-	chips,
-}: {
+export interface ComposerProps {
 	hint: string
+	/** Marks the hint for the e2e suite, as live mode's wallet status. */
+	hintTestId?: string
+	hintStatus?: string
 	aside?: ReactNode
 	fields: ReactNode
 	action: ReactNode
+	/** Under the fields: a validation message. */
+	footer?: ReactNode
 	chips: ReactNode
-}) {
+}
+
+/** The "inside the wallets" panel: who acts, what they do, to whom, how much; then the scene chips. */
+export function Composer(p: ComposerProps) {
 	return (
 		<section
 			className="flex flex-col gap-3 rounded-[14px] border border-line bg-white px-4 py-3.5 lg:px-[18px]"
@@ -94,15 +95,18 @@ export function Composer({
 					INSIDE THE WALLETS
 				</h2>
 				<span className="flex items-center gap-3 text-[13px] text-muted">
-					{hint}
-					{aside}
+					<span data-testid={p.hintTestId} data-status={p.hintStatus}>
+						{p.hint}
+					</span>
+					{p.aside}
 				</span>
 			</div>
 			<div className="grid grid-cols-2 items-end gap-2.5 md:grid-cols-[140px_196px_176px_100px_minmax(0,1fr)]">
-				{fields}
-				<div className="col-span-2 md:col-span-1">{action}</div>
+				{p.fields}
+				<div className="col-span-2 md:col-span-1">{p.action}</div>
 			</div>
-			{chips}
+			{p.footer}
+			{p.chips}
 		</section>
 	)
 }

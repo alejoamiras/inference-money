@@ -26,21 +26,30 @@ import {
 } from "@inference-money/bridge-core"
 import {
 	aztecWorld,
-	ethereumWorld,
+	castClaim,
+	castDeposit,
+	type DemoL1,
+	demoL1,
+	depositWorld,
+	HIDDEN,
+	l1CtxOf,
 	parseTour,
 	SMOKE_AMOUNTS,
+	sendPrivate,
+	sponsoredFee,
 	TOUR_STEPS,
 	type TourStep,
 	type TourStepId,
 	totalSupplySlot,
 	tourHeader,
+	usdcOf,
+	type WorldItem,
+	withdrawWorld,
 } from "@inference-money/demo"
 import type { Hex } from "viem"
 import { tokenOf } from "./admin"
 import { usersTagOf } from "./demo"
-import { castClaim, castDeposit, enlist, type Log, type Player, sendPrivate, sponsored, withHeartbeat } from "./demo-flows"
-import { demoSigner, l1Ctx, usdcOf } from "./demo-l1"
-import type { L1Signer } from "./l1"
+import { enlist, type Log, logWait, type Player, withHeartbeat } from "./demo-flows"
 import { type StateDir, withStateDir } from "./run-state"
 import { type ManifestRef, type Session, withSession } from "./session"
 import type { SentTx } from "./wallet"
@@ -52,15 +61,15 @@ const A = SMOKE_AMOUNTS
 const usdc = (v: bigint) => v.toString()
 
 /** Each step as the tour tells it; `hidden` names what its Aztec tx carries that nobody else can read. */
-const STORY: Record<SmokeStep, Pick<TourStep, "actor" | "action" | "to" | "amount"> & { hidden?: string[] }> = {
+const STORY: Record<SmokeStep, Pick<TourStep, "actor" | "action" | "to" | "amount"> & { hidden?: readonly string[] }> = {
 	deposit: { actor: "A_demo", action: "deposit", to: "alice", amount: usdc(A.deposit) },
-	claim: { actor: "alice", action: "claim", to: "alice", amount: usdc(A.deposit), hidden: ["recipient"] },
-	request: { actor: "galactica", action: "request", to: "galactica", amount: usdc(A.deposit), hidden: ["recipient", "payer"] },
-	pay: { actor: "alice", action: "pay", to: "galactica", amount: usdc(A.deposit), hidden: ["payer", "recipient", "amount"] },
-	refund: { actor: "galactica", action: "refund", to: "alice", amount: usdc(A.refund), hidden: ["sender", "recipient", "amount"] },
+	claim: { actor: "alice", action: "claim", to: "alice", amount: usdc(A.deposit), hidden: HIDDEN.claim },
+	request: { actor: "galactica", action: "request", to: "galactica", amount: usdc(A.deposit), hidden: HIDDEN.request },
+	pay: { actor: "alice", action: "pay", to: "galactica", amount: usdc(A.deposit), hidden: HIDDEN.pay },
+	refund: { actor: "galactica", action: "refund", to: "alice", amount: usdc(A.refund), hidden: HIDDEN.transfer },
 	"transfer-refused": { actor: "alice", action: "transfer", to: "bob", amount: usdc(A.refused) },
 	"exit-refused": { actor: "alice", action: "exit", to: "B_demo", amount: usdc(A.refused) },
-	exit: { actor: "alice", action: "exit", to: "A_demo", amount: usdc(A.exit), hidden: ["sender"] },
+	exit: { actor: "alice", action: "exit", to: "A_demo", amount: usdc(A.exit), hidden: HIDDEN.exit },
 	withdraw: { actor: "A_demo", action: "withdraw", to: "A_demo", amount: usdc(A.exit) },
 }
 
@@ -103,8 +112,8 @@ interface Run {
 	dir: StateDir
 	state: SmokeState
 	cast: Record<"alice" | "bob" | "galactica", Player>
-	aDemo: L1Signer
-	bDemo: L1Signer
+	aDemo: DemoL1
+	bDemo: DemoL1
 	log: Log
 }
 
@@ -137,8 +146,8 @@ async function aztecEntry(r: Run, step: SmokeStep): Promise<TourStep> {
 	return { id: step, ...story, verdict: "settled", l2, world }
 }
 
-async function ethereumEntry(r: Run, step: SmokeStep, hash: Hex | undefined, fields: [string, string][]): Promise<TourStep> {
-	const entry: TourStep = { id: step, ...STORY[step], verdict: "settled", world: ethereumWorld(fields) }
+async function ethereumEntry(r: Run, step: SmokeStep, hash: Hex | undefined, world: WorldItem[]): Promise<TourStep> {
+	const entry: TourStep = { id: step, ...STORY[step], verdict: "settled", world }
 	if (!hash) return entry
 	const receipt = await r.aDemo.publicClient.getTransactionReceipt({ hash })
 	return { ...entry, l1: { txHash: hash, block: Number(receipt.blockNumber) } }
@@ -171,26 +180,20 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 		}
 		const prior = r.state.draft ? decodeDepositDraft(r.state.draft) : undefined
 		const plan = { from: "alice", to: r.cast.alice.address, kind: "private", amount: A.deposit } as const
-		const t = await castDeposit(r.s, plan, prior, persist)
+		const t = await castDeposit(r.s, r.aDemo, plan, prior, persist)
 		r.state.claim = encodeTicket("claim", t)
-		return ethereumEntry(r, "deposit", t.draft.l1TxHash, [
-			["depositor", t.depositor],
-			["amount", usdc(t.draft.intent.amount)],
-			["kind", "private"],
-			["secret hash", t.draft.secretHash.toString()],
-			["message index", t.leafIndex.toString()],
-		])
+		return ethereumEntry(r, "deposit", t.draft.l1TxHash, depositWorld(t))
 	},
 	claim: async (r) => {
 		if (!r.state.claim) throw new Error("no claim ticket stored")
-		await castClaim(r.s, decodeClaimTicket(r.state.claim), r.log)
+		await castClaim(r.s, decodeClaimTicket(r.state.claim), logWait(r.log))
 		return aztecEntry(r, "claim")
 	},
 	request: async (r) => {
 		const { alice, galactica } = r.cast
 		const list = await syncMerchantList(r.s.node, tokenAddress(r))
 		const intent = { from: galactica.address, to: galactica.address, completer: alice.address }
-		const { commitment } = await openRequest(r.s.wallet, r.s.node, tokenAddress(r), intent, { list, fee: sponsored(r.s) })
+		const { commitment } = await openRequest(r.s.wallet, r.s.node, tokenAddress(r), intent, { list, fee: sponsoredFee(r.s.m) })
 		r.state.commitment = commitment.toString()
 		return aztecEntry(r, "request")
 	},
@@ -199,7 +202,7 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 		const commitment = Fr.fromHexString(r.state.commitment)
 		const list = await syncMerchantList(r.s.node, tokenAddress(r))
 		const p = { from: r.cast.alice.address, commitment, amount: A.deposit, kind: "private" } as const
-		await payRequest(r.s.gate, r.s.wallet, tokenAddress(r), p, { list, fee: sponsored(r.s) })
+		await payRequest(r.s.gate, r.s.wallet, tokenAddress(r), p, { list, fee: sponsoredFee(r.s.m) })
 		if ((await completionCount(r.s.node, tokenAddress(r), commitment)) !== 1)
 			throw new Error("the request is not completed exactly once")
 		return aztecEntry(r, "pay")
@@ -212,7 +215,7 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 		const { alice, bob } = r.cast
 		const transfer = tokenOf(r.s.wallet, r.s.m).methods.transfer_private_to_private!(alice.address, bob.address, A.refused, 0)
 		return refusedEntry(r, "transfer-refused", "transfer", tokenRefusalOf, () =>
-			transfer.simulate({ from: alice.address, fee: sponsored(r.s) }),
+			transfer.simulate({ from: alice.address, fee: sponsoredFee(r.s.m) }),
 		)
 	},
 	"exit-refused": (r) => {
@@ -236,11 +239,9 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 		const t = decodeExitTicket(r.state.exit)
 		let hash: Hex | undefined
 		if (await isExitWithdrawn(t, r.s.node, outbox(r))) r.log("  an earlier run completed the withdrawal; its L1 tx is not on record")
-		else hash = await finishWithdrawal(t, r.s.node, outbox(r), l1Ctx(r.aDemo), r.s.m, (st) => r.log(`  withdraw: ${st}`), WITHDRAWABLE)
-		return ethereumEntry(r, "withdraw", hash, [
-			["recipient", t.recipient],
-			["amount", usdc(t.amount)],
-		])
+		else
+			hash = await finishWithdrawal(t, r.s.node, outbox(r), l1CtxOf(r.aDemo), r.s.m, (st) => r.log(`  withdraw: ${st}`), WITHDRAWABLE)
+		return ethereumEntry(r, "withdraw", hash, withdrawWorld(t.recipient, t.amount))
 	},
 }
 
@@ -310,13 +311,13 @@ function writeTour(path: string, r: Run): void {
 
 async function startRun(s: Session, dir: StateDir, tag: string, log: Log): Promise<Run> {
 	const rpc = s.endpoints.l1RpcUrl
-	const aDemo = demoSigner(rpc, s.m, "alice")
+	const aDemo = demoL1(rpc, s.m, "alice")
 	await assertNetworkIdentity(s.node, aDemo.publicClient, s.m)
 	const cast = await enlist(s, ["alice", "bob", "galactica"] as const, tag)
 	const stored = dir.read<SmokeState>(STATE)
 	const state = stored ?? { baseline: asStrings(await balances({ s, cast, aDemo })), done: [], tour: {} }
 	if (stored) log(`resuming the run at ${nextStep(stored) ?? "its checks"}`)
-	const run: Run = { s, dir, state, cast, aDemo, bDemo: demoSigner(rpc, s.m, "bob"), log }
+	const run: Run = { s, dir, state, cast, aDemo, bDemo: demoL1(rpc, s.m, "bob"), log }
 	save(run)
 	return run
 }

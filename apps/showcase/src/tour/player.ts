@@ -36,7 +36,7 @@ export interface PlayedScene {
 }
 
 /** What an observer of the chain can say about a step: no more than its public fields show. */
-const PUBLIC_TEXT: Record<TourStep["action"], string> = {
+export const PUBLIC_TEXT: Record<TourStep["action"], string> = {
 	deposit: "A deposit into the portal, in the clear.",
 	claim: "A private transaction minted USDC.",
 	request: "A private transaction.",
@@ -46,7 +46,7 @@ const PUBLIC_TEXT: Record<TourStep["action"], string> = {
 	exit: "A private transaction burned USDC and messaged Ethereum.",
 	withdraw: "The portal paid a withdrawal out, in the clear.",
 }
-const REFUSED_TEXT = "The wallet refused it before proving anything, so nothing reached a chain."
+export const REFUSED_TEXT = "The wallet refused it before proving anything, so nothing reached a chain."
 
 const RULES: Record<string, string> = { ...TOKEN_REFUSALS, ...BRIDGE_REFUSALS }
 
@@ -88,7 +88,8 @@ function txLink(s: TourStep, explorer: Explorer | undefined): string | undefined
 	return undefined
 }
 
-function rowOf(s: TourStep, explorer: Explorer | undefined): FeedRow {
+/** A recorded step's public row. */
+export function rowOf(s: TourStep, explorer: Explorer | undefined): FeedRow {
 	const row = { key: s.id, source: "recorded" } as const
 	if (s.verdict === "refused") return { ...row, chain: "none", text: REFUSED_TEXT, items: [] }
 	const chain = s.world.some((w) => w.chain === "ethereum") ? "ethereum" : "aztec"

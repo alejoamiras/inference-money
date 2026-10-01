@@ -19,4 +19,5 @@ export const TESTIDS = {
 	verdictRule: "verdict-rule",
 	feedRow: "feed-row",
 	feedSource: "feed-source",
+	payout: "payout",
 } as const

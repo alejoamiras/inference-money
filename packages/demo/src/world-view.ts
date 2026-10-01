@@ -1,7 +1,7 @@
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import type { Fr } from "@aztec-labs/aztec.js/fields"
 import { computePublicDataTreeLeafSlot } from "@aztec-labs/stdlib/hash"
-import { type BridgeManifest, tokenArtifact } from "@inference-money/bridge-core"
+import { type BridgeManifest, type ClaimTicket, tokenArtifact } from "@inference-money/bridge-core"
 import type { WorldItem } from "./tour"
 
 /** The parts of a mined tx effect anyone can read from a node. */
@@ -68,3 +68,29 @@ export function aztecWorld(effect: EffectView, sent: Commitments, known: readonl
 /** An L1 call's public fields, as its calldata and events show them. */
 export const ethereumWorld = (fields: readonly [label: string, value: string][]): WorldItem[] =>
 	fields.map(([label, value]) => readable("ethereum", label, value))
+
+/** A private deposit as the router's call and its `Deposit` event show it. */
+export const depositWorld = (t: ClaimTicket): WorldItem[] =>
+	ethereumWorld([
+		["depositor", t.depositor],
+		["amount", t.draft.intent.amount.toString()],
+		["kind", t.draft.intent.kind],
+		["secret hash", t.draft.secretHash.toString()],
+		["message index", t.leafIndex.toString()],
+	])
+
+/** A withdrawal's payout as the portal's call shows it. */
+export const withdrawWorld = (recipient: string, amount: bigint): WorldItem[] =>
+	ethereumWorld([
+		["recipient", recipient],
+		["amount", amount.toString()],
+	])
+
+/** What each kind of Aztec tx carries that nobody but its parties can read. */
+export const HIDDEN: Record<"claim" | "request" | "pay" | "transfer" | "exit", readonly string[]> = {
+	claim: ["recipient"],
+	request: ["recipient", "payer"],
+	pay: ["payer", "recipient", "amount"],
+	transfer: ["sender", "recipient", "amount"],
+	exit: ["sender"],
+}

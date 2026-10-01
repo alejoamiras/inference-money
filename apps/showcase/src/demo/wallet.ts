@@ -5,11 +5,20 @@ import { openBrowserStore, PXE_DATA_SCHEMA_VERSION } from "@aztec-labs/pxe/clien
 import type { Tx } from "@aztec-labs/stdlib/tx"
 import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { type BridgeManifest, PaymentGate, type PaymentStore, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
-import { ACTORS, type Actor, type CastMember, castMember } from "@inference-money/demo"
+import { ACTORS, type Actor, type CastMember, castMember, recordingNode, type SentTx } from "@inference-money/demo"
 
 /** A cast member whose account the page's wallet holds, so the page can sign as it. */
 export interface Player extends CastMember {
 	address: AztecAddress
+}
+
+/** Where a send stands once simulated: proving in this page, handed to the node, then waiting to settle. */
+export type SendStage = "prove" | "send" | "settle"
+
+export interface StageFeed {
+	emit(stage: SendStage): void
+	/** Returns the unsubscribe. */
+	listen(fn: (stage: SendStage) => void): () => void
 }
 
 export interface DemoWallet {
@@ -20,6 +29,9 @@ export interface DemoWallet {
 	cast: Record<Actor, Player>
 	/** `performance.now()` as each tx reached the node: everything before it is the page simulating and proving. */
 	sentAt: number[]
+	/** Every tx the page sent, with what the world sees of it but its effect does not carry. */
+	sent: SentTx[]
+	stages: StageFeed
 }
 
 export interface DemoWalletOptions {
@@ -32,16 +44,55 @@ export interface DemoWalletOptions {
 /** Opening a store another tab holds fails outright; say what to do about it. */
 const POOL_BUSY = "SqlitePoolBusyError"
 
-function stamping(node: AztecNode, sentAt: number[]): AztecNode {
-	return new Proxy(node, {
-		get: (target, key, receiver) =>
-			key === "sendTx"
-				? (tx: Tx) => {
-						sentAt.push(performance.now())
-						return target.sendTx(tx)
-					}
-				: Reflect.get(target, key, receiver),
+function stageFeed(): StageFeed {
+	const listeners = new Set<(stage: SendStage) => void>()
+	return {
+		emit: (stage) => {
+			for (const fn of listeners) fn(stage)
+		},
+		listen: (fn) => {
+			listeners.add(fn)
+			return () => listeners.delete(fn)
+		},
+	}
+}
+
+/** Methods bound to the target: a class with private fields refuses a proxy as `this`. */
+function intercept<T extends object>(target: T, key: PropertyKey, wrap: (method: (...args: never[]) => unknown) => unknown): T {
+	return new Proxy(target, {
+		get(t, k) {
+			const value = Reflect.get(t, k, t)
+			if (typeof value !== "function") return value
+			const bound = value.bind(t)
+			return k === key ? wrap(bound) : bound
+		},
 	})
+}
+
+function stamping(node: AztecNode, sentAt: number[], stages: StageFeed): AztecNode {
+	return intercept(node, "sendTx", (send) => async (tx: Tx) => {
+		sentAt.push(performance.now())
+		stages.emit("send")
+		const sent = await (send as (tx: Tx) => Promise<void>)(tx)
+		stages.emit("settle")
+		return sent
+	})
+}
+
+/**
+ * The embedded wallet, reporting when it starts proving: the one step of a send its API does not surface. Its `create`
+ * constructs `new this(…)`, so the subclass is what it builds.
+ */
+function stagedWallet(stages: StageFeed): typeof EmbeddedWallet {
+	return class StagedWallet extends EmbeddedWallet {
+		constructor(...[pxe, ...rest]: ConstructorParameters<typeof EmbeddedWallet>) {
+			const proving = intercept(pxe, "proveTx", (prove) => (...args: never[]) => {
+				stages.emit("prove")
+				return prove(...args)
+			})
+			super(proving, ...rest)
+		}
+	}
 }
 
 /** One PXE store per deployment: a redeploy on the same rollup brings new contracts and a new cast. */
@@ -65,9 +116,12 @@ async function openPxeStore(node: AztecNode, m: BridgeManifest) {
  */
 export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: DemoWalletOptions): Promise<DemoWallet> {
 	const sentAt: number[] = []
+	const sent: SentTx[] = []
+	const stages = stageFeed()
 	const store = await openPxeStore(node, m)
-	const gate = new PaymentGate(stamping(node, sentAt), opts.payments)
-	const wallet = await gate.bindWallet((gated) => EmbeddedWallet.create(gated, { pxe: { proverEnabled: opts.proves, store } }))
+	const gate = new PaymentGate(recordingNode(stamping(node, sentAt, stages), sent), opts.payments)
+	const Staged = stagedWallet(stages)
+	const wallet = await gate.bindWallet((gated) => Staged.create(gated, { pxe: { proverEnabled: opts.proves, store } }))
 	await registerSponsor(wallet, m)
 	await registerBridgeContracts(wallet, m)
 	const cast = {} as Record<Actor, Player>
@@ -77,5 +131,5 @@ export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: D
 		const account = await wallet.createSchnorrAccount(member.secret, Fr.ZERO, member.signingKey, actor)
 		cast[actor] = { ...member, address: account.address }
 	}
-	return { wallet, node, gate, cast, sentAt }
+	return { wallet, node, gate, cast, sentAt, sent, stages }
 }

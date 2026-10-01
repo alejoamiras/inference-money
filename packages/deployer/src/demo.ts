@@ -13,24 +13,29 @@ import {
 	syncMerchantList,
 	waitClaimFinalized,
 } from "@inference-money/bridge-core"
-import { aztecAddressOf, castMember, DEMO_SEED, MERCHANTS, newUsersTag, USERS } from "@inference-money/demo"
+import {
+	aztecAddressOf,
+	castClaim,
+	castDeposit,
+	castMember,
+	DEMO_SEED,
+	type DepositPlan,
+	demoL1,
+	l1CtxOf,
+	MERCHANTS,
+	newUsersTag,
+	resetAmount,
+	sendPrivate,
+	sponsoredFee,
+	USERS,
+	usdcOf,
+} from "@inference-money/demo"
 import { type DemoFile, demoFilePath, readDemoFile } from "@inference-money/demo/files"
 import { privateKeyToAccount } from "viem/accounts"
 import { addMerchants } from "./admin"
 import { keepUntilFinal, type ReclaimSteps } from "./claim-finality"
-import {
-	castClaim,
-	castDeposit,
-	type DepositPlan,
-	deployPlayers,
-	enlist,
-	type Log,
-	type Player,
-	sendPrivate,
-	sponsored,
-	withHeartbeat,
-} from "./demo-flows"
-import { anvilFaucet, demoSigner, fundDemoL1, l1Ctx, signerFaucet, usdcOf } from "./demo-l1"
+import { deployPlayers, enlist, type Log, logWait, type Player, withHeartbeat } from "./demo-flows"
+import { anvilFaucet, fundDemoL1, signerFaucet } from "./demo-l1"
 import { topUpSponsor } from "./fee-juice"
 import { l1Signer } from "./l1"
 import { type StateDir, withStateDir } from "./run-state"
@@ -126,7 +131,7 @@ async function ensureMerchantsListed(s: Session, log: Log): Promise<void> {
 function liveSetupOps(s: Session, log: Log): SetupOps {
 	let players: Record<string, Player> = {}
 	const claimAgain = async (t: ClaimTicket) => {
-		await castClaim(s, t, log)
+		await castClaim(s, t, logWait(log))
 	}
 	return {
 		prepare: async (tag) => {
@@ -136,13 +141,16 @@ function liveSetupOps(s: Session, log: Log): SetupOps {
 			players = await enlist(s, [...USERS, ...MERCHANTS], tag)
 			await deployPlayers(s, Object.values(players), log)
 		},
-		deposit: (seed, _tag, prior, persist) => castDeposit(s, SEED_PLANS[seed](players), prior, persist),
+		deposit: (seed, _tag, prior, persist) => {
+			const plan = SEED_PLANS[seed](players)
+			return castDeposit(s, demoL1(s.endpoints.l1RpcUrl, s.m, plan.from), plan, prior, persist)
+		},
 		claim: async (t) => {
-			log(`claim to ${t.draft.intent.recipient}: ${await castClaim(s, t, log)}`)
+			log(`claim to ${t.draft.intent.recipient}: ${await castClaim(s, t, logWait(log))}`)
 		},
 		final: {
 			finality: (t) => waitClaimFinalized(t, s.node, s.m),
-			reconcile: (t) => reconcileDeposit(t.draft, l1Ctx(demoSigner(s.endpoints.l1RpcUrl, s.m, "alice")), s.m),
+			reconcile: (t) => reconcileDeposit(t.draft, l1CtxOf(demoL1(s.endpoints.l1RpcUrl, s.m, "alice")), s.m),
 			claimAgain,
 			pause: (ms) => new Promise((r) => setTimeout(r, ms)),
 			log,
@@ -194,7 +202,7 @@ export function demoStatus(ref: ManifestRef, log: Log): Promise<void> {
 		}
 		if (!tag) log("alice, bob: not set up yet (bridge demo setup)")
 		for (const user of USERS) {
-			const signer = demoSigner(s.endpoints.l1RpcUrl, s.m, user)
+			const signer = demoL1(s.endpoints.l1RpcUrl, s.m, user)
 			const address = signer.account.address
 			const [eth, usdc] = await Promise.all([signer.publicClient.getBalance({ address }), usdcOf(signer, s.m, address)])
 			log(`${user === "alice" ? "A_demo" : "B_demo"}    ${address}: ${eth} wei, ${usdc} USDC units`)
@@ -211,8 +219,8 @@ export function demoReset(ref: ManifestRef, log: Log): Promise<void> {
 			l2UsdcBalance(s.wallet, s.m, p.alice.address, "private"),
 			l2UsdcBalance(s.wallet, s.m, p.galactica.address, "private"),
 		])
-		const amount = DEMO_SEED.alice - alice < galactica ? DEMO_SEED.alice - alice : galactica
-		if (amount <= 0n) {
+		const amount = resetAmount(alice, galactica)
+		if (amount === 0n) {
 			log(`nothing to rebalance: alice holds ${alice}, galactica ${galactica} privately`)
 			return
 		}
@@ -240,7 +248,7 @@ export function demoFund(ref: ManifestRef, log: Log): Promise<void> {
 			wallet: s.wallet,
 			from: galactica.address,
 			sponsor: (await sponsorInstance()).address,
-			fee: sponsored(s),
+			fee: sponsoredFee(s.m),
 			bridge: { l1RpcUrl: rpc, l1PrivateKey: key, l1ChainId: s.m.l1.chainId },
 			log,
 		})
