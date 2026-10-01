@@ -7,7 +7,7 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); in progress: P1 ✓ P2 ✓"
+status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); in progress: P1 ✓ P2 ✓ P3 ✓"
 ---
 
 # galactica-compliant-usdc
@@ -471,6 +471,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
    - A DPM read with D = 86400 and nothing pending sets the same cap, so merchant checks blend in. This is an inference; A21 pins it by comparing expiry with a non-reading tx at the same anchor.
    - A pending change sets `change − 1`.
    - D = 3600 sets `anchor + 3599`.
+   - **Measured in P3:** these are in-circuit caps. The PXE commits each one rounded down from the anchor, to whole hours, else half hours, else seconds (`compute_tx_expiration_timestamp.js`). Every tx with a 24 h horizon commits `anchor + 82800`, merchant check or not, so parity holds. D = 3600 commits `anchor + 1800`. ([lessons](lessons/phase-3.md))
 2. **`InitialDelay = 3600`, then `schedule_delay_change(setting)` at add.** Raising from the floor always applies at once, so a new merchant starts with the configured delay. A compile-time 24 h would make a later 1 h setting take 23 h for every new merchant. The guardian slot gets the same call in the constructors.
 3. **Cancels and switch-ons still mark.** Any schedule sets `change = now + D`, and reads of that entry stay marked until then.
 4. **Hints and flags are advice.** Every branch is fully constrained. `try_prove_merchant`'s `false` is only used to refuse.
@@ -767,7 +768,7 @@ Pass: the token and keystone floors are raised to the measured counts, and every
 
 Layers: Noir, artifact.
 
-**P3. Token wiring, integration, docs.**
+**P3. Token wiring, integration, docs.** ✓ 2026-10-01 (I2 was wrong: proxy and bridge class ids re-pinned; commitments reach the opener through an offchain effect; arc 1 codex loop converged in 3 rounds; [lessons](lessons/phase-3.md))
 
 Work:
 - **Nargo:** the proxy and bridge depend on `token = { path = "../token" }`, and bridge TXE uses the fork's artifact.
