@@ -1,8 +1,14 @@
 # Architecture
 
-**Deposit (L1 → L2).** The user signs one Permit2 witness transfer naming `Permit2DepositRouter`, which pulls exactly `amount` USDC and deposits it into `TokenPortal`. The portal locks the USDC and sends an L1→L2 message whose content hash binds the amount, the depositor and (public) the recipient. On Aztec, `token_bridge.claim_public` / `claim_private` consumes the message and mints through `token_minter_proxy`, the Token's only minter. Private claims re-derive the message secret in-circuit from a salt and the recipient, so only the committed recipient can be credited.
+**Deposit (L1 → L2).** The user signs one Permit2 witness transfer naming `Permit2DepositRouter`, which pulls exactly `amount` USDC and deposits it into `TokenPortal`. The portal locks the USDC and sends an L1→L2 message whose content hash binds the amount, the depositor and (public) the recipient. On Aztec, `token_bridge` consumes the message and mints through `token_minter_proxy`, the Token's only minter. `claim_public` mints to the recipient the message names, which must be a merchant, whoever submits it. `claim_private` re-derives the message secret in-circuit from a salt and the recipient, and only that recipient may submit it.
 
-**Withdraw (L2 → L1).** `token_bridge.exit_to_l1_*` burns the L2 balance and emits an L2→L1 message binding the L1 recipient and amount. Once the epoch is proven, anyone holding the membership witness calls `TokenPortal.withdraw`, which consumes the message in the Outbox and pays out.
+**Funding address.** A user account's first private claim binds it for good to that deposit's depositor: a `PrivateImmutable` note only the owner can initialize, delivered on chain so a restored wallet finds it again. Every later private claim must come from the same address, and the account withdraws only there. Merchants bind too, but exit anywhere; their public deposits never bind.
+
+**Returns.** A deposit nobody may claim (a user's public deposit, or a private one from another address than the account's funding address) goes back to its depositor. `return_deposit_{private,public}` consumes the message, mints nothing, and emits the withdraw an exit to the depositor would; whoever holds the claim data may send it. A merchant's public deposit is claimed, never returned, since its secret is readable in the mempool once a claim is sent and anyone could otherwise bounce it.
+
+**Withdraw (L2 → L1).** `token_bridge.exit_to_l1_*` burns the L2 balance and emits an L2→L1 message binding the L1 recipient and amount. A merchant exits publicly or privately to any address; a user exits only privately, and only to its funding address. Once the epoch is proven, anyone holding the membership witness calls `TokenPortal.withdraw`, which consumes the message in the Outbox and pays out. The owner's pause holds claims, returns and exits on L2, never a withdrawal already made.
+
+**The books.** The portal's USDC always covers the L2 supply, every deposit not yet consumed and every withdrawal (exit or return) not yet paid out on L1, and integration asserts that equation at the end of each acceptance, returns and exit-rules spec.
 
 **Cross-toolchain keystone.** The content hashes and the claim-secret derivation are pinned by identical literal vectors in Noir, Solidity and TypeScript; a drift in any one strands deposits.
 

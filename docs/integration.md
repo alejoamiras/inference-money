@@ -1,0 +1,67 @@
+# Integrating the compliant USDC
+
+For wallets and x402 facilitators that hold, move or pay with the bridged USDC on Aztec. The token is aztec-standards' `Token` (v6.0.0-rc.1) plus a merchant list, so upstream calls keep working; what changes is who may do what. Every rule below is enforced on chain; `@inference-money/bridge-core` checks the same rules before anything is signed or proven, so a refused action costs no fee.
+
+## Who may do what
+
+Every Aztec account is either a **merchant** (on the token's list, curated by the merchant admin) or a **user** (everyone else).
+
+| Action | If it's a user | If it's a merchant |
+|---|---|---|
+| Receive a deposit from Ethereum | Private deposits only. The account's first claim binds it, for good, to the Ethereum address that deposit came from (its **funding address**); every later deposit must come from that address. | Public or private deposits. A private claim binds the account too, but a merchant's exits ignore the binding. |
+| Claim a deposit | Only the recipient itself may submit a private claim. | Anyone may submit a public claim; the tokens always land with the merchant the deposit names. |
+| Send privately | Only to a merchant. | To anyone. |
+| Open a payment request | Only with a merchant as the recipient. | With any recipient. |
+| Pay a request | Only one whose recipient is a merchant (stamped). | Any request. |
+| Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address. |
+
+A deposit that can't be claimed (a public deposit to a user, or a private one from another address than the recipient's funding address) is **returned**: anyone holding its claim data consumes it on Aztec, nothing is minted, and the depositor is paid back on Ethereum once the epoch is proven. A merchant's public deposit is never returned, only claimed.
+
+## Refusals
+
+Each refusal is one exact string, exported from `bridge-core/src/rules.ts` (`TOKEN_REFUSALS`, `BRIDGE_REFUSALS`, with `tokenRefusalOf` / `bridgeRefusalOf` to read them out of an error) and checked against the Noir sources by a test.
+
+| Contract | String | Meaning |
+|---|---|---|
+| token | `Transfer refused: neither sender nor recipient is a merchant` | a private transfer between two users |
+| token | `Request refused: neither creator nor recipient is a merchant` | a request with no merchant on either side |
+| token | `Payment refused: users may only pay into requests opened for a merchant` | a user paying an unstamped request |
+| bridge | `Public claims are for merchants only` | a public deposit to a user: return it |
+| bridge | `Only the recipient can claim privately` | a relayed private claim |
+| bridge | `Deposit is not from this account's funding address` | a private deposit from another address than the bound one: return it |
+| bridge | `A merchant's public deposit is claimed, not returned` | |
+| bridge | `Public exits are for merchants only` | |
+| bridge | `Withdrawals from a user account go only to its funding address` | also: an account that never claimed has no funding address yet |
+| bridge | `Bridge is paused` | claims, returns and exits wait for the owner to resume; Ethereum withdrawals already made are unaffected |
+
+The merchant admin's own refusals (`Only the merchant admin`, `Merchant already added`, …) are in `TOKEN_REFUSALS` too.
+
+bridge-core raises typed errors before any signature or proof: `PublicDepositToUserError` (`assertPublicRecipient`), `NotFundingAddressError` (`claimBinding`, and inside `claim`) and `ExitDestinationError` (inside `exitToL1`).
+
+## Using bridge-core
+
+- **Before a first private claim**, `claimBinding(wallet, manifest, recipient, depositor)` answers `"binds"`: show "this binds the account to 0x… for good" and get consent. `fundingAddress(wallet, manifest, account)` reads the binding; only a wallet holding the account's keys can.
+- **A claim that reports `consumed-unknown`** found its message already consumed, by an earlier claim or by a return. It is never a mint: read the balance, or the return's ticket.
+- **Returns**: `waitReturnable`, then `returnDeposit(ticket, …)` gives an exit ticket for the depositor; `finishWithdrawal` pays it out on Ethereum, from any account.
+- **Merchant exits** pass `asMerchant: true`; the bridge proves the sender's listing at the tx's anchor block.
+- **Paying a request twice loses the second payment** (upstream completion is not single-use). `payRequest` refuses a request it has paid or is paying; a facilitator that pays without `payments.ts` needs the same guard.
+
+## Messages between the chains
+
+Each L1↔L2 message content is `sha256ToField(abi.encodeWithSignature(signature, args…))`:
+
+| Message | Signature | Arguments |
+|---|---|---|
+| Public deposit | `mint_to_public(bytes32,uint256,address)` | recipient, amount, depositor |
+| Private deposit | `mint_to_private(uint256,address)` | amount, depositor; the recipient is bound through the claim secret |
+| Withdraw (exits and returns) | `withdraw(address,uint256,address)` | L1 recipient, amount, L1 caller (zero: anyone may submit) |
+
+The depositor is the address the USDC came from: a direct deposit's caller, or the Permit2 signer when the deposit goes through the router. Vectors for all three formats are pinned in Solidity, Noir and TypeScript (`docs/architecture.md`).
+
+## What each action makes public
+
+- **Visible.** Ethereum shows who deposited and who withdrew, with amounts. Aztec shows claim and withdrawal amounts (total-supply writes) and payment-request amounts (completion logs). A return shows no amount on Aztec, but its payout on Ethereum shows recipient and amount, which a public deposit links back to. The merchant list is public. The pause checks a bridge call enqueues reveal bridge use, and an account's first claim is distinguishable from later ones.
+- **Inferable from the rules.** A private↔public transfer whose public side isn't a listed merchant has a merchant on its hidden side. An Ethereum withdrawal to an address that never deposited is a merchant's. Whoever knows a request's commitment can tell whether it was opened for a merchant.
+- **Linkable.** A merchant with a change pending is recognisable by its txs' expiry until the change lands, and so are all merchants proven under a 1 h delay.
+- **Your node** learns which merchant each proof reads, and a paid request's stamp; with bridge-core's capsule it learns nothing about your own address. Run your own node to keep this from third parties.
+- **Hidden.** Direct private transfers show only counts; with a 24 h delay their expiry equals any other tx's.
