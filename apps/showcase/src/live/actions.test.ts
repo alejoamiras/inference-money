@@ -1,11 +1,19 @@
 // @vitest-environment node
 import type { SentTx } from "@inference-money/demo"
-import { describe, expect, it } from "vitest"
-import { MANIFEST, TOUR } from "@/config/network"
+import { describe, expect, it, vi } from "vitest"
+import { MANIFEST, TOUR, WALLETS } from "@/config/network"
+import type { PendingDeposit, Tickets } from "@/demo/tickets"
 import type { DemoWallet } from "@/demo/wallet"
 import type { LiveCtx } from "./actions"
-import { replay, withConflictRetry } from "./actions"
+import { replay, runDraft, withConflictRetry } from "./actions"
 import type { Outcome } from "./outcome"
+
+// A deposit this page sent is still unconfirmed on Ethereum.
+vi.mock("@inference-money/bridge-core", async (original) => ({
+	...(await original<typeof import("@inference-money/bridge-core")>()),
+	decodeDepositDraft: () => ({}),
+	reconcileDeposit: async () => "pending",
+}))
 
 const HASH = `0x${"12".repeat(32)}`
 
@@ -64,5 +72,19 @@ describe("replay", () => {
 			detail: /less than that\. This replays the recorded run instead, so nothing moved now\.$/,
 		})
 		expect(outcome.kind === "settled" && outcome.rows.map((r) => [r.key, r.source])).toEqual([["deposit", "recorded"]])
+	})
+})
+
+describe("claim", () => {
+	it("replays the recorded claim only when this page has nothing pending, and waits on its own deposit", async () => {
+		const pending: PendingDeposit[] = [{ id: "d1", user: "alice", since: 0, draft: "sent, not yet mined" }]
+		const tickets = { deposits: () => pending, dropDeposit: () => {}, putDeposit: () => {} } as unknown as Tickets
+		// viem refuses an empty URL; nothing dials it, since the reconcile is mocked.
+		const ctx: LiveCtx = { ...ctxWith(false), l1RpcUrl: "http://127.0.0.1:9", tickets }
+		const claim = () => runDraft(ctx, { actor: "alice", action: "claim", to: "alice" }, WALLETS, () => {})
+		expect(await claim()).toEqual({ kind: "failed", detail: "That deposit is still confirming on Ethereum; try again in a minute." })
+		pending.length = 0
+		const outcome = await claim()
+		expect(outcome.kind === "settled" && outcome.rows.map((r) => [r.key, r.source])).toEqual([["claim", "recorded"]])
 	})
 })

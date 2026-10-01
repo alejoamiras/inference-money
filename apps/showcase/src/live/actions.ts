@@ -129,12 +129,14 @@ async function deposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Out
 	return { kind: "settled", detail: `Deposited. ${HOLDER_NAME[user]} can claim it once the message reaches Aztec.`, rows: [row] }
 }
 
+const NOTHING_TO_CLAIM = "There is nothing to claim: deposit first."
+
 /** The oldest deposit of `user`'s this page sent, as a claim ticket; a string says why there is none to claim. */
 async function claimable(ctx: LiveCtx, user: User): Promise<{ id: string; ticket: ClaimTicket } | string> {
 	const p = ctx.tickets.deposits().find((x) => x.user === user)
-	if (!p) return "There is nothing to claim: deposit first."
+	if (!p) return NOTHING_TO_CLAIM
 	if (p.claim) return { id: p.id, ticket: decodeClaimTicket(p.claim) }
-	if (!p.draft) return "There is nothing to claim: deposit first."
+	if (!p.draft) return NOTHING_TO_CLAIM
 	const found = await reconcileDeposit(decodeDepositDraft(p.draft), l1CtxOf(demoL1(ctx.l1RpcUrl, ctx.m, user)), ctx.m)
 	if (found === "pending") return "That deposit is still confirming on Ethereum; try again in a minute."
 	if (found === "not-deposited") {
@@ -148,7 +150,9 @@ async function claimable(ctx: LiveCtx, user: User): Promise<{ id: string; ticket
 async function claimDeposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Outcome> {
 	const user = d.actor as User
 	const found = await claimable(ctx, user)
-	if (typeof found === "string") return user === "alice" ? replay(ctx, "claim", found) : { kind: "failed", detail: found }
+	// The recording has alice's claim only; a deposit of this page's still on its way is waited for, never replayed over.
+	if (found === NOTHING_TO_CLAIM && user === "alice") return replay(ctx, "claim", found)
+	if (typeof found === "string") return { kind: "failed", detail: found }
 	const since = ctx.demo.sent.length
 	await castClaim(session(ctx), found.ticket, () => report("simulate", "Waiting for the deposit's message to reach Aztec."))
 	ctx.tickets.dropDeposit(found.id)
