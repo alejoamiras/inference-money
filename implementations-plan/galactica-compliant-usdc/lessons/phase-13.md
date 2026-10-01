@@ -60,3 +60,5 @@ Past the cap with fixes unreviewed, the loop continues for a confirming round, p
 **Round 6 (confirming):** confirmed the scan (a ticket after a confirming and a throwing entry claims; the reason shows only when none can); not converged on one finding, rejected: a hostile L1 RPC can return a Deposit event whose `key` is out of field range, which the page stores and every claim then trips on. The page's RPC and node are its trusted readers: a hostile one already makes `reconcileDeposit` report "not-deposited" (the draft, the only copy of the secret, goes), and an in-range wrong `key` or `index` wedges the claim just the same, so a range check closes nothing. Defending against a hostile reader is a second-RPC or light-client design for all of bridge-core's reconcile path. `docs/architecture.md` now states the trust model.
 
 **Round 7: converged.** Codex: "Converged under the stated trust model (high confidence): no material findings remain in the reviewed arc 5 code. I withdraw the hostile-reader finding."
+
+**After the loop (1fe6dae):** the suite, the local e2e (7/7) and the P13 gate against the new preview (`70d33f0e`, 2/2) pass.
