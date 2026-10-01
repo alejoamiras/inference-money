@@ -1,10 +1,11 @@
 // The one derivation token_bridge consumes with and the keystone pins against
 // packages/bridge-core/src/claim-secret.ts, so the toolchains cannot drift a deposit into an unclaimable state.
 //
-// A private deposit's message commits to `compute_secret_hash(derive_claim_secret(salt, recipient))` and
-// claim_private re-derives the secret from its `recipient` argument: a relayer holding the claim data can claim FOR
-// the recipient but never redirect. Rests on poseidon2 preimage resistance and claim_private being the sole consumer
-// of private-deposit messages (scripts/check-sole-consumer.sh).
+// A private deposit's message commits to `compute_secret_hash(derive_claim_secret(salt, recipient))`, and both of its
+// consumers re-derive the secret from their `recipient` argument: claim_private, which only the recipient may submit,
+// and return_deposit_private, which only pays the depositor back. Whoever holds the claim data can return a deposit
+// but never redirect it. Rests on poseidon2 preimage resistance and those two being the only consumers of
+// private-deposit messages (scripts/check-sole-consumer.sh).
 use aztec::protocol::address::AztecAddress;
 use aztec::protocol::hash::poseidon2_hash_with_separator;
 use aztec::protocol::traits::ToField;
