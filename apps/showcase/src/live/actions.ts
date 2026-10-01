@@ -163,7 +163,6 @@ async function fromDraft(ctx: LiveCtx, p: PendingDeposit, draft: DepositDraft): 
 	return { p: next, ticket: found }
 }
 
-/** The oldest deposit of `user`'s this page sent and holds no claim of, as a claim ticket; a string says why there is none. */
 /** `p`'s records, decoded; nothing when they no longer decode, since such an entry can neither claim nor be shown. */
 function decodedDeposit(p: PendingDeposit): { draft?: DepositDraft; ticket?: ClaimTicket } | undefined {
 	try {
@@ -196,18 +195,24 @@ async function claimableEntry(ctx: LiveCtx, p: PendingDeposit): Promise<Claimabl
 	return p.claimed && (await stillClaimed(ctx, p, d.ticket)) ? undefined : { p, ticket: d.ticket }
 }
 
-/** The oldest of `user`'s deposits that can claim; one that cannot be read right now never holds up those after it. */
+/**
+ * The oldest of `user`'s deposits that can claim now. One still confirming, or that cannot be read right now, never
+ * holds up those after it: its reason shows only when none can claim.
+ */
 async function claimable(ctx: LiveCtx, user: User): Promise<Claimable> {
+	let waiting: string | undefined
 	let failure: unknown
 	for (const p of ctx.tickets.deposits()) {
 		if (p.user !== user) continue
 		try {
 			const found = await claimableEntry(ctx, p)
-			if (found !== undefined) return found
+			if (typeof found === "string") waiting ??= found
+			else if (found !== undefined) return found
 		} catch (e) {
 			failure ??= e
 		}
 	}
+	if (waiting !== undefined) return waiting
 	if (failure !== undefined) throw failure
 	return NOTHING_TO_CLAIM
 }

@@ -163,8 +163,9 @@ describe("claim", () => {
 		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
 	})
 
-	it("never lets a deposit it cannot read back right now hold up the claims after it", async () => {
+	it("never lets a deposit still confirming, or one it cannot read back right now, hold up the claims after it", async () => {
 		const store = new Map<string, PendingDeposit>([
+			["b0", { id: "b0", user: "bob", since: -1, draft: "confirming" }],
 			["b1", { id: "b1", user: "bob", since: 0, draft: "broken" }],
 			["b2", { id: "b2", user: "bob", since: 1, claim: "ticket" }],
 		])
@@ -176,7 +177,7 @@ describe("claim", () => {
 		const ctx: LiveCtx = { ...ctxWith(false), tickets }
 		const before = claims.sent
 		expect((await runDraft(ctx, { actor: "bob", action: "claim", to: "bob" }, WALLETS, () => {})).kind).toBe("settled")
-		expect([claims.sent - before, [...store.keys()], store.get("b2")?.claimed]).toEqual([1, ["b1", "b2"], true])
+		expect([claims.sent - before, [...store.keys()], store.get("b2")?.claimed]).toEqual([1, ["b0", "b1", "b2"], true])
 	})
 })
 
