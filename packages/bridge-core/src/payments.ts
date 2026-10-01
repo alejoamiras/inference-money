@@ -215,16 +215,19 @@ async function timestampAt(node: Pick<AztecNode, "getBlockData">, tag: "latest" 
  * What the chain proves about a sent tx expiring at `expiresAt`: "gone" once it reverted in a finalized block or a
  * finalized block passed its expiry without it, "landed" once finalized without a revert. A prune can undo any block
  * short of finalized, and a node's "dropped" says nothing of other nodes' mempools, so anything else is "unsettled".
+ * The finalized boundary is read before the receipt: a tx included meanwhile then shows in the receipt, never as an
+ * absence past expiry. That holds for one node's view, not across nodes behind a balancer.
  */
 export async function finalFate(
 	node: Pick<AztecNode, "getTxReceipt" | "getBlockData">,
 	txHash: string,
 	expiresAt: bigint,
 ): Promise<"landed" | "gone" | "unsettled"> {
+	const finalizedAt = (await timestampAt(node, "finalized")) ?? 0n
 	const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
 	if (receipt.isMined() && receipt.status === TxStatus.FINALIZED) return receipt.hasExecutionReverted() ? "gone" : "landed"
 	if (receipt.isMined() || receipt.isPending()) return "unsettled"
-	return ((await timestampAt(node, "finalized")) ?? 0n) > expiresAt ? "gone" : "unsettled"
+	return finalizedAt > expiresAt ? "gone" : "unsettled"
 }
 
 /** What a `sent` record becomes on the node's current view; undefined releases it. */

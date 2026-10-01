@@ -14,7 +14,7 @@ import { TESTNET } from "./networks"
 import { runRedacted } from "./redact"
 import { DISPOSABLE_DIR, keyedWorktree } from "./run-state"
 import { scanFailed, scanForSecrets, scanLine } from "./scan"
-import { aztecSecretFrom, KEYED, scrubbedEnv, secretNeedles } from "./secrets"
+import { aztecSecretFrom, KEYED, l1PrivateKeyFrom, scrubbedEnv, secretNeedles } from "./secrets"
 import { endpointsFor, type ManifestRef } from "./session"
 import { readRoles } from "./token-reads"
 
@@ -125,22 +125,28 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 const finalRoles = (ref: ManifestRef) => readRoles(createAztecNodeClient(endpointsFor(ref).nodeUrl), ref.m, "finalized")
 
 /**
- * Deletes the disposable keys once the finalized chain shows neither disposable account holding, or being offered, a
- * role in `ref`'s deployment: with the keys gone, nobody could hand such a role over again, and a prune can undo a
- * switch short of finalized. A failed read keeps the file.
+ * Deletes the disposable keys once the deployment they made shows, at its last finalized block, both roles held by the
+ * manifest's admin alone, an account none of the keys control. Absence is no evidence (a finalized block from before
+ * the deploy holds no roles at all), and a prune can undo a switch short of finalized; with the keys gone, a role left
+ * with them could never move again. Anything less, a failed read included, keeps the file.
  */
 export async function disposableDestroy(ref: ManifestRef, opts: { file?: string; roles?: typeof finalRoles } = {}): Promise<void> {
 	const file = opts.file ?? DISPOSABLE_FILE
 	if (!existsSync(file)) return
 	const values = readValues(file)
-	const accounts = await Promise.all(
+	if (ref.m.l1.deployer.toLowerCase() !== privateKeyToAddress(l1PrivateKeyFrom(values)).toLowerCase()) {
+		throw new Error(`${ref.path} is not the deployment the disposable keys made.`)
+	}
+	const disposable = await Promise.all(
 		[KEYED.deployerSecret, KEYED.adminSecret].map(async (name) => (await accountOf(aztecSecretFrom(name, values))).toField()),
 	)
-	const roles = await (opts.roles ?? finalRoles)(ref)
-	const held = Object.entries(roles).filter(([, holder]) => accounts.some((a) => a.equals(holder)))
-	if (held.length > 0) {
-		const names = held.map(([role]) => role).join(", ")
-		throw new Error(`As of the last finalized block, a disposable account holds or is offered ${names}: switch, then let it finalize.`)
+	const admin = Fr.fromHexString(ref.m.l2.admin ?? "0x0")
+	const r = await (opts.roles ?? finalRoles)(ref)
+	const alone = r.owner.equals(admin) && r.admin.equals(admin) && r.pendingOwner.isZero() && r.pendingAdmin.isZero()
+	if (admin.isZero() || disposable.some((a) => a.equals(admin)) || !alone) {
+		throw new Error(
+			`As of the last finalized block, the manifest's admin does not hold both roles alone, or is disposable: switch, then let it finalize.`,
+		)
 	}
 	rmSync(file)
 }

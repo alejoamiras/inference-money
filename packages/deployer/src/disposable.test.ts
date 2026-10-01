@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Writable } from "node:stream"
 import { Fr } from "@aztec-labs/aztec.js/fields"
+import type { Hex } from "viem"
 import { MANIFEST } from "../../bridge-core/src/test/fixtures"
 import { assertOwnerOnly, disposableDestroy, disposableExec, disposableInit } from "./disposable"
 import type { Roles } from "./token-reads"
@@ -87,17 +88,25 @@ describe("the disposable fallback", () => {
 		expect(await disposableExec(accept, { ...opts, argv: () => CHILD, out: sink().stream, err: sink().stream, scan: leaked })).toBe(1)
 	})
 
-	it("destroy removes the keys only once neither disposable account holds or is offered a role", async () => {
+	it("destroy removes the keys only on finalized proof that the manifest's admin, not a disposable one, holds both roles alone", async () => {
 		const file = join(temp(), "testnet.env")
-		const { deployer, admin } = await disposableInit(file)
-		const ref = { path: "testnet.json", m: MANIFEST }
+		const { l1, admin } = await disposableInit(file)
+		const mine = { ...MANIFEST, l1: { ...MANIFEST.l1, deployer: l1 } }
+		const handedOver = { path: "testnet.json", m: { ...mine, l2: { ...mine.l2, admin: someone.toString() as Hex } } }
 		const roles = (r: Partial<Roles>) => async (): Promise<Roles> => ({ ...NOBODY, ...r })
 
-		await expect(disposableDestroy(ref, { file, roles: roles({ pendingAdmin: admin.toField() }) })).rejects.toThrow("pendingAdmin")
-		await expect(disposableDestroy(ref, { file, roles: roles({ owner: deployer.toField() }) })).rejects.toThrow("owner")
+		await expect(disposableDestroy({ path: "other.json", m: MANIFEST }, { file, roles: roles({}) })).rejects.toThrow(
+			"not the deployment",
+		)
+		const before = { owner: Fr.ZERO, admin: Fr.ZERO }
+		await expect(disposableDestroy(handedOver, { file, roles: roles(before) })).rejects.toThrow("does not hold both roles alone")
+		await expect(disposableDestroy(handedOver, { file, roles: roles({ pendingAdmin: admin.toField() }) })).rejects.toThrow("alone")
+		const interim = { path: "testnet.json", m: { ...mine, l2: { ...mine.l2, admin: admin.toString() as Hex } } }
+		const held = roles({ owner: admin.toField(), admin: admin.toField() })
+		await expect(disposableDestroy(interim, { file, roles: held })).rejects.toThrow("disposable")
 		expect(existsSync(file)).toBe(true)
 
-		await disposableDestroy(ref, { file, roles: roles({}) })
+		await disposableDestroy(handedOver, { file, roles: roles({}) })
 		expect(existsSync(file)).toBe(false)
 	})
 })

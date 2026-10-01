@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { StateDir, takeOverStaleLock, withStateDir } from "./run-state"
+import { StateDir, withStateDir } from "./run-state"
 
 /** Above every platform's pid range, so never alive. */
 const DEAD = 999_999_999
@@ -18,19 +19,13 @@ afterEach(() => {
 })
 
 describe("StateDir", () => {
-	it("lets one live process hold a deployment's state, and leaves other deployments' state free", () => {
+	it("lets one live process hold a deployment's state, leaves other deployments' state free, and writes owner-only", async () => {
 		const r = root()
 		const held = StateDir.acquire("smoke", "0xb", r)
 		expect(() => StateDir.acquire("smoke", "0xb", r)).toThrow(`in use by process ${process.pid}`)
 		expect(() => StateDir.acquire("smoke", "0xother", r).release()).not.toThrow()
 		held.release()
-		expect(() => StateDir.acquire("smoke", "0xb", r).release()).not.toThrow()
-	})
 
-	it("takes over a crashed holder's lock, and writes owner-only files atomically", async () => {
-		const r = root()
-		const crashed = StateDir.acquire("smoke", "0xb", r)
-		writeFileSync(join(crashed.dir, "lock"), String(DEAD))
 		await withStateDir(
 			"smoke",
 			"0xb",
@@ -47,18 +42,29 @@ describe("StateDir", () => {
 		expect(() => StateDir.acquire("smoke", "0xb", r).release()).not.toThrow()
 	})
 
-	it("never removes a live holder's lock: a takeover that lost the race puts it back, and release leaves it", () => {
+	it("refuses a lock its holder left behind, naming it for removal, and never removes another holder's lock", () => {
 		const r = root()
 		const s = StateDir.acquire("smoke", "0xb", r)
 		const lock = join(s.dir, "lock")
-		// Another process replaced the dead holder's lock after this one read it.
-		takeOverStaleLock(lock, DEAD)
-		expect(readFileSync(lock, "utf8")).toBe(String(process.pid))
-
-		writeFileSync(lock, "1")
+		writeFileSync(lock, String(DEAD))
+		expect(() => StateDir.acquire("smoke", "0xb", r)).toThrow(`${lock} was left by process ${DEAD}, which has exited`)
 		s.release()
-		expect(() => StateDir.acquire("smoke", "0xb", r)).toThrow("in use by process 1")
-		writeFileSync(lock, "garbage")
-		expect(() => StateDir.acquire("smoke", "0xb", r)).toThrow("names no process")
+		expect(existsSync(lock)).toBe(true)
+
+		rmSync(lock)
+		expect(() => StateDir.acquire("smoke", "0xb", r).release()).not.toThrow()
+	})
+
+	it("releases the lock when its holder is stopped by a signal", async () => {
+		const r = root()
+		const script = `import { withStateDir } from ${JSON.stringify(join(import.meta.dir, "run-state.ts"))}
+await withStateDir("smoke", "0xb", () => { console.log("held"); return new Promise(() => {}) }, ${JSON.stringify(r)})`
+		const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] })
+		await new Promise<void>((held) => child.stdout.once("data", () => held()))
+		expect(existsSync(join(r, "smoke", "0xb", "lock"))).toBe(true)
+
+		child.kill("SIGTERM")
+		expect(await new Promise<number | null>((exited) => child.once("exit", (code) => exited(code)))).toBe(143)
+		expect(existsSync(join(r, "smoke", "0xb", "lock"))).toBe(false)
 	})
 })

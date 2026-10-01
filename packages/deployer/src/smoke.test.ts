@@ -29,4 +29,18 @@ describe("the smoke journal", () => {
 		await expect(fateOf(nodeWith(TxStatus.CHECKPOINTED, true, 0n), PAY)).rejects.toThrow("rerun once it is finalized")
 		expect(await fateOf(nodeWith(TxStatus.CHECKPOINTED, false, 0n), PAY)).toBe("landed")
 	})
+
+	it("reads the finalized boundary before the receipt, so a tx the node takes in between is never called gone", async () => {
+		let finalized = 1000n
+		const node = nodeWith(TxStatus.DROPPED, false, 0n)
+		const syncing = {
+			getTxReceipt: async (h: unknown) => {
+				const stale = await node.getTxReceipt(h as never)
+				finalized = 2000n
+				return stale
+			},
+			getBlockData: async () => ({ header: { globalVariables: { timestamp: finalized } } }),
+		} as unknown as AztecNode
+		await expect(fateOf(syncing, PAY)).rejects.toThrow("may still land")
+	})
 })

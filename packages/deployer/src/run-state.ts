@@ -1,5 +1,5 @@
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs"
-import { homedir } from "node:os"
+import { constants, homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { memoryPaymentStore, type PaymentRecord, type PaymentStore } from "@inference-money/bridge-core"
 
@@ -55,33 +55,15 @@ function syncDir(dir: string): void {
 }
 
 /**
- * Moves a lock that names the dead `dead` aside. Between reading the holder and the move, a live process may have taken
- * the lock over: then the moved lock names it, and is put back.
- */
-export function takeOverStaleLock(lock: string, dead: number): void {
-	const aside = `${lock}.${process.pid}.stale`
-	try {
-		renameSync(lock, aside)
-	} catch (e) {
-		if (code(e) === "ENOENT") return
-		throw e
-	}
-	try {
-		if (holderOf(aside) !== dead) linkSync(aside, lock)
-	} finally {
-		rmSync(aside, { force: true })
-	}
-}
-
-/**
  * A directory of state files that one process at a time may hold. The lock is a file naming its holder's pid, linked
- * into place whole, so it never exists without one; a dead holder's lock is taken over. The files can hold deposit
- * secrets: owner-only, never in a checkout.
+ * into place whole, so it never exists without one. A dead holder's lock is never taken over automatically: no
+ * file-based takeover survives a crash mid-takeover, and Bun has no OS-held lock. The files can hold deposit secrets:
+ * owner-only, never in a checkout.
  */
 export class StateDir {
 	private constructor(readonly dir: string) {}
 
-	/** Takes `<STATE_ROOT>/<kind>/<name>`, e.g. one deployment's smoke; throws if a live process holds it. */
+	/** Takes `<STATE_ROOT>/<kind>/<name>`, e.g. one deployment's smoke; throws if any lock is there. */
 	static acquire(kind: string, name: string, root = STATE_ROOT): StateDir {
 		const dir = join(root, kind, name)
 		mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -90,7 +72,7 @@ export class StateDir {
 		rmSync(mine, { force: true })
 		writeDurably(mine, String(process.pid))
 		try {
-			for (let attempt = 0; attempt < 3; attempt++) {
+			for (let attempt = 0; attempt < 2; attempt++) {
 				try {
 					linkSync(mine, lock)
 					return new StateDir(dir)
@@ -99,7 +81,8 @@ export class StateDir {
 				}
 				const holder = holderOf(lock)
 				if (holder !== undefined && alive(holder)) throw new Error(`${dir} is in use by process ${holder}`)
-				if (holder !== undefined) takeOverStaleLock(lock, holder)
+				if (holder !== undefined)
+					throw new Error(`${lock} was left by process ${holder}, which has exited: remove it once nothing uses ${dir}`)
 			}
 			throw new Error(`could not take the lock on ${dir}`)
 		} finally {
@@ -148,11 +131,18 @@ export class StateDir {
 	}
 }
 
+/** Holds the state dir while `fn` runs, releasing it however `fn` ends, a SIGINT or SIGTERM included. */
 export async function withStateDir<T>(kind: string, name: string, fn: (s: StateDir) => Promise<T>, root = STATE_ROOT): Promise<T> {
 	const state = StateDir.acquire(kind, name, root)
+	const onSignal = (signal: NodeJS.Signals) => {
+		state.release()
+		process.exit(128 + constants.signals[signal])
+	}
+	process.once("SIGINT", onSignal).once("SIGTERM", onSignal)
 	try {
 		return await fn(state)
 	} finally {
+		process.off("SIGINT", onSignal).off("SIGTERM", onSignal)
 		state.release()
 	}
 }

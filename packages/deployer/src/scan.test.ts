@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { scanForSecrets } from "./scan"
@@ -63,6 +63,18 @@ describe("scanForSecrets", () => {
 		chmodSync(join(roots.cache, "locked"), 0o000)
 		expect(scanForSecrets(repo, NEEDLES, roots)).toMatchObject({ found: false, skipped: process.getuid?.() === 0 ? 0 : 1 })
 		chmodSync(join(roots.cache, "locked"), 0o700)
+	})
+
+	it("reads through a link within its roots once, and counts a link out of them as unread", () => {
+		const { repo, roots } = fixture()
+		symlinkSync(join(repo, "notes.md"), join(roots.cache, "notes-link"))
+		symlinkSync(roots.cache, join(roots.cache, "loop"))
+		expect(scanForSecrets(repo, NEEDLES, roots)).toMatchObject({ found: false, files: 1, skipped: 0 })
+
+		const outside = mkdtempSync(join(tmpdir(), "scan-outside-"))
+		dirs.push(outside)
+		symlinkSync(outside, join(repo, "logs"))
+		expect(scanForSecrets(repo, NEEDLES, roots).skipped).toBe(1)
 	})
 
 	it("reports a wallet store left on disk", () => {

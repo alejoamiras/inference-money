@@ -348,7 +348,7 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
   2. `bridge disposable exec admin propose deployments/testnet.json <owner admin>`;
   3. the keyed `admin accept`;
   4. `verify`;
-  5. `bridge disposable destroy deployments/testnet.json`, which deletes the file only once the last finalized block shows neither disposable account holding or being offered a role.
+  5. `bridge disposable destroy deployments/testnet.json`, which deletes the file only for the deployment the disposable keys made, once its last finalized block shows the manifest's (non-disposable) admin holding both roles with nothing pending.
 
   No redeploy. Delivery waits for the switch.
 - Residual: the file sits on disk until the switch, readable by any same-user process for that whole time, not just during one run. That is accepted for testnet keys holding test funds.
