@@ -22,7 +22,7 @@ fi
 case "$crate" in
   token) floor=153 ;;
   token_bridge) floor=50 ;;
-  keystone) floor=14 ;;
+  keystone) floor=16 ;;
   *)
     echo "usage: $0 [--crate token|token_bridge|keystone] [nargo flags...] [-- test names...]" >&2
     exit 2

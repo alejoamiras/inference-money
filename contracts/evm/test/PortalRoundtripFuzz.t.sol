@@ -12,11 +12,10 @@ import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
 /// Content-hash ROUNDTRIP fuzzing for the real portal: for arbitrary inputs, the hash committed into the L1<>L2
 /// message must equal an INDEPENDENT model (`sha256(preimage) >> 8`, computed without the Aztec Hash library the
 /// portal itself uses, which would make the assertion a tautology). Deposits name their depositor both ways the
-/// portal allows: as the caller of a direct deposit, and as the router's argument. The keystone pins three points;
-/// this pins the whole input domain.
+/// portal allows: as the caller of a direct deposit, and as the router's argument. The keystone pins five points;
+/// this covers every address and the whole u128 amount range the L2 side accepts.
 contract PortalRoundtripFuzzTest is Test {
     bytes32 internal constant BRIDGE = bytes32(uint256(0x1111));
-    uint256 internal constant FUNDS = 1_000_000 * 1e6;
 
     CapturingInbox internal inbox;
     CapturingOutbox internal outbox;
@@ -35,7 +34,6 @@ contract PortalRoundtripFuzzTest is Test {
         (portal, router) = initializedPortal(
             address(new FakeRegistry(address(new FakeRollup(address(inbox), address(outbox))))), address(usdc), BRIDGE
         );
-        usdc.mint(address(portal), FUNDS);
     }
 
     /// Funds and approves whoever pays the deposit: the depositor itself, or the router naming it.
@@ -55,7 +53,7 @@ contract PortalRoundtripFuzzTest is Test {
         uint256 amount,
         bytes32 secret
     ) public {
-        amount = bound(amount, 1, FUNDS);
+        amount = bound(amount, 1, type(uint128).max);
         address payer = _payer(viaRouter, depositor, amount);
         vm.prank(payer);
         if (viaRouter) portal.depositToAztecPublicFor(depositor, to, amount, secret);
@@ -75,7 +73,7 @@ contract PortalRoundtripFuzzTest is Test {
         uint256 amount,
         bytes32 secret
     ) public {
-        amount = bound(amount, 1, FUNDS);
+        amount = bound(amount, 1, type(uint128).max);
         address payer = _payer(viaRouter, depositor, amount);
         vm.prank(payer);
         if (viaRouter) portal.depositToAztecPrivateFor(depositor, amount, secret);
@@ -92,8 +90,9 @@ contract PortalRoundtripFuzzTest is Test {
         bool withCaller,
         address callerOnL1
     ) public {
-        amount = bound(amount, 1, FUNDS);
+        amount = bound(amount, 1, type(uint128).max);
         vm.assume(recipient != address(0) && recipient != address(portal));
+        usdc.mint(address(portal), amount);
         // The capturing outbox authorizes any caller, so any caller may drive the reconstruction.
         address caller = withCaller ? callerOnL1 : address(0);
         vm.prank(caller);

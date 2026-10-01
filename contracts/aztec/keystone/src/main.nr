@@ -21,6 +21,8 @@ use portal_messages::{mint_to_private_content_hash, mint_to_public_content_hash,
 fn main() {}
 
 global DEPOSITOR: EthAddress = EthAddress::from_field(0xD0D0);
+// The top bit of every word set: an encoder that truncates an address or amount still matches the low vectors.
+global HIGH_DEPOSITOR: EthAddress = EthAddress::from_field(0x8000000000000000000000000000000000000001);
 
 #[test]
 fn mint_to_public_matches_l1() {
@@ -36,6 +38,19 @@ fn mint_to_private_matches_l1() {
 }
 
 #[test]
+fn mint_to_public_matches_l1_at_high_bits() {
+    let to = AztecAddress::from_field(0x1234);
+    let h = mint_to_public_content_hash(to, 0x80000000000000000000000000000000, HIGH_DEPOSITOR);
+    assert(h == 0x00c92584ad559f46de9851f17d4c3d591df8dd99278eaa8dd7d568af0b076685);
+}
+
+#[test]
+fn mint_to_private_matches_l1_at_high_bits() {
+    let h = mint_to_private_content_hash(0xffffffffffffffffffffffffffffffff, HIGH_DEPOSITOR);
+    assert(h == 0x0027e4159023e23580ae653c0c0cc3ea532ec740f7f9cee719433a8674acd365);
+}
+
+#[test]
 fn withdraw_matches_l1() {
     let recipient = EthAddress::from_field(0xBEEF);
     let caller = EthAddress::zero();
@@ -43,13 +58,19 @@ fn withdraw_matches_l1() {
     assert(h == 0x00ac390e12f1097130e1a7c2e5eea30780cd11d12002b8de22d608cf10a60775);
 }
 
-// A deposit's content must commit to its depositor across the whole 160-bit range: flipping the lowest bit of any
-// address must move both hashes, or a claim could present a neighbouring address.
+// A deposit's content must commit to every bit of its depositor: flipping any one of the 160 must move both hashes,
+// or a claim could present a neighbouring address.
 #[test]
-fn fuzz_deposit_hashes_bind_the_depositor(high: u32, low: u128, amount: u128, to: Field) {
+fn fuzz_deposit_hashes_bind_the_depositor(high: u32, low: u128, bit: u8, amount: u128, to: Field) {
     let two_128 = 0x100000000000000000000000000000000;
+    let k = bit % 160;
+    let (flipped_high, flipped_low) = if k < 128 {
+        (high, low ^ ((1 as u128) << (k as u128)))
+    } else {
+        (high ^ ((1 as u32) << ((k - 128) as u32)), low)
+    };
     let depositor = EthAddress::from_field(high as Field * two_128 + low as Field);
-    let neighbour = EthAddress::from_field(high as Field * two_128 + (low ^ 1) as Field);
+    let neighbour = EthAddress::from_field(flipped_high as Field * two_128 + flipped_low as Field);
     assert(
         mint_to_private_content_hash(amount, depositor) != mint_to_private_content_hash(amount, neighbour),
         "the private deposit hash ignores the depositor",
