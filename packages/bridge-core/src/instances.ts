@@ -46,9 +46,17 @@ export const BRIDGE_CONTRACTS = [
 	["bridge", tokenBridgeArtifact],
 ] as const
 
-/** Registers proxy, token and bridge in `wallet` from the manifest, each verified against its recorded address first. */
+/**
+ * Registers proxy, token and bridge in `wallet` from the manifest, each verified against its recorded address first. A
+ * manifest these artifacts no longer derive is an older deployment: its own commit's CLI can still finish its tickets.
+ */
 export async function registerBridgeContracts(wallet: Pick<Wallet, "registerContract">, m: BridgeManifest): Promise<void> {
 	for (const [key, artifact] of BRIDGE_CONTRACTS) {
-		await wallet.registerContract(await instanceFromRecord(artifact, m.l2[key]), artifact)
+		const instance = await instanceFromRecord(artifact, m.l2[key]).catch((cause: unknown) => {
+			throw new Error(`This deployment was made from commit ${m.sourceCommit}; finish its tickets with that commit's CLI.`, {
+				cause,
+			})
+		})
+		await wallet.registerContract(instance, artifact)
 	}
 }
