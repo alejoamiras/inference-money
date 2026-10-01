@@ -28,3 +28,12 @@ Scope: the showcase arc's own commits (P10–P13 and the socket fix); P9's commi
 7. **Medium: the e2e sidecar's teardown lost ownership with its leader.** It is now spawned with this run's marker, a marked member proves a leaderless group, and its wallet dir goes once no process holds its pid.
 8. **Low: teardown recomputed the data dir**, stranding a run named before the digest change; it now removes the handle's own record when that is a child of the net root.
 9. **Low: comments.** The socket bound claimed every number at its widest (it reserves widths); `classify`'s doc restated its signature.
+
+**Round 2:** confirmed the claim, privacy, storage-getter and socket-wording fixes; not converged, six findings, all accepted but one part:
+
+1. **High: the exit was still stored after the node's response**, so a lost response or a reload in that window lost the burn. The wallet's recording node now hands the next tx to a one-shot `onNextSend` before forwarding it; `withdraw` stores the hash, recipient, amount and expiry there. `exitToL1`'s `onSent` went back out, unused.
+2. **High: a refused request-opening could settle a whole payment.** The landed-copy shortcut now settles only one-send actions; a payment runs again, and the payment gate refuses paying one request twice.
+3. **High: retiring an exit was unsafe both ways.** A dropped receipt is now proof of nothing until the finalized tip passes the tx's expiry (any block that could hold it is final by then), and a located burn's receipt is read again on every pass, so a pruned checkpoint shows as stuck instead of "proving" forever.
+4. **Medium: a malformed stored field still threw outside the per-entry catch.** Stored records are parsed with zod schemas (an entry that fails is skipped), and each claim entry is decoded alone: one that no longer decodes is dropped instead of blocking later claims.
+5. **Medium: the payout exclusion ended with the component.** It is now page-wide, in `finishPayouts`. Not taken: persisting the Ethereum payout tx before broadcast. A reload inside its inclusion window can send a second `withdraw`, which the Outbox reverts; the cost is one reverted tx's gas from a demo wallet, and guarding it means signing and sending in separate steps.
+6. **Medium: the sidecar's wallet dir could survive a SIGKILL that had not finished**, and a dead leader did not prove its group gone. The dir goes once the whole group has exited; a group still standing keeps it.
