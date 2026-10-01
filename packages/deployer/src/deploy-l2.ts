@@ -1,15 +1,15 @@
-import { createHash } from "node:crypto"
 import { NO_FROM } from "@aztec-labs/aztec.js/account"
 import { AztecAddress, EthAddress } from "@aztec-labs/aztec.js/addresses"
 import { BatchCall, Contract } from "@aztec-labs/aztec.js/contracts"
 import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
-import { Fq, Fr } from "@aztec-labs/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
 import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	instanceRecord,
 	type L2InstanceRecord,
+	signingKeyFor,
 	tokenArtifact,
 	tokenBridgeArtifact,
 	tokenMinterProxyArtifact,
@@ -22,14 +22,10 @@ export interface L2Fees {
 	tx: FeePaymentMethod | undefined
 }
 
-/** Bound to the secret, so whoever holds it can always rebuild the owner account. */
-export function signingKeyFor(secret: Fr): Fq {
-	return Fq.fromBufferReduce(createHash("sha256").update("inference-money/schnorr-signing-key").update(secret.toBuffer()).digest())
-}
-
 /**
- * Registers the deployer's Schnorr account in `wallet`, deploying it first unless its initialization nullifier exists.
- * An account deploy does not publish its instance, so the node's contract lookup cannot answer this.
+ * Registers the Schnorr account `secret` rebuilds in `wallet` (a deployer or an admin), deploying it first unless its
+ * initialization nullifier exists. An account deploy does not publish its instance, so the node's contract lookup cannot
+ * answer this.
  */
 export async function ensureDeployerAccount(
 	wallet: EmbeddedWallet,

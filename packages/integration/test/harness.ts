@@ -12,18 +12,18 @@ import {
 	PaymentGate,
 	registerBridgeContracts,
 	registerSponsor,
+	signingKeyFor,
 } from "@inference-money/bridge-core"
 import {
 	deployLocal,
 	enterOwnedTmpDir,
 	forgeRunDir,
-	LOCAL_DEPLOYER_SECRET,
+	LOCAL_ADMIN_SECRET,
 	l1Chain,
 	newSponsoredAccount,
 	openBridgeWallet,
 	recordingNode,
 	type SentTx,
-	signingKeyFor,
 	startBlockHeartbeat,
 } from "@inference-money/deployer"
 import { L1_CHAIN_ID, localDeploymentDir, netDown, netUp, resolveEndpoints, runIdFor } from "@inference-money/local-network"
@@ -39,7 +39,7 @@ export interface Harness {
 	sent: SentTx[]
 	/** The payment records; `wallet` sends through its node, so `payRequest` works with it. */
 	gate: PaymentGate
-	/** The bridge's L2 owner (the deploy account), registered in `wallet`. */
+	/** The bridge's owner and the merchant admin, which a local deploy hands to the fixed local admin; in `wallet`. */
 	owner: AztecAddress
 	outbox: OutboxReader
 	l1: { rpcUrl: string; chain: Chain; publicClient: PublicClient; test: TestClient }
@@ -122,14 +122,14 @@ async function open(log: (m: string) => void): Promise<Harness> {
 		cleanup.push(() => netDown(runId, log))
 		await netUp(runId, log)
 	}
-	const { manifest } = await deployLocal(runId, log)
+	const { manifest } = await deployLocal(runId, { log })
 	cleanup.push(enterOwnedTmpDir())
 	const net = resolveEndpoints(runId)
 	const node = createAztecNodeClient(net.nodeUrl)
 	const sent: SentTx[] = []
 	const gate = new PaymentGate(recordingNode(holdingNode(node), sent), memoryPaymentStore())
 	const wallet = await gate.bindWallet((gated) => openWallet(gated, manifest))
-	const owner = (await wallet.createSchnorrAccount(LOCAL_DEPLOYER_SECRET, Fr.ZERO, signingKeyFor(LOCAL_DEPLOYER_SECRET))).address
+	const owner = (await wallet.createSchnorrAccount(LOCAL_ADMIN_SECRET, Fr.ZERO, signingKeyFor(LOCAL_ADMIN_SECRET))).address
 	await startHeartbeat(node, manifest)
 	const chain = l1Chain(net.anvilUrl, L1_CHAIN_ID)
 	const publicClient = createPublicClient({ chain, transport: http(net.anvilUrl) }) as PublicClient

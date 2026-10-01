@@ -7,16 +7,8 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
-		"deploy:local": "bun src/cli.ts deploy local",
-		"deploy:testnet": "bun src/cli.ts deploy testnet",
-		"probe:testnet": "bun src/cli.ts probe testnet",
-		"secrets:scan": "bun src/cli.ts scan secrets",
-		"smoke:testnet": "bun src/cli.ts smoke testnet",
-		"spike:proof-compat": "bun src/cli.ts spike testnet",
 		"test": "bun test --preload ../../test-preload.ts src",
-		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"verify:local": "bun src/cli.ts verify local",
-		"verify:testnet": "bun src/cli.ts verify testnet"
+		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
 		"@aztec-labs/aztec.js": "6.0.0-rc.1",
@@ -28,6 +20,7 @@
 		"@aztec-labs/stdlib": "6.0.0-rc.1",
 		"@aztec-labs/wallets": "6.0.0-rc.1",
 		"@inference-money/bridge-core": "workspace:*",
+		"@inference-money/demo": "workspace:*",
 		"@inference-money/local-network": "workspace:*",
 		"viem": "2.56.7"
 	},

@@ -1,8 +1,5 @@
 import { spawn } from "node:child_process"
-import { existsSync } from "node:fs"
-import { resolve } from "node:path"
 import type { Readable, Writable } from "node:stream"
-import { loadTestnetSecrets, secretNeedles } from "./secrets"
 
 /** Set in the child's env only; never a secret. */
 export const REDACTED_CHILD = "INFERENCE_MONEY_REDACTED_CHILD"
@@ -11,12 +8,6 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 export function redact(text: string, needles: string[]): string {
 	return needles.reduce((out, n) => out.replace(new RegExp(escapeRegExp(n), "gi"), "[redacted]"), text)
-}
-
-/** The testnet secrets and the env's RPC URL, in every form output could carry them. */
-export function outputNeedles(repoRoot: string): string[] {
-	const hasFile = existsSync(resolve(repoRoot, ".env.testnet"))
-	return secretNeedles(hasFile ? loadTestnetSecrets(repoRoot) : {})
 }
 
 /** Secrets hold no newline, so redacting whole lines never lets one straddle two writes. */
@@ -58,7 +49,7 @@ async function reapGroup(pgid: number): Promise<void> {
 
 /**
  * Runs `argv` under this runtime with stdout and stderr redacted line by line. Dependency loggers write to the fds
- * directly, so only a pipe catches everything; the child reads its secrets itself, never from argv or env. The child
+ * directly, so only a pipe catches everything; the child takes its secrets from `env`, never from argv. The child
  * leads its own process group, which is reaped on cancellation and after the child exits: a surviving descendant (a
  * prover, a build) would keep running, and could hold the pipes open.
  */
@@ -67,9 +58,10 @@ export async function runRedacted(
 	needles: string[],
 	out: Writable = process.stdout,
 	err: Writable = process.stderr,
+	env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-	const env = { ...process.env, [REDACTED_CHILD]: "1" }
-	const child = spawn(process.execPath, argv, { env, stdio: ["ignore", "pipe", "pipe"], detached: true })
+	const childEnv = { ...env, [REDACTED_CHILD]: "1" }
+	const child = spawn(process.execPath, argv, { env: childEnv, stdio: ["ignore", "pipe", "pipe"], detached: true })
 	let reaping: Promise<void> | undefined
 	const reap = () => {
 		reaping ??= child.pid === undefined ? Promise.resolve() : reapGroup(child.pid)

@@ -1,87 +1,183 @@
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import { signingKeyFor, sponsoredPayment } from "@inference-money/bridge-core"
+import { aztecAddressOf } from "@inference-money/demo"
 import { REPO_ROOT, runIdFor } from "@inference-money/local-network"
-import { deployLocal, verifyLocal } from "./local"
-import { networkByName, TESTNET } from "./networks"
+import {
+	acceptAdmin,
+	addMerchants,
+	cancelMerchantChange,
+	describeMerchants,
+	proposeAdmin,
+	scheduleGuardian,
+	scheduleMerchant,
+	setMerchantDelay,
+	setPaused,
+} from "./admin"
+import { type Command, type Invocation, parseDelay, parseInvocation, USAGE } from "./cli-args"
+import { deployLocal } from "./local"
+import { localManifestPath, writeManifest } from "./manifest"
+import { TESTNET } from "./networks"
 import { probeNetwork } from "./preflight"
-import { describeError, outputNeedles, REDACTED_CHILD, runRedacted } from "./redact"
+import { describeError, REDACTED_CHILD, runRedacted } from "./redact"
 import { scanForSecrets } from "./scan"
-import { loadTestnetSecrets } from "./secrets"
-import { smokeTestnet } from "./smoke"
-import { proofCompatSpike } from "./spike"
-import { deployTestnet, TESTNET_MANIFEST, verifyTestnet } from "./testnet"
+import { aztecSecretFrom, KEYED, secretNeedles } from "./secrets"
+import { adminAccount, adminSecretFor, loadManifest, type Session, withSession } from "./session"
+import { deployTestnet } from "./testnet"
+import { verifyManifest } from "./verify-cli"
 
-const USAGE =
-	"usage: bun src/cli.ts <probe|spike|deploy|verify|smoke> testnet | <deploy|verify> local | scan secrets   (RUN_ID selects the local run)"
 const log = (m: string) => console.log(m)
+/** Set by `disposable exec` alone: an `admin accept` under it records the admin as interim. */
+export const INTERIM_ADMIN = "BRIDGE_INTERIM_ADMIN"
+type Handler = (inv: Invocation) => Promise<number>
 
-async function probe(): Promise<number> {
-	const pins = networkByName("testnet")
-	const checks = await probeNetwork(pins, process.env.SEPOLIA_RPC_URL || pins.defaultL1RpcUrl)
-	for (const c of checks) console.log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
-	const failed = checks.filter((c) => !c.ok).length
-	console.log(failed === 0 ? `probe ${pins.name}: all ${checks.length} checks passed` : `probe ${pins.name}: ${failed} failed`)
-	return failed === 0 ? 0 : 1
+const flag = (inv: Invocation, name: string): string | undefined => {
+	const v = inv.flags[name]
+	return typeof v === "string" ? v : undefined
 }
-
-async function spike(): Promise<number> {
-	const secrets = loadTestnetSecrets(REPO_ROOT)
-	const r = await proofCompatSpike(TESTNET, secrets, secrets.sepoliaRpcUrl ?? TESTNET.defaultL1RpcUrl, log)
-	console.log(
-		`spike testnet: account ${r.account} deployed in tx ${r.txHash} (block ${r.blockNumber}, fee ${r.transactionFee}) after ${r.minutes}m`,
-	)
-	return 0
+const aztecAddress = (value: string): AztecAddress => {
+	if (!/^0x[0-9a-fA-F]{64}$/.test(value)) throw new Error("expected an Aztec address (32-byte 0x-hex)")
+	return AztecAddress.fromStringUnsafe(value.toLowerCase())
 }
 
-/** Prints only a yes/no and counts: which secret matched, or where, is never output. */
-function scanSecrets(): number {
-	const r = scanForSecrets(REPO_ROOT, loadTestnetSecrets(REPO_ROOT))
-	console.log(`secrets:scan found=${r.found} files=${r.files} walletDirs=${r.walletDirs.length}`)
-	return r.found || r.walletDirs.length > 0 ? 1 : 0
+/** Runs `fn` as the manifest's admin: the fixed local one, or the keyed run's on testnet. */
+const asAdmin = (inv: Invocation, fn: (s: Session, admin: AztecAddress) => Promise<void>): Promise<number> =>
+	withSession(loadManifest(inv.args[0] as string), {}, async (s) => {
+		await fn(s, await adminAccount(s))
+		return 0
+	})
+
+const HANDLERS: Partial<Record<Command, Handler>> = {
+	async deploy(inv) {
+		const merchantDelay = flag(inv, "merchant-delay")
+		const opts = { log, ...(merchantDelay ? { merchantDelay: parseDelay(merchantDelay) } : {}) }
+		if (inv.args[0] === "local") {
+			const { path } = await deployLocal(runIdFor(), opts)
+			log(`deploy local: verified, handed over to the local admin; manifest ${path}`)
+		} else {
+			const m = await deployTestnet(opts)
+			log(`deploy testnet: verified with the handover pending; manifest deployments/testnet.json (bridge ${m.l2.bridge.address})`)
+		}
+		return 0
+	},
+	/** The address the admin secret rebuilds, derived offline: it goes into the deploy template as TESTNET_ADMIN_ADDRESS. */
+	async "admin address"() {
+		const secret = aztecSecretFrom(KEYED.adminSecret)
+		log((await aztecAddressOf({ secret, signingKey: signingKeyFor(secret) })).toString())
+		return 0
+	},
+	async "admin accept"(inv) {
+		const ref = loadManifest(inv.args[0] as string)
+		return withSession(ref, {}, async (s) => {
+			const admin = await acceptAdmin(s.wallet, s.m, adminSecretFor(s.m), log)
+			const interim = process.env[INTERIM_ADMIN] === "1"
+			const { interimAdmin: _, ...l2 } = s.m.l2
+			const recorded = { ...l2, admin: admin.toString() as `0x${string}`, ...(interim ? { interimAdmin: true as const } : {}) }
+			writeManifest(ref.path, { ...s.m, l2: recorded })
+			log(`admin ${admin} accepted the bridge and the merchant admin role${interim ? " (interim)" : ""}; manifest ${ref.path}`)
+			return 0
+		})
+	},
+	"admin propose": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			const next = aztecAddress(inv.args[1] as string)
+			await proposeAdmin(s.wallet, s.m, admin, next, { paymentMethod: sponsoredPayment(s.m) })
+			log(`proposed both roles to ${next}; it takes them with \`bridge admin accept\``)
+		}),
+	"merchants add": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			const accounts = inv.args.slice(1).map(aztecAddress)
+			log(`listed ${accounts.length} merchant(s) in ${await addMerchants(s, admin, accounts)} tx(s)`)
+		}),
+	"merchants off": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			await scheduleMerchant(s, admin, aztecAddress(inv.args[1] as string), true)
+			log("switch-off scheduled: it takes effect after the merchant's delay")
+		}),
+	"merchants on": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			await scheduleMerchant(s, admin, aztecAddress(inv.args[1] as string), false)
+			log("switch-on scheduled: it takes effect after the merchant's delay")
+		}),
+	"merchants delay": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			const txs = await setMerchantDelay(s, admin, parseDelay(inv.args[1] as string))
+			log(`delay set and synced to every merchant in ${txs} tx(s); a decrease applies after old − new`)
+		}),
+	"merchants guardian": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			await scheduleGuardian(s, admin, aztecAddress(inv.args[1] as string))
+			log("guardian scheduled: it takes over after the guardian slot's delay")
+		}),
+	"merchants cancel": (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			await cancelMerchantChange(s, admin, aztecAddress(inv.args[1] as string))
+			log("pending change cancelled")
+		}),
+	async "merchants list"(inv) {
+		const ref = loadManifest(inv.args[0] as string)
+		const lines = await describeMerchants({ node: createAztecNodeClient(ref.m.l2.nodeUrl), m: ref.m })
+		for (const line of lines) log(line)
+		log(`${lines.length} merchant(s) added`)
+		return 0
+	},
+	pause: (inv) =>
+		asAdmin(inv, async (s, admin) => {
+			await setPaused(s, admin, inv.args[1] === "on")
+			log(`bridge ${inv.args[1] === "on" ? "paused" : "unpaused"}`)
+		}),
+	verify: (inv) =>
+		verifyManifest(loadManifest(inv.args[0] as string), {
+			tour: flag(inv, "tour"),
+			node: flag(inv, "node"),
+			l1Rpc: flag(inv, "l1-rpc"),
+			log,
+		}),
+	async "manifest-path"() {
+		console.log(localManifestPath(runIdFor()))
+		return 0
+	},
+	async probe() {
+		const checks = await probeNetwork(TESTNET, process.env.SEPOLIA_RPC_URL || TESTNET.defaultL1RpcUrl)
+		for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
+		const failed = checks.filter((c) => !c.ok).length
+		log(failed === 0 ? `probe testnet: all ${checks.length} checks passed` : `probe testnet: ${failed} failed`)
+		return failed === 0 ? 0 : 1
+	},
+	/** Prints only a yes/no and counts: which secret matched, or where, is never output. */
+	async scan() {
+		const r = scanForSecrets(REPO_ROOT, secretNeedles())
+		log(`secrets:scan found=${r.found} files=${r.files} walletDirs=${r.walletDirs.length}`)
+		return r.found || r.walletDirs.length > 0 ? 1 : 0
+	},
 }
 
-const COMMANDS: Record<string, () => Promise<number> | number> = {
-	"probe testnet": probe,
-	"spike testnet": spike,
-	"deploy testnet": async () => {
-		const m = await deployTestnet(log)
-		console.log(`deploy testnet: verified; manifest ${TESTNET_MANIFEST} (bridge ${m.l2.bridge.address})`)
-		console.log("reminder: the L2 owner key (pause/unpause) is TESTNET_AZTEC_SECRET_KEY in .env.testnet; keep it.")
-		return 0
-	},
-	"verify testnet": async () => {
-		await verifyTestnet(log)
-		console.log("verify testnet: every check passed")
-		return 0
-	},
-	"smoke testnet": async () => {
-		await smokeTestnet(log)
-		console.log("smoke testnet: all four legs settled")
-		return 0
-	},
-	"deploy local": async () => {
-		const { path } = await deployLocal(runIdFor(), log)
-		console.log(`deploy local: verified; manifest ${path}`)
-		return 0
-	},
-	"verify local": async () => {
-		await verifyLocal(runIdFor(), log)
-		console.log("verify local: every check passed")
-		return 0
-	},
-	"scan secrets": scanSecrets,
+export const handlerFor = (command: Command): Handler | undefined => HANDLERS[command]
+
+async function main(): Promise<number> {
+	let inv: Invocation
+	try {
+		inv = parseInvocation(process.argv.slice(2))
+	} catch (e) {
+		console.error(e instanceof Error ? e.message : USAGE)
+		return 2
+	}
+	const needles = secretNeedles()
+	// Any environment holding a secret runs the command as a child whose output is redacted line by line.
+	if (needles.length > 0 && process.env[REDACTED_CHILD] !== "1") return runRedacted(process.argv.slice(1), needles)
+	const handler = handlerFor(inv.command)
+	if (!handler) {
+		console.error(`${inv.command} is not available in this build`)
+		return 2
+	}
+	return handler(inv)
 }
 
-const command = process.argv.slice(2, 4).join(" ")
-const run = COMMANDS[command]
-if (!run) {
-	console.error(USAGE)
-	process.exit(2)
-}
-if (!command.endsWith(" local") && process.env[REDACTED_CHILD] !== "1") {
-	process.exit(await runRedacted(process.argv.slice(1), outputNeedles(REPO_ROOT)))
-}
-try {
-	process.exit(await run())
-} catch (e) {
-	console.error(describeError(e))
-	process.exit(1)
+if (import.meta.main) {
+	try {
+		process.exit(await main())
+	} catch (e) {
+		console.error(describeError(e))
+		process.exit(1)
+	}
 }

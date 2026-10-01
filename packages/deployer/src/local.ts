@@ -1,16 +1,17 @@
 import { SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
 import { Fr } from "@aztec-labs/aztec.js/fields"
-import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { type BridgeManifest, sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
 import { ANVIL_ACCOUNTS, L1_CHAIN_ID, resolveEndpoints } from "@inference-money/local-network"
 import type { Hex } from "viem"
 import { mnemonicToAccount } from "viem/accounts"
+import { acceptAdmin, proposeAdmin, tokenOf } from "./admin"
 import { deployBridge } from "./deploy"
 import { deployMockUsdc } from "./deploy-l1"
 import { buildBridgeContracts } from "./evm"
 import { installCanonicalPermit2, l1Signer } from "./l1"
-import { localManifestPath, readManifest, writeManifest } from "./manifest"
+import { localManifestPath, writeManifest } from "./manifest"
 import { scrubbedEnv } from "./secrets"
+import { accountFor, LOCAL_ADMIN_SECRET } from "./session"
 import { assertAllPass, verifyDeployment } from "./verify"
 import { withBridgeWallet } from "./wallet"
 
@@ -21,11 +22,21 @@ const ANVIL_MNEMONIC = "test test test test test test test test test test test j
  * would race every write on one nonce.
  */
 export const localL1Account = () => mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: ANVIL_ACCOUNTS - 1 })
-/** A fixed local-only secret (like anvil's keys), so every process of a run can rebuild the L2 owner account. */
+/** A fixed local-only secret (like anvil's keys), so every process of a run can rebuild the deploy account. */
 export const LOCAL_DEPLOYER_SECRET = new Fr(0x1a7e0de9107e5n)
 
-/** Deploys the bridge onto this run's local network, verifies every read-back, and only then writes the manifest. */
-export async function deployLocal(runId: string, log: (m: string) => void): Promise<{ manifest: BridgeManifest; path: string }> {
+export interface DeployOptions {
+	/** Applied before the handover; the token starts at 86400 s. */
+	merchantDelay?: bigint
+	log: (m: string) => void
+}
+
+/**
+ * Deploys the bridge onto this run's local network, hands both admin roles to the fixed local admin and accepts them in
+ * the same run (so the handover path runs every time), verifies every read-back, and only then writes the manifest.
+ */
+export async function deployLocal(runId: string, opts: DeployOptions): Promise<{ manifest: BridgeManifest; path: string }> {
+	const { log } = opts
 	const net = resolveEndpoints(runId)
 	const evm = buildBridgeContracts(runId, false, scrubbedEnv())
 	const l1 = l1Signer(net.anvilUrl, L1_CHAIN_ID, localL1Account())
@@ -36,8 +47,9 @@ export async function deployLocal(runId: string, log: (m: string) => void): Prom
 		const sponsor = await sponsorInstance()
 		await wallet.registerContract(sponsor, sponsoredFpcArtifact)
 		const sponsored = new SponsoredFeePaymentMethod(sponsor.address)
+		const fee = { paymentMethod: sponsored }
 		const fees = { accountDeploy: async () => sponsored, tx: sponsored }
-		const m = await deployBridge({
+		const deployed = await deployBridge({
 			network: "local",
 			l1,
 			evm,
@@ -51,20 +63,17 @@ export async function deployLocal(runId: string, log: (m: string) => void): Prom
 			sponsoredFpc: sponsor.address.toString() as Hex,
 			log,
 		})
-		assertAllPass(await verifyDeployment(m, evm, l1.publicClient, node, l1.account.address), log)
+		const deployer = await accountFor(wallet, LOCAL_DEPLOYER_SECRET)
+		if (opts.merchantDelay !== undefined) {
+			await tokenOf(wallet, deployed).methods.set_merchant_delay!(opts.merchantDelay).send({ from: deployer, fee })
+		}
+		await proposeAdmin(wallet, deployed, deployer, await accountFor(wallet, LOCAL_ADMIN_SECRET), fee)
+		const admin = await acceptAdmin(wallet, deployed, LOCAL_ADMIN_SECRET, log)
+		const m: BridgeManifest = { ...deployed, l2: { ...deployed.l2, admin: admin.toString() as Hex } }
+		assertAllPass(await verifyDeployment(m, evm, l1.publicClient, node), log)
 		return m
 	})
 	const path = localManifestPath(runId)
 	writeManifest(path, manifest)
 	return { manifest, path }
-}
-
-/** Re-verifies this run's written manifest against a fresh `forge build --force`. */
-export async function verifyLocal(runId: string, log: (m: string) => void): Promise<void> {
-	const net = resolveEndpoints(runId)
-	const manifest = readManifest(localManifestPath(runId))
-	const evm = buildBridgeContracts(runId, true, scrubbedEnv())
-	const l1 = l1Signer(net.anvilUrl, L1_CHAIN_ID, localL1Account())
-	const node = createAztecNodeClient(net.nodeUrl)
-	assertAllPass(await verifyDeployment(manifest, evm, l1.publicClient, node, l1.account.address), log)
 }

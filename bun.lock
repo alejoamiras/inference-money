@@ -125,6 +125,7 @@
         "@aztec-labs/stdlib": "6.0.0-rc.1",
         "@aztec-labs/wallets": "6.0.0-rc.1",
         "@inference-money/bridge-core": "workspace:*",
+        "@inference-money/demo": "workspace:*",
         "@inference-money/local-network": "workspace:*",
         "viem": "2.56.7",
       },

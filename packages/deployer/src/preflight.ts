@@ -9,6 +9,8 @@ import type { NetworkPins } from "./networks"
 export interface Check {
 	name: string
 	ok: boolean
+	/** Passes, but an operator should act on it. */
+	warn?: boolean
 	detail: string
 }
 

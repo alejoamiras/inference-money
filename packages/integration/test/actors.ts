@@ -208,7 +208,7 @@ export function returnable(t: ClaimTicket, from = t.draft.intent.recipient): Pro
 	return waitReturnable(t, node, wallet, m, from, undefined, { pollMs: 1_000, attempts: 600 })
 }
 
-/** Flips the bridge's pause as its owner, the local deploy account. */
+/** Flips the bridge's pause as its owner, the local admin. */
 export async function setPaused(paused: boolean): Promise<void> {
 	const { manifest: m, wallet, owner } = harness()
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)

@@ -11,7 +11,7 @@ export const sponsored = () => ({ paymentMethod: sponsoredPayment(harness().mani
 /** Sends as `from`, paid by the sponsor (test accounts hold no Fee Juice). */
 export const as = (from: AztecAddress) => ({ from, fee: sponsored() })
 
-/** As the merchant admin, which a local deploy leaves with the deploy account. */
+/** As the merchant admin, which a local deploy hands to the local admin. */
 export const asAdmin = () => as(harness().owner)
 
 export async function listMerchant(account: AztecAddress): Promise<void> {

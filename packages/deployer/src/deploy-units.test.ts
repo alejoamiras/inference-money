@@ -2,9 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { Fr } from "@aztec-labs/aztec.js/fields"
 import { MANIFEST } from "../../bridge-core/src/test/fixtures"
-import { signingKeyFor } from "./deploy-l2"
 import { maskImmutables } from "./evm"
 import { readManifest, writeManifest } from "./manifest"
 
@@ -14,12 +12,6 @@ describe("deploy units", () => {
 		expect(maskImmutables("0xaabbccdd", ranges)).toBe("0xaa0000dd")
 		expect(maskImmutables("0xaa1122dd", ranges)).toBe(maskImmutables("0xaabbccdd", ranges))
 		expect(maskImmutables("0xaabbccde", ranges)).not.toBe(maskImmutables("0xaabbccdd", ranges))
-	})
-
-	it("derives one signing key per secret, the same every time", () => {
-		const a = new Fr(1n)
-		expect(signingKeyFor(a).equals(signingKeyFor(new Fr(1n)))).toBe(true)
-		expect(signingKeyFor(a).equals(signingKeyFor(new Fr(2n)))).toBe(false)
 	})
 
 	it("writes only a valid manifest, and reads it back unchanged", () => {
