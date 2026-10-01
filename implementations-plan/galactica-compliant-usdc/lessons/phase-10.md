@@ -1,6 +1,6 @@
 # Phase 10 — Rename, strip, embedded wallet, proving harness
 
-Status: **in progress**: every gate line but `build:testnet`, which needs P9's v2 manifest.
+Status: **done** 2026-10-01: every gate line green on `5c98525`, `build:testnet` on P9's committed deployment; the proving rerun agrees with the decision (medians 7.4 s unconstrained, 21.4 s on 2 CPUs, peak 1.19 GB).
 
 ## The proving decision: live proving
 

@@ -1,6 +1,6 @@
 # Phase 11 — UI, design F
 
-Status: **in progress**: lint, typecheck and `test:components` pass; `build:testnet` waits for P9's manifest, demo file and recorded tour. Live mode runs against faked chains in the component tests only, until P12's e2e drives it on a local network.
+Status: **done** 2026-10-01: lint, typecheck, `test:components` and `build:testnet` (P9's manifest, demo file and recorded tour) green on `5c98525`; P12's e2e drives live mode on a local network.
 
 ## Decisions
 

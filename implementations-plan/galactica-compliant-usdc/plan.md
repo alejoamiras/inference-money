@@ -1031,7 +1031,7 @@ Layers: live testnet with real proofs, cross-chain settlement.
 
 ### Arc 5: showcase
 
-**P10. Rename, strip, embedded wallet, proving harness.**
+**P10. Rename, strip, embedded wallet, proving harness.** ✓ 2026-10-01 (live proving: medians 7.4 s unconstrained and 21.4 s on 2 CPUs, peak 1.19 GB; gate green on `5c98525` after a socket-path fix in the local network; [lessons](lessons/phase-10.md))
 
 Work:
 - `git mv apps/web apps/showcase` and rename the package.
@@ -1062,7 +1062,7 @@ Pass:
 
 Layers: component, browser real proving, build headers.
 
-**P11. UI, design F.**
+**P11. UI, design F.** ✓ 2026-10-01 (all seven steps from the recorded testnet tour, refusals from `rules.ts`; gate green on `5c98525`; [lessons](lessons/phase-11.md))
 
 Work:
 - **`ui/`:**
