@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Static tripwire for what no TXE test can prove absent: the bridge consumes L1→L2 messages at EXACTLY four sites, each
-# bound to its own message type and sent by config.portal, and the rules guarding them are still on their paths.
+# bound to its own message type and sent by config.portal, and the rules guarding them are still in their bodies, behind
+# no control flow but the rule branches (`if bind`, `if as_merchant`). It pins text and shape; the TXE suites prove that
+# each rule refuses.
 #   claim_public:           consumes mint_to_public(to, amount, depositor) with the caller's secret; `to` must be a
 #                           merchant; mints to `to`; messages no portal.
 #   return_deposit_public:  the same consumption; refuses a merchant `to`; pays `depositor` on L1, once, and mints nothing.
@@ -90,6 +92,19 @@ consumes_derived() {
     "does not consume its private content hash with the derived secret ($derived) from config.portal"
 }
 
+# flow_is <fn> <body> <conditions>: the body branches only on the rule conditions given (space-separated, in order) and
+# has no loop, match or closure: `if false { assert(…) }` keeps exactly the text the other checks match, but never runs.
+flow_is() {
+  local code ifs
+  code=$(printf '%s' "$2" | sed -E 's/"([^"\\]|\\.)*"//g')
+  if printf '%s' "$code" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
+    violation "$1 has a loop, match or closure" || return 1
+  fi
+  ifs=$(printf '%s' "$code" | grep -oE "(^|[^A-Za-z0-9_])if[[:space:]]+[^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
+    tr '\n' ' ' | sed -E 's/ $//')
+  [ "$ifs" = "$3" ] || violation "$1 branches on [$ifs], not exactly on the rule conditions [$3]"
+}
+
 # A claim mints and nothing else: a withdraw from the same consumption would pay the deposit out twice.
 no_portal_message() {
   if printf '%s' "$2" | grep -q message_portal; then
@@ -117,7 +132,8 @@ check_claim_public() {
     "does not require a merchant recipient" || return 1
   need claim_public "$body" "\\.mint_to_public${S}\\(${S}to${S},${S}amount${S}\\)" \
     "does not mint to the hashed recipient" || return 1
-  no_portal_message claim_public "$body"
+  no_portal_message claim_public "$body" || return 1
+  flow_is claim_public "$body" ""
 }
 
 check_claim_private() {
@@ -135,7 +151,8 @@ check_claim_private() {
     "does not hold a later deposit to the funding address" || return 1
   need claim_private "$body" "\\.mint_to_private${S}\\(${S}recipient${S},${S}amount${S}\\)" \
     "does not mint to the committed recipient" || return 1
-  no_portal_message claim_private "$body"
+  no_portal_message claim_private "$body" || return 1
+  flow_is claim_private "$body" bind
 }
 
 check_returns() {
@@ -143,11 +160,13 @@ check_returns() {
   body=$(fn_body "$1" return_deposit_private)
   consumes_derived return_deposit_private "$body" || return 1
   pays_depositor return_deposit_private "$body" || return 1
+  flow_is return_deposit_private "$body" "" || return 1
   body=$(fn_body "$1" return_deposit_public)
   consumes_public return_deposit_public "$body" || return 1
   need return_deposit_public "$body" "assert${S}\\(${S}!${S}${token_view}\\.is_merchant\\(${S}to${S}\\)${S}\\)${S}," \
     "does not refuse a merchant's deposit" || return 1
-  pays_depositor return_deposit_public "$body"
+  pays_depositor return_deposit_public "$body" || return 1
+  flow_is return_deposit_public "$body" ""
 }
 
 check_exits() {
@@ -155,13 +174,15 @@ check_exits() {
   body=$(fn_body "$1" exit_to_l1_public)
   need exit_to_l1_public "$body" "assert${S}\\(${S}${token_view}\\.is_merchant\\(${S}sender${S}\\)${S}\\)${S}," \
     "does not require a merchant sender" || return 1
+  flow_is exit_to_l1_public "$body" "" || return 1
   body=$(fn_body "$1" exit_to_l1_private)
   need exit_to_l1_private "$body" \
     "if${S}as_merchant${S}\\{${S}assert${S}\\(${S}${token_view}\\.try_prove_merchant\\(${S}sender${S}\\)${S}\\)${S}," \
     "does not require try_prove_merchant for a merchant exit" || return 1
   need exit_to_l1_private "$body" \
     "\\}${S}else${S}\\{.*assert${S}\\(${S}self\\.storage\\.funding_address\\.at\\(${S}sender${S}\\)\\.get_note\\(\\)\\.address${S}==${S}recipient${S}," \
-    "does not hold a user to its funding address"
+    "does not hold a user to its funding address" || return 1
+  flow_is exit_to_l1_private "$body" as_merchant
 }
 
 # check_file <main.nr> [extra source dir...]: 0 when the invariant holds, 1 with a reason on stderr otherwise.
@@ -308,6 +329,16 @@ true,"
   mutant public_exit_for_users "exit_to_l1_public does not require a merchant sender" main \
     'assert(self.view(Token::at(config.token).is_merchant(sender)), "Public exits are for merchants only");' ""
 
+  # Control flow: a rule's text kept behind a branch or loop that never runs it.
+  mutant dead_branch "exit_to_l1_private branches on [as_merchant false]" main \
+    "assert(
+self.storage.funding_address.at(sender).get_note().address == recipient," \
+    "if false { assert(
+self.storage.funding_address.at(sender).get_note().address == recipient,"
+  mutant dead_loop "claim_private has a loop, match or closure" main \
+    'assert(self.msg_sender() == recipient, "Only the recipient can claim privately");' \
+    'for _ in 0..0 { assert(self.msg_sender() == recipient, "Only the recipient can claim privately"); }'
+
   [ "$fails" = 0 ] || exit 1
   echo "✅ check-sole-consumer self-test passed (real source upheld; $count single-rule mutants rejected for their own reasons)"
 }
@@ -319,4 +350,4 @@ fi
 check_file "$bridge_main" "$lib_src" "$messages_src" || exit 1
 echo "✅ sole-consumer invariant holds: four consume sites, each bound to its own message type from config.portal;" \
   "the private ones consume only the recipient-derived secret; returns pay their depositor and never mint; the" \
-  "merchant, binding and exit rules are in place"
+  "merchant, binding and exit rules are in place, behind no control flow but their own branches"

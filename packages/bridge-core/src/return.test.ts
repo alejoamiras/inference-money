@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
-import { TxStatus } from "@aztec-labs/aztec.js/tx"
+import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import { getAddress } from "viem"
+import { messageNullifier } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { type ExitNode, expectedExitMessage } from "./exit"
-import { ReturnRevertedError, ReturnUnconfirmedError, returnDeposit } from "./return"
+import { depositFate, type FateNode, ReturnRevertedError, ReturnUnconfirmedError, returnDeposit } from "./return"
 import { fakeWallet } from "./test/fake-wallet"
 import { a, f, MANIFEST as M, receiptAt } from "./test/fixtures"
 
@@ -56,5 +57,31 @@ describe("returnDeposit", () => {
 		const lost = await returnDeposit(pub, w.wallet, unreadable, M, { from: recipient }).catch((e: unknown) => e)
 		expect(lost).toBeInstanceOf(ReturnUnconfirmedError)
 		expect(lost).toMatchObject({ l2TxHash: w.txHash, depositor: DEPOSITOR, amount: AMOUNT })
+	})
+})
+
+describe("depositFate", () => {
+	it("reads the deposit's fate from the tx that consumed its message: none, a claim, or a return to the depositor", async () => {
+		const t = await ticket("private")
+		const nullifier = await messageNullifier(t, M)
+		const consumer = TxHash.random()
+		// The decoy pays the same depositor in the same block, so only the nullifier can pick the consuming tx.
+		const node = (consumed: Fr[] | undefined) =>
+			({
+				findLeavesIndexes: async (_b: unknown, _t: unknown, [n]: Fr[]) => [
+					consumed && n?.equals(nullifier) ? { l2BlockNumber: 7 } : undefined,
+				],
+				getBlock: async () => ({
+					body: {
+						txEffects: [
+							{ txHash: TxHash.random(), nullifiers: [new Fr(1)], l2ToL1Msgs: [payout] },
+							{ txHash: consumer, nullifiers: [new Fr(2), nullifier], l2ToL1Msgs: consumed },
+						],
+					},
+				}),
+			}) as unknown as FateNode
+		expect(await depositFate(t, node(undefined), M)).toEqual({ state: "unconsumed" })
+		expect(await depositFate(t, node([new Fr(9)]), M)).toEqual({ state: "claimed", l2TxHash: consumer })
+		expect(await depositFate(t, node([new Fr(9), payout]), M)).toEqual({ state: "returned", l2TxHash: consumer })
 	})
 })

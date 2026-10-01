@@ -1,23 +1,28 @@
 import { describe, expect, it } from "bun:test"
-import { claimBinding, fundingAddress, NotFundingAddressError } from "@inference-money/bridge-core"
+import { claimBinding, depositFate, exitTicketFromTx, fundingAddress, NotFundingAddressError } from "@inference-money/bridge-core"
 import { type Address, isAddressEqual } from "viem"
 import { claimable, claimFor, deposit, l1Actor, l2Actor, l2Balances, openBooks, returnable, returnFor, USDC } from "./actors"
-import { harness, INTEGRATION } from "./harness"
+import { harness, INTEGRATION, sendTogether } from "./harness"
+
+/** The losing claim's binding repeats the winner's initialization nullifier. */
+const LOST_RACE = /nullifier/i
 
 const boundTo = async (account: Parameters<typeof fundingAddress>[2]): Promise<Address | undefined> =>
 	fundingAddress(harness().wallet, harness().manifest, account)
 
 describe.skipIf(!INTEGRATION)("funding-address binding", () => {
 	it("[A23] the first private claim binds the account to its depositor; later deposits claim only from there", async () => {
-		const { wallet, manifest: m } = harness()
+		const { wallet, manifest: m, node, outbox } = harness()
 		const [l1, other, bob] = await Promise.all([l1Actor(), l1Actor(), l2Actor()])
 		const books = await openBooks()
 		expect(await boundTo(bob)).toBeUndefined()
 
 		const first = books.deposit(await deposit(l1, "private", bob, 2n * USDC))
+		expect(await depositFate(first, node, m)).toEqual({ state: "unconsumed" })
 		await claimable(first, bob)
 		expect(await claimBinding(wallet, m, bob, first.depositor), "the app warns before this claim").toBe("binds")
 		expect(await claimFor(first)).toBe("claimed")
+		expect((await depositFate(first, node, m)).state).toBe("claimed")
 		const bound = await boundTo(bob)
 		expect(bound !== undefined && isAddressEqual(bound, l1.account)).toBe(true)
 
@@ -31,7 +36,13 @@ describe.skipIf(!INTEGRATION)("funding-address binding", () => {
 		await expect(claimFor(stranger)).rejects.toBeInstanceOf(NotFundingAddressError)
 		expect((await l2Balances(bob)).private).toBe(3n * USDC)
 		await returnable(stranger)
-		books.withdrawal(await returnFor(stranger))
+		await returnFor(stranger)
+		// Bob keeps the return's hash; the stranger finds its payout from its own deposit ticket.
+		const fate = await depositFate(stranger, node, m)
+		if (fate.state !== "returned") throw new Error(`the refused deposit reads ${fate.state}`)
+		const payout = await exitTicketFromTx(fate.l2TxHash, other.account, USDC, node, outbox, m)
+		if (typeof payout === "string") throw new Error(`the return's withdrawal reads ${payout}`)
+		books.withdrawal(payout)
 		await books.settle()
 	})
 
@@ -42,9 +53,15 @@ describe.skipIf(!INTEGRATION)("funding-address binding", () => {
 		const tb = books.deposit(await deposit(b, "private", bob, 2n * USDC))
 		await Promise.all([claimable(ta, bob), claimable(tb, bob)])
 
-		const outcomes = await Promise.allSettled([claimFor(ta), claimFor(tb)])
+		// Both claims bind (the account is unbound when each is proven), and both reach the node.
+		const { sent } = harness()
+		const before = sent.length
+		const outcomes = await sendTogether([() => claimFor(ta), () => claimFor(tb)])
+		expect(sent.length - before, "both claims were proven and submitted").toBe(2)
 		const won = outcomes.flatMap((o, i) => (o.status === "fulfilled" && o.value === "claimed" ? [i] : []))
 		expect(won, JSON.stringify(outcomes.map((o) => o.status))).toHaveLength(1)
+		const lost = outcomes[1 - (won[0] ?? 0)]
+		expect(lost?.status === "rejected" && String(lost.reason)).toMatch(LOST_RACE)
 		const [winner, loser] = won[0] === 0 ? [ta, tb] : [tb, ta]
 		const bound = await boundTo(bob)
 		expect(bound !== undefined && isAddressEqual(bound, winner.depositor)).toBe(true)

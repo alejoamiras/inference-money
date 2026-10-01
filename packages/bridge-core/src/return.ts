@@ -3,6 +3,8 @@ import { Contract, NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { TxHash } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
+import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
+import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import type { Address } from "viem"
 import { tokenBridgeArtifact } from "./artifacts"
 import {
@@ -10,18 +12,20 @@ import {
 	type ClaimWait,
 	type FeeChoice,
 	feeFor,
+	messageNullifier,
+	type NullifierNode,
 	sponsorFailure,
 	type WaitClaimableOptions,
 	waitConsumable,
 } from "./claim"
 import type { ClaimTicket } from "./deposit"
-import { type ExitNode, type ExitTicket, locateWithdrawal } from "./exit"
+import { type ExitNode, type ExitTicket, expectedExitMessage, locateWithdrawal } from "./exit"
 import type { BridgeManifest } from "./manifest"
 import type { StageSink } from "./types"
 
 /**
  * The return was sent but its withdrawal could not be located yet. Returning again would fail on the consumed message:
- * resume with `exitTicketFromTx` from these fields.
+ * resume with `exitTicketFromTx` from these fields, or from the deposit ticket alone with {@link depositFate}.
  */
 export class ReturnUnconfirmedError extends Error {
 	constructor(
@@ -93,4 +97,24 @@ export async function returnDeposit(
 	})
 	if (located === "reverted") throw new ReturnRevertedError(txHash)
 	return located
+}
+
+export type FateNode = NullifierNode & Pick<AztecNode, "getBlock">
+
+export type DepositFate = { state: "unconsumed" } | { state: "claimed" | "returned"; l2TxHash: TxHash }
+
+/**
+ * What became of `t`'s deposit, read from the chain with the ticket alone, since whoever claimed or returned it need not
+ * share the tx: "returned" when the tx that consumed its message paid the depositor, "claimed" otherwise. A return is
+ * finished like any exit: `exitTicketFromTx(l2TxHash, t.depositor, amount, …)`, then `finishWithdrawal`.
+ */
+export async function depositFate(t: ClaimTicket, node: FateNode, m: BridgeManifest): Promise<DepositFate> {
+	const nullifier = await messageNullifier(t, m)
+	const [hit] = await node.findLeavesIndexes("checkpointed", MerkleTreeId.NULLIFIER_TREE, [nullifier])
+	if (!hit) return { state: "unconsumed" }
+	const block = await node.getBlock(hit.l2BlockNumber, { includeTransactions: true })
+	const effect = block?.body.txEffects.find((e) => e.nullifiers.some((n) => n.equals(nullifier)))
+	if (!effect) throw new Error(`Block ${hit.l2BlockNumber} holds no tx with this deposit's nullifier.`)
+	const payout = await expectedExitMessage(t.depositor, t.draft.intent.amount, m)
+	return { state: effect.l2ToL1Msgs.some((msg) => msg.equals(payout)) ? "returned" : "claimed", l2TxHash: effect.txHash }
 }

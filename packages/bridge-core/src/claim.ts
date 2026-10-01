@@ -19,7 +19,7 @@ import type { StageSink } from "./types"
 
 /**
  * "consumed-unknown": the message is already consumed, by an earlier claim or by a return; the nullifier alone cannot
- * tell which, so it is never reported as a mint.
+ * tell which, so it is never reported as a mint. `depositFate` reads which from the consuming tx.
  */
 export type ClaimResult = "claimed" | "consumed-unknown"
 
@@ -164,20 +164,24 @@ export type NullifierNode = Pick<AztecNode, "findLeavesIndexes">
 export type ClaimNode = NullifierNode & Pick<AztecNode, "getTxReceipt">
 
 /**
- * Whether the bridge has nullified this ticket's message on L2. The nullifier is aztec-nr's
- * `compute_l1_to_l2_message_nullifier`, which stdlib names after the fee-juice contract; the bridge siloes it.
+ * The nullifier the bridge emits when a claim or a return consumes this ticket's message: aztec-nr's
+ * `compute_l1_to_l2_message_nullifier` (stdlib names it after the fee-juice contract), siloed by the bridge.
  */
+export async function messageNullifier(t: ClaimTicket, m: BridgeManifest): Promise<Fr> {
+	const { kind, recipient } = t.draft.intent
+	const secret = kind === "private" ? deriveClaimSecret(t.draft.secretOrSalt, recipient) : t.draft.secretOrSalt
+	const inner = await computeFeeJuiceMessageNullifier(Fr.fromHexString(t.messageHash), secret)
+	return siloNullifier(AztecAddress.fromStringUnsafe(m.l2.bridge.address), inner)
+}
+
+/** Whether the bridge has nullified this ticket's message on L2, by a claim or a return. */
 export async function isClaimConsumed(
 	t: ClaimTicket,
 	node: NullifierNode,
 	m: BridgeManifest,
 	at: "checkpointed" | "finalized" = "checkpointed",
 ): Promise<boolean> {
-	const { kind, recipient } = t.draft.intent
-	const secret = kind === "private" ? deriveClaimSecret(t.draft.secretOrSalt, recipient) : t.draft.secretOrSalt
-	const inner = await computeFeeJuiceMessageNullifier(Fr.fromHexString(t.messageHash), secret)
-	const siloed = await siloNullifier(AztecAddress.fromStringUnsafe(m.l2.bridge.address), inner)
-	const [hit] = await node.findLeavesIndexes(at, MerkleTreeId.NULLIFIER_TREE, [siloed])
+	const [hit] = await node.findLeavesIndexes(at, MerkleTreeId.NULLIFIER_TREE, [await messageNullifier(t, m)])
 	return hit !== undefined
 }
 

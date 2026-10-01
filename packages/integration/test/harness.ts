@@ -2,6 +2,7 @@ import { rmSync } from "node:fs"
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import type { Tx } from "@aztec-labs/stdlib/tx"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	type BridgeManifest,
@@ -54,6 +55,50 @@ export function harness(): Harness {
 
 export const newAccount = newSponsoredAccount
 
+interface Held {
+	count: number
+	queued: { send: () => Promise<void>; done: ReturnType<typeof Promise.withResolvers<void>> }[]
+}
+let held: Held | undefined
+
+async function release(batch: Held): Promise<void> {
+	if (held === batch) held = undefined
+	for (const q of batch.queued.splice(0)) await q.send().then(q.done.resolve, q.done.reject)
+}
+
+/** Forwards each submission at once, unless {@link sendTogether} is collecting them. */
+function holdingNode(node: AztecNode): AztecNode {
+	return new Proxy(node, {
+		get(target, key, receiver) {
+			if (key !== "sendTx") return Reflect.get(target, key, receiver)
+			return async (tx: Tx) => {
+				const batch = held
+				if (!batch) return target.sendTx(tx)
+				const done = Promise.withResolvers<void>()
+				batch.queued.push({ send: () => target.sendTx(tx), done })
+				if (batch.queued.length === batch.count) await release(batch)
+				return done.promise
+			}
+		},
+	})
+}
+
+/**
+ * Runs `actions` with the actor wallet's submissions held until every action has proven its tx, then sends them back to
+ * back: all were built against the same state, so the sequencer decides any conflict between them. An action that
+ * settles without submitting releases the rest.
+ */
+export async function sendTogether<T>(actions: (() => Promise<T>)[]): Promise<PromiseSettledResult<T>[]> {
+	if (held) throw new Error("sendTogether is already collecting")
+	const batch: Held = { count: actions.length, queued: [] }
+	held = batch
+	try {
+		return await Promise.allSettled(actions.map((act) => act().finally(() => (held === batch ? release(batch) : undefined))))
+	} finally {
+		if (held === batch) held = undefined
+	}
+}
+
 async function openWallet(node: AztecNode, m: BridgeManifest): Promise<EmbeddedWallet> {
 	const wallet = await openBridgeWallet(node, { prove: false })
 	cleanup.push(() => wallet.stop())
@@ -82,7 +127,7 @@ async function open(log: (m: string) => void): Promise<Harness> {
 	const net = resolveEndpoints(runId)
 	const node = createAztecNodeClient(net.nodeUrl)
 	const sent: SentTx[] = []
-	const gate = new PaymentGate(recordingNode(node, sent), memoryPaymentStore())
+	const gate = new PaymentGate(recordingNode(holdingNode(node), sent), memoryPaymentStore())
 	const wallet = await gate.bindWallet((gated) => openWallet(gated, manifest))
 	const owner = (await wallet.createSchnorrAccount(LOCAL_DEPLOYER_SECRET, Fr.ZERO, signingKeyFor(LOCAL_DEPLOYER_SECRET))).address
 	await startHeartbeat(node, manifest)
