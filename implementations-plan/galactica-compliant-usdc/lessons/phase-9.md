@@ -44,3 +44,5 @@ The arc-4 loop stopped at its cap with `cd59491` unreviewed (phase-8.md); this p
 1. **High: the round-2 lock broke `exec`'s cancellation.** `withStateDir` registered its signal handler before `runRedacted`'s reaper, so a SIGINT or SIGTERM released the bundle and exited while the detached, secret-bearing child kept running, unscanned. `exec` now takes the lock with `StateDir.acquire` and releases it in `finally`, so `runRedacted` reaps the child and the scan runs first; `init` and `destroy`, which spawn nothing, keep `withStateDir`. A test emits SIGTERM mid-run and requires the child gone, the scan run and the bundle free.
 
 Past the cap with one fix unreviewed, the loop continues for a confirming round, per the owner's standing call on loops at the cap: minimal fixes only.
+
+**Round 4 (confirming):** converged — "Converged — no material findings remain in the reviewed arc-4 boundary; confidence high." Codex drove SIGTERM then SIGINT against a child that ignores SIGTERM: a second exec was refused, the child was killed, the scan ran before the release, and the next exec succeeded. A SIGKILL leaves the lock, which `StateDir` never takes over on its own.
