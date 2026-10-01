@@ -23,9 +23,9 @@ import { localManifestPath, writeManifest } from "./manifest"
 import { TESTNET } from "./networks"
 import { probeNetwork } from "./preflight"
 import { describeError, REDACTED_CHILD, runRedacted } from "./redact"
-import { scanForSecrets } from "./scan"
-import { aztecSecretFrom, KEYED, secretNeedles } from "./secrets"
-import { adminAccount, adminSecretFor, loadManifest, type Session, withSession } from "./session"
+import { scanFailed, scanForSecrets, scanLine } from "./scan"
+import { aztecSecretFrom, holdSecrets, KEYED, keyedEnv, secretNeedles } from "./secrets"
+import { accountFor, adminAccount, adminSecretFor, loadManifest, type Session, withSession } from "./session"
 import { smoke } from "./smoke"
 import { deployTestnet } from "./testnet"
 import { verifyManifest } from "./verify-cli"
@@ -71,7 +71,7 @@ const HANDLERS: Record<Command, Handler> = {
 	async "admin accept"(inv) {
 		const ref = loadManifest(inv.args[0] as string)
 		return withSession(ref, {}, async (s) => {
-			const admin = await acceptAdmin(s.wallet, s.m, adminSecretFor(s.m), log)
+			const admin = await acceptAdmin(s.wallet, s.node, s.m, adminSecretFor(s.m), log)
 			const interim = process.env[INTERIM_ADMIN] === "1"
 			const { interimAdmin: _, ...l2 } = s.m.l2
 			const recorded = { ...l2, admin: admin.toString() as `0x${string}`, ...(interim ? { interimAdmin: true as const } : {}) }
@@ -111,10 +111,12 @@ const HANDLERS: Record<Command, Handler> = {
 			await scheduleGuardian(s, admin, aztecAddress(inv.args[1] as string))
 			log("guardian scheduled: it takes over after the guardian slot's delay")
 		}),
+	// The admin or the guardian, each with its own key: the token judges which, so the manifest's admin isn't required.
 	"merchants cancel": (inv) =>
-		asAdmin(inv, async (s, admin) => {
-			await cancelMerchantChange(s, admin, aztecAddress(inv.args[1] as string))
+		withSession(loadManifest(inv.args[0] as string), {}, async (s) => {
+			await cancelMerchantChange(s, await accountFor(s.wallet, adminSecretFor(s.m)), aztecAddress(inv.args[1] as string))
 			log("pending change cancelled")
+			return 0
 		}),
 	async "merchants list"(inv) {
 		const ref = loadManifest(inv.args[0] as string)
@@ -173,13 +175,13 @@ const HANDLERS: Record<Command, Handler> = {
 		return 0
 	},
 	"disposable exec": (inv) => disposableExec(inv.args),
-	async "disposable destroy"() {
-		await disposableDestroy()
+	async "disposable destroy"(inv) {
+		await disposableDestroy(loadManifest(inv.args[0] as string))
 		log(`destroyed ${DISPOSABLE_FILE}`)
 		return 0
 	},
 	async probe() {
-		const checks = await probeNetwork(TESTNET, process.env.SEPOLIA_RPC_URL || TESTNET.defaultL1RpcUrl)
+		const checks = await probeNetwork(TESTNET, keyedEnv()[KEYED.rpcUrl] || TESTNET.defaultL1RpcUrl)
 		for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
 		const failed = checks.filter((c) => !c.ok).length
 		log(failed === 0 ? `probe testnet: all ${checks.length} checks passed` : `probe testnet: ${failed} failed`)
@@ -187,9 +189,9 @@ const HANDLERS: Record<Command, Handler> = {
 	},
 	/** Prints only a yes/no and counts: which secret matched, or where, is never output. */
 	async scan() {
-		const r = scanForSecrets(REPO_ROOT, secretNeedles())
-		log(`secrets:scan found=${r.found} files=${r.files} walletDirs=${r.walletDirs.length}`)
-		return r.found || r.walletDirs.length > 0 ? 1 : 0
+		const r = scanForSecrets(REPO_ROOT, secretNeedles(keyedEnv()))
+		log(`secrets:scan ${scanLine(r)}`)
+		return scanFailed(r) ? 1 : 0
 	},
 }
 
@@ -204,6 +206,7 @@ async function main(): Promise<number> {
 	const needles = secretNeedles()
 	// Any environment holding a secret runs the command as a child whose output is redacted line by line.
 	if (needles.length > 0 && process.env[REDACTED_CHILD] !== "1") return runRedacted(process.argv.slice(1), needles)
+	holdSecrets()
 	return HANDLERS[inv.command](inv)
 }
 

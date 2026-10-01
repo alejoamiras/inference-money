@@ -212,16 +212,26 @@ async function timestampAt(node: Pick<AztecNode, "getBlockData">, tag: "latest" 
 }
 
 /**
- * What a `sent` record becomes on the node's current view; undefined releases it. A prune can undo any block short of
- * finalized, and with it a revert or the absence of the tx, so only finalized evidence moves a record on.
+ * What the chain proves about a sent tx expiring at `expiresAt`: "gone" once it reverted in a finalized block or a
+ * finalized block passed its expiry without it, "landed" once finalized without a revert. A prune can undo any block
+ * short of finalized, and a node's "dropped" says nothing of other nodes' mempools, so anything else is "unsettled".
  */
+export async function finalFate(
+	node: Pick<AztecNode, "getTxReceipt" | "getBlockData">,
+	txHash: string,
+	expiresAt: bigint,
+): Promise<"landed" | "gone" | "unsettled"> {
+	const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
+	if (receipt.isMined() && receipt.status === TxStatus.FINALIZED) return receipt.hasExecutionReverted() ? "gone" : "landed"
+	if (receipt.isMined() || receipt.isPending()) return "unsettled"
+	return ((await timestampAt(node, "finalized")) ?? 0n) > expiresAt ? "gone" : "unsettled"
+}
+
+/** What a `sent` record becomes on the node's current view; undefined releases it. */
 async function settle(r: Extract<PaymentRecord, { state: "sent" }>, node: PaymentNode): Promise<PaymentRecord | undefined> {
-	const receipt = await node.getTxReceipt(TxHash.fromString(r.txHash))
-	if (receipt.isMined() && receipt.status === TxStatus.FINALIZED) {
-		return receipt.hasExecutionReverted() ? undefined : { state: "paid", txHash: r.txHash }
-	}
-	if (receipt.isMined() || receipt.isPending()) return r
-	return ((await timestampAt(node, "finalized")) ?? 0n) > BigInt(r.expiresAt) ? undefined : r
+	const fate = await finalFate(node, r.txHash, BigInt(r.expiresAt))
+	if (fate === "unsettled") return r
+	return fate === "landed" ? { state: "paid", txHash: r.txHash } : undefined
 }
 
 async function refreshed(r: PaymentRecord | undefined, node: PaymentNode, now: number): Promise<PaymentRecord | undefined> {

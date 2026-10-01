@@ -25,7 +25,10 @@ export const TESTNET_DEPLOY_TXS = [
 	"propose both admin roles",
 ] as const
 
-/** The L2 txs the rest of P9 sends through the sponsor: admin accept, the demo merchants, demo fund and setup, one smoke. */
+/**
+ * The L2 txs a testnet bring-up sends through the sponsor after the deploy: admin accept, the demo merchants, demo fund
+ * and setup, one smoke.
+ */
 export const TESTNET_SPONSORED_TXS = [
 	"deploy admin account",
 	"accept both admin roles",

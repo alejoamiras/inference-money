@@ -2,10 +2,12 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { BatchCall, Contract, type ContractFunctionInteraction } from "@aztec-labs/aztec.js/contracts"
 import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
 import type { Fr } from "@aztec-labs/aztec.js/fields"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	type BridgeManifest,
+	L2_DONE,
 	merchantStatus,
 	sponsoredPayment,
 	syncMerchantList,
@@ -14,7 +16,7 @@ import {
 } from "@inference-money/bridge-core"
 import { ensureAccount } from "./deploy-l2"
 import type { Session } from "./session"
-import { entryDelay } from "./token-reads"
+import { entryDelay, readRoles } from "./token-reads"
 
 /** The account entrypoint takes five calls and the sponsor's payment is one of them. */
 export const CALLS_PER_TX = 4
@@ -33,7 +35,7 @@ export async function sendChunked(
 ): Promise<number> {
 	let txs = 0
 	for (let i = 0; i < calls.length; i += CALLS_PER_TX) {
-		await new BatchCall(wallet, calls.slice(i, i + CALLS_PER_TX)).send({ from, fee })
+		await new BatchCall(wallet, calls.slice(i, i + CALLS_PER_TX)).send({ from, fee, wait: L2_DONE })
 		txs++
 	}
 	return txs
@@ -51,20 +53,39 @@ export async function proposeAdmin(
 	fee?: { paymentMethod: FeePaymentMethod },
 ): Promise<void> {
 	const calls = [bridgeOf(wallet, m).methods.transfer_ownership!(admin), tokenOf(wallet, m).methods.propose_merchant_admin!(admin)]
-	await new BatchCall(wallet, calls).send({ from, fee })
+	await new BatchCall(wallet, calls).send({ from, fee, wait: L2_DONE })
 }
 
-/** Accepts both roles as the account `secret` rebuilds, deploying it through the sponsor first if needed. */
-export async function acceptAdmin(wallet: EmbeddedWallet, m: BridgeManifest, secret: Fr, log: (m: string) => void) {
+/**
+ * Accepts both roles as the account `secret` rebuilds, deploying it through the sponsor first if needed, and returns
+ * once both read back as its own at a checkpoint. A rerun after an accept that landed only reads them back, since a
+ * second accept would revert.
+ */
+export async function acceptAdmin(
+	wallet: EmbeddedWallet,
+	node: Pick<AztecNode, "getPublicStorageAt">,
+	m: BridgeManifest,
+	secret: Fr,
+	log: (m: string) => void,
+): Promise<AztecAddress> {
 	const fees = { accountDeploy: async () => sponsoredPayment(m), tx: sponsoredPayment(m) }
 	const admin = await ensureAccount(wallet, secret, fees, log, "admin")
+	const holdsBoth = async () => {
+		const r = await readRoles(node, m)
+		return r.owner.equals(admin.toField()) && r.admin.equals(admin.toField())
+	}
+	if (await holdsBoth()) {
+		log(`admin ${admin}: already holds both roles`)
+		return admin
+	}
 	const calls = [bridgeOf(wallet, m).methods.claim_ownership!(), tokenOf(wallet, m).methods.accept_merchant_admin!()]
-	await new BatchCall(wallet, calls).send({ from: admin, fee: sponsored(m) })
+	await new BatchCall(wallet, calls).send({ from: admin, fee: sponsored(m), wait: L2_DONE })
+	if (!(await holdsBoth())) throw new Error(`The accept was checkpointed, but ${admin} does not hold both roles.`)
 	return admin
 }
 
 export async function setPaused(s: Session, admin: AztecAddress, paused: boolean): Promise<void> {
-	await bridgeOf(s.wallet, s.m).methods.set_paused!(paused).send({ from: admin, fee: sponsored(s.m) })
+	await bridgeOf(s.wallet, s.m).methods.set_paused!(paused).send({ from: admin, fee: sponsored(s.m), wait: L2_DONE })
 }
 
 export async function addMerchants(s: Session, admin: AztecAddress, accounts: AztecAddress[]): Promise<number> {
@@ -79,7 +100,7 @@ export async function addMerchants(s: Session, admin: AztecAddress, accounts: Az
 
 /** Schedules a switch-off (`off`) or a switch back on, effective after the merchant's delay. */
 export async function scheduleMerchant(s: Session, admin: AztecAddress, account: AztecAddress, off: boolean): Promise<void> {
-	await tokenOf(s.wallet, s.m).methods.schedule_merchant_off!(account, off).send({ from: admin, fee: sponsored(s.m) })
+	await tokenOf(s.wallet, s.m).methods.schedule_merchant_off!(account, off).send({ from: admin, fee: sponsored(s.m), wait: L2_DONE })
 }
 
 /**
@@ -96,12 +117,12 @@ export async function setMerchantDelay(s: Session, admin: AztecAddress, delay: b
 
 /** Schedules the cancel-only guardian (zero removes it), effective after the guardian slot's delay. */
 export async function scheduleGuardian(s: Session, admin: AztecAddress, guardian: AztecAddress): Promise<void> {
-	await tokenOf(s.wallet, s.m).methods.schedule_merchant_guardian!(guardian).send({ from: admin, fee: sponsored(s.m) })
+	await tokenOf(s.wallet, s.m).methods.schedule_merchant_guardian!(guardian).send({ from: admin, fee: sponsored(s.m), wait: L2_DONE })
 }
 
 /** Cancels a merchant's pending change; the token refuses one with nothing pending. */
 export async function cancelMerchantChange(s: Session, admin: AztecAddress, account: AztecAddress): Promise<void> {
-	await tokenOf(s.wallet, s.m).methods.cancel_merchant_change!(account).send({ from: admin, fee: sponsored(s.m) })
+	await tokenOf(s.wallet, s.m).methods.cancel_merchant_change!(account).send({ from: admin, fee: sponsored(s.m), wait: L2_DONE })
 }
 
 /** One line per added merchant, from `MerchantAdded` events and each switch-off entry at the latest block. */

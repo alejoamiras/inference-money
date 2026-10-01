@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Writable } from "node:stream"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import { MANIFEST } from "../../bridge-core/src/test/fixtures"
 import { assertOwnerOnly, disposableDestroy, disposableExec, disposableInit } from "./disposable"
+import type { Roles } from "./token-reads"
+
+const someone = new Fr(0x5eedn)
+const NOBODY: Roles = { owner: someone, pendingOwner: Fr.ZERO, admin: someone, pendingAdmin: Fr.ZERO }
 
 const roots: string[] = []
 const temp = () => {
@@ -37,7 +43,7 @@ const CHILD = [
 	"-e",
 	`const s = process.env.TESTNET_ADMIN_SECRET
 console.log(process.argv.some((a) => a.includes(s.slice(2))) ? "argv holds a secret" : "argv clean")
-console.log("secret", s, "admin", process.env.TESTNET_ADMIN_ADDRESS, "interim", process.env.BRIDGE_INTERIM_ADMIN)`,
+console.log("secret", s, "l1", process.env.TESTNET_L1_PRIVATE_KEY ?? "absent", "interim", process.env.BRIDGE_INTERIM_ADMIN)`,
 ]
 
 describe("the disposable fallback", () => {
@@ -55,11 +61,11 @@ describe("the disposable fallback", () => {
 		expect(readFileSync(file, "utf8")).toBe(before)
 	})
 
-	it("exec refuses a looser file, another owner, another checkout and a nested call; its child gets the values by env alone, redacted", async () => {
+	it("exec refuses a looser file, another owner, another checkout and a nested call; its child gets only its command's values, by env, redacted", async () => {
 		const [keys, checkout] = [temp(), temp()]
 		const file = join(keys, "testnet.env")
-		const { admin } = await disposableInit(file)
-		const clean = () => ({ found: false, files: 0, walletDirs: [] })
+		await disposableInit(file)
+		const clean = () => ({ found: false, files: 0, skipped: 0, walletDirs: [] })
 		const opts = { file, root: checkout, keyedRoot: checkout, scan: clean }
 
 		chmodSync(file, 0o640)
@@ -67,31 +73,31 @@ describe("the disposable fallback", () => {
 		chmodSync(file, 0o600)
 		expect(() => assertOwnerOnly(file, (process.getuid?.() ?? 0) + 1)).toThrow("another user")
 		await expect(disposableExec(["verify", "x"], { ...opts, keyedRoot: keys })).rejects.toThrow("keyed worktree")
-		await expect(disposableExec(["disposable", "destroy"], opts)).rejects.toThrow("not another disposable")
+		await expect(disposableExec(["disposable", "destroy", "x"], opts)).rejects.toThrow("not another disposable")
 
+		const accept = ["admin", "accept", "x"]
 		const [out, err] = [sink(), sink()]
-		const code = await disposableExec(["verify", "x"], { ...opts, argv: () => CHILD, out: out.stream, err: err.stream })
+		const code = await disposableExec(accept, { ...opts, argv: () => CHILD, out: out.stream, err: err.stream })
 		expect(code, err.text()).toBe(0)
 		expect(out.text()).toContain("argv clean")
-		expect(out.text()).toContain(`secret [redacted] admin ${admin} interim 1`)
+		expect(out.text()).toContain("secret [redacted] l1 absent interim 1")
 		expect(secretsIn(file).filter((s) => out.text().toLowerCase().includes(s))).toEqual([])
 
-		const leaked = () => ({ found: true, files: 1, walletDirs: [] })
-		expect(
-			await disposableExec(["verify", "x"], { ...opts, argv: () => CHILD, out: sink().stream, err: sink().stream, scan: leaked }),
-		).toBe(1)
+		const leaked = () => ({ found: true, files: 1, skipped: 0, walletDirs: [] })
+		expect(await disposableExec(accept, { ...opts, argv: () => CHILD, out: sink().stream, err: sink().stream, scan: leaked })).toBe(1)
 	})
 
-	it("destroy removes the keys, but not while a manifest still names their admin", async () => {
-		const dir = temp()
-		const [file, manifest] = [join(dir, "testnet.env"), join(dir, "testnet.json")]
-		const { admin } = await disposableInit(file)
-		writeFileSync(manifest, JSON.stringify({ l2: { admin: admin.toString() } }))
-		await expect(disposableDestroy(file, manifest)).rejects.toThrow("switch to the owner's admin first")
+	it("destroy removes the keys only once neither disposable account holds or is offered a role", async () => {
+		const file = join(temp(), "testnet.env")
+		const { deployer, admin } = await disposableInit(file)
+		const ref = { path: "testnet.json", m: MANIFEST }
+		const roles = (r: Partial<Roles>) => async (): Promise<Roles> => ({ ...NOBODY, ...r })
+
+		await expect(disposableDestroy(ref, { file, roles: roles({ pendingAdmin: admin.toField() }) })).rejects.toThrow("pendingAdmin")
+		await expect(disposableDestroy(ref, { file, roles: roles({ owner: deployer.toField() }) })).rejects.toThrow("owner")
 		expect(existsSync(file)).toBe(true)
 
-		writeFileSync(manifest, JSON.stringify({ l2: { admin: `0x${"0a".repeat(32)}` } }))
-		await disposableDestroy(file, manifest)
+		await disposableDestroy(ref, { file, roles: roles({}) })
 		expect(existsSync(file)).toBe(false)
 	})
 })

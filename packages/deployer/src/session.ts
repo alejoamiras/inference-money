@@ -15,7 +15,7 @@ import {
 import { resolveEndpoints, runIdFor } from "@inference-money/local-network"
 import { localManifestPath, readManifest } from "./manifest"
 import { TESTNET } from "./networks"
-import { aztecSecretFrom, KEYED } from "./secrets"
+import { aztecSecretFrom, KEYED, keyedEnv } from "./secrets"
 import { recordingNode, type SentTx, withBridgeWallet } from "./wallet"
 
 /** Fixed and public, like anvil's keys: a local deploy hands both admin roles to it, so the handover runs every time. */
@@ -50,7 +50,7 @@ export interface EndpointFlags {
 export function endpointsFor(ref: ManifestRef, flags: EndpointFlags = {}): Endpoints {
 	const nodeUrl = flags.node ?? ref.m.l2.nodeUrl
 	if (flags.l1Rpc) return { nodeUrl, l1RpcUrl: flags.l1Rpc }
-	if (ref.m.network === "testnet") return { nodeUrl, l1RpcUrl: process.env[KEYED.rpcUrl] || TESTNET.defaultL1RpcUrl }
+	if (ref.m.network === "testnet") return { nodeUrl, l1RpcUrl: keyedEnv()[KEYED.rpcUrl] || TESTNET.defaultL1RpcUrl }
 	return { nodeUrl, l1RpcUrl: resolveEndpoints(basename(dirname(ref.path))).anvilUrl }
 }
 

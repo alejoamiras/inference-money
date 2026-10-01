@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { StateDir, withStateDir } from "./run-state"
+import { StateDir, takeOverStaleLock, withStateDir } from "./run-state"
+
+/** Above every platform's pid range, so never alive. */
+const DEAD = 999_999_999
 
 const roots: string[] = []
 const root = () => {
@@ -24,10 +27,10 @@ describe("StateDir", () => {
 		expect(() => StateDir.acquire("smoke", "0xb", r).release()).not.toThrow()
 	})
 
-	it("survives a crashed holder, and writes owner-only files atomically", async () => {
+	it("takes over a crashed holder's lock, and writes owner-only files atomically", async () => {
 		const r = root()
 		const crashed = StateDir.acquire("smoke", "0xb", r)
-		writeFileSync(join(crashed.dir, "lock", "pid"), "999999999")
+		writeFileSync(join(crashed.dir, "lock"), String(DEAD))
 		await withStateDir(
 			"smoke",
 			"0xb",
@@ -42,5 +45,20 @@ describe("StateDir", () => {
 			r,
 		)
 		expect(() => StateDir.acquire("smoke", "0xb", r).release()).not.toThrow()
+	})
+
+	it("never removes a live holder's lock: a takeover that lost the race puts it back, and release leaves it", () => {
+		const r = root()
+		const s = StateDir.acquire("smoke", "0xb", r)
+		const lock = join(s.dir, "lock")
+		// Another process replaced the dead holder's lock after this one read it.
+		takeOverStaleLock(lock, DEAD)
+		expect(readFileSync(lock, "utf8")).toBe(String(process.pid))
+
+		writeFileSync(lock, "1")
+		s.release()
+		expect(() => StateDir.acquire("smoke", "0xb", r)).toThrow("in use by process 1")
+		writeFileSync(lock, "garbage")
+		expect(() => StateDir.acquire("smoke", "0xb", r)).toThrow("names no process")
 	})
 })

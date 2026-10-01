@@ -2,8 +2,8 @@ import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { Hex } from "viem"
 
 /**
- * The keyed-run variables. Each reaches only the environment of the one process a keyed run approved (env-exec) or a
- * `disposable exec` child, and is read from there alone: never from a file, never from argv.
+ * The keyed-run variables. A command gets them through its environment alone (env-exec's approved process, or a
+ * `disposable exec` child), never argv, and moves them out of process.env at startup ({@link holdSecrets}).
  */
 export const KEYED = {
 	l1PrivateKey: "TESTNET_L1_PRIVATE_KEY",
@@ -24,15 +24,34 @@ function scalar(name: string, env: NodeJS.ProcessEnv, bound: bigint): Hex {
 	return value as Hex
 }
 
-export const l1PrivateKeyFrom = (env: NodeJS.ProcessEnv = process.env): Hex => scalar(KEYED.l1PrivateKey, env, SECP256K1_N)
+export const l1PrivateKeyFrom = (env: NodeJS.ProcessEnv = keyedEnv()): Hex => scalar(KEYED.l1PrivateKey, env, SECP256K1_N)
 
 /** An Aztec account or deployer secret: a field element, as `op-remote`'s `generate fr` draws it. */
-export const aztecSecretFrom = (name: typeof KEYED.deployerSecret | typeof KEYED.adminSecret, env: NodeJS.ProcessEnv = process.env): Fr =>
+export const aztecSecretFrom = (name: typeof KEYED.deployerSecret | typeof KEYED.adminSecret, env: NodeJS.ProcessEnv = keyedEnv()): Fr =>
 	Fr.fromHexString(scalar(name, env, Fr.MODULUS))
 
 const SECRET_NAME = /PRIVATE_KEY|SECRET|MNEMONIC|PASSWORD|TOKEN|RPC_URL|API_KEY/i
 /** env-exec refuses shorter secret values, and a shorter needle would redact ordinary text. */
 const MIN_SECRET = 8
+
+let held: NodeJS.ProcessEnv | undefined
+
+/**
+ * Moves every credential-named variable out of `env` into this module, so no process this one spawns inherits one: a
+ * child that needs a value is handed it explicitly. node:child_process and `Bun.$` honor the deletion; `Bun.spawn`
+ * without `env` passes the environment the process started with, so every spawn here goes through node:child_process.
+ */
+export function holdSecrets(env: NodeJS.ProcessEnv = process.env): void {
+	held ??= {}
+	for (const [k, v] of Object.entries(env)) {
+		if (!SECRET_NAME.test(k)) continue
+		held[k] = v
+		delete env[k]
+	}
+}
+
+/** The credential-named variables: the held ones once {@link holdSecrets} ran, process.env's before. */
+export const keyedEnv = (): NodeJS.ProcessEnv => held ?? process.env
 
 /** The environment minus every variable that can carry a credential (an RPC URL often embeds an API key). */
 export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {

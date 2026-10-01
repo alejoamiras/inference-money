@@ -3,18 +3,22 @@ import { dirname, join, resolve } from "node:path"
 import type { Writable } from "node:stream"
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
+import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { signingKeyFor } from "@inference-money/bridge-core"
 import { aztecAddressOf } from "@inference-money/demo"
 import { REPO_ROOT } from "@inference-money/local-network"
 import type { Address } from "viem"
 import { generatePrivateKey, privateKeyToAddress } from "viem/accounts"
+import { type Command, parseInvocation } from "./cli-args"
 import { TESTNET } from "./networks"
 import { runRedacted } from "./redact"
 import { DISPOSABLE_DIR, keyedWorktree } from "./run-state"
-import { scanForSecrets } from "./scan"
+import { scanFailed, scanForSecrets, scanLine } from "./scan"
 import { aztecSecretFrom, KEYED, scrubbedEnv, secretNeedles } from "./secrets"
+import { endpointsFor, type ManifestRef } from "./session"
+import { readRoles } from "./token-reads"
 
-/** The P9 fallback's keys: owner-only, outside every checkout, until `destroy`. */
+/** The disposable fallback's keys: owner-only, outside every checkout, until `destroy`. */
 export const DISPOSABLE_FILE = join(DISPOSABLE_DIR, "testnet.env")
 /** Set in a `disposable exec` child alone: an `admin accept` under it records the admin as interim. */
 export const INTERIM_ADMIN = "BRIDGE_INTERIM_ADMIN"
@@ -65,6 +69,22 @@ function readValues(file: string): Record<string, string> {
 	return Object.fromEntries(entries)
 }
 
+const AS_ADMIN = [KEYED.adminSecret] as const
+/** The disposable values each command sees; any other command sees none. */
+const NEEDS: Partial<Record<Command, readonly string[]>> = {
+	deploy: [KEYED.l1PrivateKey, KEYED.deployerSecret, ADMIN_ADDRESS],
+	"demo fund": [KEYED.l1PrivateKey],
+	"admin accept": AS_ADMIN,
+	"admin propose": AS_ADMIN,
+	pause: AS_ADMIN,
+	"merchants add": AS_ADMIN,
+	"merchants off": AS_ADMIN,
+	"merchants on": AS_ADMIN,
+	"merchants delay": AS_ADMIN,
+	"merchants guardian": AS_ADMIN,
+	"merchants cancel": AS_ADMIN,
+}
+
 /** Test seams; the CLI passes none. */
 export interface ExecOptions {
 	file?: string
@@ -86,30 +106,41 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 	if (root !== resolve(opts.keyedRoot ?? keyedWorktree())) {
 		throw new Error("disposable exec runs from the keyed worktree only: bash scripts/keyed-worktree.sh sync, then run it there")
 	}
-	if (command[0] === "disposable") throw new Error("disposable exec runs a bridge command, not another disposable one")
-	const values = readValues(opts.file ?? DISPOSABLE_FILE)
+	const inv = parseInvocation(command)
+	if (inv.command.startsWith("disposable")) throw new Error("disposable exec runs a bridge command, not another disposable one")
+	const all = readValues(opts.file ?? DISPOSABLE_FILE)
+	const values = Object.fromEntries((NEEDS[inv.command] ?? []).flatMap((name) => (all[name] ? [[name, all[name]]] : [])))
 	const env = { ...scrubbedEnv(), ...values, [KEYED.rpcUrl]: TESTNET.defaultL1RpcUrl, [INTERIM_ADMIN]: "1" }
 	const needles = secretNeedles(env)
 	const argv = opts.argv ? opts.argv(command) : [CLI, ...command]
 	const code = await runRedacted(argv, needles, opts.out ?? process.stdout, opts.err ?? process.stderr, env)
 	const scan = (opts.scan ?? scanForSecrets)(root, needles)
-	if (scan.found || scan.walletDirs.length > 0) {
-		;(opts.err ?? process.stderr).write(`secrets:scan after the run: found=${scan.found} walletDirs=${scan.walletDirs.length}\n`)
+	if (scanFailed(scan)) {
+		;(opts.err ?? process.stderr).write(`secrets:scan after the run: ${scanLine(scan)}\n`)
 		return code === 0 ? 1 : code
 	}
 	return code
 }
 
+const finalRoles = (ref: ManifestRef) => readRoles(createAztecNodeClient(endpointsFor(ref).nodeUrl), ref.m, "finalized")
+
 /**
- * Deletes the disposable keys, refusing while `manifest` still names their interim admin: with the key gone, nobody
- * could ever hand the role over.
+ * Deletes the disposable keys once the finalized chain shows neither disposable account holding, or being offered, a
+ * role in `ref`'s deployment: with the keys gone, nobody could hand such a role over again, and a prune can undo a
+ * switch short of finalized. A failed read keeps the file.
  */
-export async function disposableDestroy(file = DISPOSABLE_FILE, manifest = join(REPO_ROOT, "deployments", "testnet.json")): Promise<void> {
+export async function disposableDestroy(ref: ManifestRef, opts: { file?: string; roles?: typeof finalRoles } = {}): Promise<void> {
+	const file = opts.file ?? DISPOSABLE_FILE
 	if (!existsSync(file)) return
 	const values = readValues(file)
-	const admin = (await accountOf(aztecSecretFrom(KEYED.adminSecret, values))).toString()
-	// Read raw: a manifest of any protocol version that names this admin blocks the delete.
-	const named = existsSync(manifest) && (JSON.parse(readFileSync(manifest, "utf8")) as { l2?: { admin?: string } }).l2?.admin === admin
-	if (named) throw new Error(`${manifest} still names the disposable admin ${admin}: switch to the owner's admin first`)
+	const accounts = await Promise.all(
+		[KEYED.deployerSecret, KEYED.adminSecret].map(async (name) => (await accountOf(aztecSecretFrom(name, values))).toField()),
+	)
+	const roles = await (opts.roles ?? finalRoles)(ref)
+	const held = Object.entries(roles).filter(([, holder]) => accounts.some((a) => a.equals(holder)))
+	if (held.length > 0) {
+		const names = held.map(([role]) => role).join(", ")
+		throw new Error(`As of the last finalized block, a disposable account holds or is offered ${names}: switch, then let it finalize.`)
+	}
 	rmSync(file)
 }

@@ -57,7 +57,7 @@ export interface Player extends CastMember {
 	address: AztecAddress
 }
 
-/** Registers `actors` in the session's wallet; users need the users' tag. */
+/** Users' secrets derive from the users' tag, so enlisting one needs it. */
 export async function enlist<A extends Actor>(s: Session, actors: readonly A[], tag?: string): Promise<Record<A, Player>> {
 	const players = {} as Record<A, Player>
 	for (const actor of actors) {
@@ -67,7 +67,6 @@ export async function enlist<A extends Actor>(s: Session, actors: readonly A[], 
 	return players
 }
 
-/** Deploys every player's account that is not deployed yet, through the sponsor. */
 export async function deployPlayers(s: Session, players: readonly Player[], log: Log): Promise<void> {
 	const fees = { accountDeploy: async () => sponsoredPayment(s.m) }
 	for (const p of players) await ensureAccount(s.wallet, p.secret, fees, log, p.actor)

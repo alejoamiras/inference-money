@@ -46,15 +46,15 @@ function fakeOps(over: Partial<SetupOps> & { finality?: SetupOps["final"]["final
 }
 
 describe("demo setup", () => {
-	it("publishes the users' tag only once both bindings are finalized, re-claiming a pruned one first", async () => {
+	it("publishes the users' tag and drops the secrets only once every claim is finalized, re-claiming a pruned one first", async () => {
 		const { store, current } = memoryStore()
-		const bobFinal = Promise.withResolvers<"finalized">()
-		const bobAnswers: Promise<"finalized" | "dropped">[] = [Promise.resolve("dropped"), bobFinal.promise]
+		const floatFinal = Promise.withResolvers<"finalized">()
+		const floatAnswers: Promise<"finalized" | "dropped">[] = [Promise.resolve("dropped"), floatFinal.promise]
 		let asked = 0
 		const finality = async (t: ClaimTicket) => {
-			if (seedOf(t) !== "bob") return "finalized" as const
+			if (seedOf(t) !== "galactica") return "finalized" as const
 			asked++
-			return bobAnswers.shift() as Promise<"finalized" | "dropped">
+			return floatAnswers.shift() as Promise<"finalized" | "dropped">
 		}
 		const { ops, calls } = fakeOps({ finality })
 		const published: string[] = []
@@ -62,10 +62,10 @@ describe("demo setup", () => {
 
 		while (asked < 2) await Bun.sleep(1)
 		expect(published).toEqual([])
-		expect(calls.reclaims).toEqual(["bob"])
+		expect(calls.reclaims).toEqual(["galactica"])
 		expect(current()?.tag).toMatch(/^[0-9a-f]{32}$/)
 
-		bobFinal.resolve("finalized")
+		floatFinal.resolve("finalized")
 		await run
 		expect(calls.claims).toEqual(["alice", "bob", "galactica"])
 		expect(published).toHaveLength(1)

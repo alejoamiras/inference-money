@@ -181,13 +181,13 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 		const { wallet, owner, manifest: m, manifestPath } = harness()
 		const secret = Fr.random()
 		await ok("admin", "propose", manifestPath, (await accountFor(wallet, secret)).toString())
-		const next = await acceptAdmin(wallet, m, secret, () => {})
+		const next = await acceptAdmin(wallet, harness().node, m, secret, () => {})
 		try {
 			expect(await failing({ ...m, l2: { ...m.l2, admin: next.toString() as Hex } })).toEqual([])
 			expect(await failing()).toEqual(["bridge owner == admin", "merchant admin == admin"])
 		} finally {
 			await proposeAdmin(wallet, m, next, owner, sponsored())
-			await acceptAdmin(wallet, m, LOCAL_ADMIN_SECRET, () => {})
+			await acceptAdmin(wallet, harness().node, m, LOCAL_ADMIN_SECRET, () => {})
 		}
 		expect(await failing()).toEqual([])
 	}, 900_000)

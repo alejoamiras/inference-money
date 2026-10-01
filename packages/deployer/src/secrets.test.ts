@@ -35,6 +35,18 @@ describe("keyed-run secrets", () => {
 		expect(out.toLowerCase()).not.toContain(KEY.slice(2))
 	})
 
+	it("holds every credential out of process.env: its readers still see it, a process spawned after does not", () => {
+		const script = [
+			`import { spawnSync } from "node:child_process"`,
+			`import { aztecSecretFrom, holdSecrets } from "${join(import.meta.dir, "secrets.ts")}"`,
+			"holdSecrets()",
+			`const child = spawnSync(process.execPath, ["-e", "console.log(process.env.TESTNET_ADMIN_SECRET ?? 'absent')"])`,
+			`console.log(aztecSecretFrom("TESTNET_ADMIN_SECRET").toString(), process.env.TESTNET_ADMIN_SECRET ?? "absent", String(child.stdout).trim())`,
+		].join("\n")
+		const r = Bun.spawnSync([process.execPath, "-e", script], { env: { PATH: process.env.PATH ?? "", TESTNET_ADMIN_SECRET: FR } })
+		expect(String(r.stdout).trim(), String(r.stderr)).toBe(`${FR} absent absent`)
+	})
+
 	it("takes needles from every credential-named variable, in every form, and nothing else", () => {
 		const needles = secretNeedles({ TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: RPC, PATH: "/usr/bin:/bin", X_TOKEN: "short" })
 		expect(needles).toContain(KEY)

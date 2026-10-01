@@ -6,7 +6,7 @@ const COMMANDS = {
 	"admin propose": { args: ["manifest", "address"] },
 	"disposable init": { args: [] },
 	"disposable exec": { args: ["command..."] },
-	"disposable destroy": { args: [] },
+	"disposable destroy": { args: ["manifest"] },
 	"merchants add": { args: ["manifest", "account..."] },
 	"merchants off": { args: ["manifest", "account"] },
 	"merchants on": { args: ["manifest", "account"] },

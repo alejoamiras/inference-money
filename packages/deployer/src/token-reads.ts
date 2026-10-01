@@ -1,10 +1,11 @@
-import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { BlockNumber } from "@aztec-labs/foundation/branded-types"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import { DelayedPublicMutableValues } from "@aztec-labs/stdlib/delayed-public-mutable"
 import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
-import { delayAt, MERCHANT_MIN_DELAY, tokenArtifact } from "@inference-money/bridge-core"
+import { type BridgeManifest, delayAt, MERCHANT_MIN_DELAY, tokenArtifact, tokenBridgeArtifact } from "@inference-money/bridge-core"
 
 /** A delayed slot's delay in force at `at`, the one scheduled to follow, and when that takes over. */
 export interface DelayState {
@@ -13,10 +14,39 @@ export interface DelayState {
 	changeAt: bigint
 }
 
-export function tokenSlot(field: string): Fr {
-	const layout = tokenArtifact.storageLayout[field]
-	if (!layout) throw new Error(`the token artifact has no ${field} storage`)
-	return layout.slot
+/** A storage field's slot in `artifact`'s layout, `offset` fields into its packed value. */
+export function layoutSlot(artifact: ContractArtifact, field: string, offset = 0): Fr {
+	const layout = artifact.storageLayout[field]
+	if (!layout) throw new Error(`${artifact.name} has no ${field} storage`)
+	return layout.slot.add(new Fr(offset))
+}
+
+export const tokenSlot = (field: string): Fr => layoutSlot(tokenArtifact, field)
+
+type Tip = "latest" | "finalized"
+
+export const publicReader =
+	(node: Pick<AztecNode, "getPublicStorageAt">, contract: string, tip: Tip = "latest") =>
+	(slot: Fr) =>
+		node.getPublicStorageAt(tip, AztecAddress.fromStringUnsafe(contract), slot)
+
+/** The bridge's owner and the token's merchant admin, each with its proposed successor (zero: none). */
+export interface Roles {
+	owner: Fr
+	pendingOwner: Fr
+	admin: Fr
+	pendingAdmin: Fr
+}
+
+export async function readRoles(node: Pick<AztecNode, "getPublicStorageAt">, m: BridgeManifest, tip: Tip = "latest"): Promise<Roles> {
+	const [b, t] = [publicReader(node, m.l2.bridge.address, tip), publicReader(node, m.l2.token.address, tip)]
+	const [owner, pendingOwner, admin, pendingAdmin] = await Promise.all([
+		b(layoutSlot(tokenBridgeArtifact, "owner")),
+		b(layoutSlot(tokenBridgeArtifact, "pending_owner")),
+		t(layoutSlot(tokenArtifact, "merchant_admin")),
+		t(layoutSlot(tokenArtifact, "pending_merchant_admin")),
+	])
+	return { owner, pendingOwner, admin, pendingAdmin }
 }
 
 async function delayOf(node: Pick<AztecNode, "getPublicStorageAt">, token: AztecAddress, slot: Fr, block: number, at: bigint) {

@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { FeeJuicePaymentMethodWithClaim } from "@aztec-labs/aztec.js/fee"
 import type { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
-import { type BridgeManifest, sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
+import { type BridgeManifest, L2_DONE, sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
 import { REPO_ROOT } from "@inference-money/local-network"
 import type { Hex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
@@ -17,7 +17,7 @@ import type { DeployOptions } from "./local"
 import { writeManifest } from "./manifest"
 import { TESTNET } from "./networks"
 import { probeNetwork } from "./preflight"
-import { aztecSecretFrom, KEYED, l1PrivateKeyFrom, scrubbedEnv } from "./secrets"
+import { aztecSecretFrom, KEYED, keyedEnv, l1PrivateKeyFrom, scrubbedEnv } from "./secrets"
 import { accountFor } from "./session"
 import { assertAllPass, verifyDeployment } from "./verify"
 import { withBridgeWallet } from "./wallet"
@@ -38,7 +38,7 @@ export function buildFresh(): BridgeEvmArtifacts {
 }
 
 /** The L1 side of a keyed testnet run: its key and RPC, from the run's environment alone. */
-export function testnetL1(env: NodeJS.ProcessEnv = process.env): { l1: L1Signer; l1RpcUrl: string; l1PrivateKey: Hex } {
+export function testnetL1(env: NodeJS.ProcessEnv = keyedEnv()): { l1: L1Signer; l1RpcUrl: string; l1PrivateKey: Hex } {
 	const l1PrivateKey = l1PrivateKeyFrom(env)
 	const l1RpcUrl = env[KEYED.rpcUrl] || TESTNET.defaultL1RpcUrl
 	return { l1: l1Signer(l1RpcUrl, TESTNET.l1ChainId, privateKeyToAccount(l1PrivateKey)), l1RpcUrl, l1PrivateKey }
@@ -110,7 +110,7 @@ export async function deployTestnet(opts: DeployOptions): Promise<BridgeManifest
 		})
 		const deployer = await accountFor(wallet, deployerSecret)
 		if (opts.merchantDelay !== undefined) {
-			await tokenOf(wallet, m).methods.set_merchant_delay!(opts.merchantDelay).send({ from: deployer })
+			await tokenOf(wallet, m).methods.set_merchant_delay!(opts.merchantDelay).send({ from: deployer, wait: L2_DONE })
 		}
 		await proposeAdmin(wallet, m, deployer, admin)
 		log(`handover proposed to ${admin}: accept it with \`bridge admin accept\``)

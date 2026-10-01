@@ -2,7 +2,6 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
-import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
 import {
 	assertNetworkIdentity,
@@ -22,7 +21,7 @@ import { type Abi, type Address, erc20Abi, type Hex, type PublicClient } from "v
 import { type BridgeEvmArtifacts, maskImmutables } from "./evm"
 import type { Check } from "./preflight"
 import { standardContractAddresses } from "./standard"
-import { type DelayState, entryDelay, guardianDelay } from "./token-reads"
+import { type DelayState, entryDelay, guardianDelay, layoutSlot, publicReader, readRoles } from "./token-reads"
 
 const check = (name: string, ok: boolean, detail: string): Check => ({ name, ok, detail })
 const warn = (name: string, detail: string): Check => ({ name, ok: true, warn: true, detail })
@@ -93,19 +92,9 @@ async function verifyInstances(node: AztecNode, m: BridgeManifest): Promise<Chec
 	return out
 }
 
-/** A storage field's slot in `artifact`'s layout, `offset` fields into its packed value. */
-function layoutSlot(artifact: ContractArtifact, field: string, offset = 0): Fr {
-	const layout = artifact.storageLayout[field]
-	if (!layout) throw new Error(`${artifact.name} has no ${field} storage`)
-	return layout.slot.add(new Fr(offset))
-}
-
-const reader = (node: AztecNode, contract: string) => (slot: Fr) =>
-	node.getPublicStorageAt("latest", AztecAddress.fromStringUnsafe(contract), slot)
-
 async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
 	const { proxy, token, bridge } = m.l2
-	const [b, p, t] = [reader(node, bridge.address), reader(node, proxy.address), reader(node, token.address)]
+	const [b, p, t] = [publicReader(node, bridge.address), publicReader(node, proxy.address), publicReader(node, token.address)]
 	// A PublicImmutable's packed value starts at its slot: the bridge config is (token_minter_proxy, token, portal).
 	const [bProxy, bToken, bPortal, bPaused, pOwner, pToken, pBridge, tDecimals, tMinter, tAuth] = await Promise.all([
 		b(layoutSlot(tokenBridgeArtifact, "config")),
@@ -141,13 +130,7 @@ const ZERO = Fr.ZERO.toString()
 
 /** Both admin roles, the bridge's ownership and the merchant admin, against the expected handover state. */
 async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handover): Promise<Check[]> {
-	const [b, t] = [reader(node, m.l2.bridge.address), reader(node, m.l2.token.address)]
-	const [owner, pendingOwner, admin, pendingAdmin] = await Promise.all([
-		b(layoutSlot(tokenBridgeArtifact, "owner")),
-		b(layoutSlot(tokenBridgeArtifact, "pending_owner")),
-		t(layoutSlot(tokenArtifact, "merchant_admin")),
-		t(layoutSlot(tokenArtifact, "pending_merchant_admin")),
-	])
+	const { owner, pendingOwner, admin, pendingAdmin } = await readRoles(node, m)
 	const deployer = m.l2.bridge.deployer
 	if (handover !== "complete") {
 		return [
@@ -178,7 +161,7 @@ const delayCheck = (name: string, d: DelayState, setting: bigint, now: bigint): 
 async function verifyDelays(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
 	const token = AztecAddress.fromStringUnsafe(m.l2.token.address)
 	const list = await syncMerchantList(node, token)
-	const setting = (await reader(node, m.l2.token.address)(layoutSlot(tokenArtifact, "merchant_delay"))).toBigInt()
+	const setting = (await publicReader(node, m.l2.token.address)(layoutSlot(tokenArtifact, "merchant_delay"))).toBigInt()
 	const guardian = await guardianDelay(node, token, list.block, list.at)
 	const entries = await Promise.all(
 		[...list.entries.keys()].map(async (a) => {
@@ -192,7 +175,7 @@ async function verifyDelays(node: AztecNode, m: BridgeManifest): Promise<Check[]
 /** Necessary, not sufficient: unclaimed deposits and unpaid withdrawals are liabilities too (integration's books). */
 async function verifyBacking(node: AztecNode, l1: PublicClient, m: BridgeManifest): Promise<Check[]> {
 	const [supply, reserve] = await Promise.all([
-		reader(node, m.l2.token.address)(layoutSlot(tokenArtifact, "total_supply")),
+		publicReader(node, m.l2.token.address)(layoutSlot(tokenArtifact, "total_supply")),
 		l1.readContract({ address: m.l1.usdc, abi: erc20Abi, functionName: "balanceOf", args: [m.l1.portal] }),
 	])
 	return [check("L2 supply ≤ portal USDC", supply.toBigInt() <= reserve, `${supply.toBigInt()} ≤ ${reserve}`)]

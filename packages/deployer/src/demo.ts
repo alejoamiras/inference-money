@@ -96,8 +96,8 @@ async function seedTicket(plan: SetupPlan, seed: Seed, store: PlanStore, ops: Se
 }
 
 /**
- * Binds both users and seeds the float, then publishes the users' tag only once both bindings are finalized: anyone
- * holding the tag could take a pruned binding. Until then the tag and every deposit secret stay in `store`.
+ * Binds both users and seeds the float, then publishes the users' tag and drops the deposit secrets only once every
+ * claim is finalized: anyone holding the tag could take a pruned binding, and a pruned claim needs its secret again.
  */
 export async function runSetup(store: PlanStore, ops: SetupOps, publish: (tag: string) => void): Promise<void> {
 	const plan = store.read() ?? { tag: newUsersTag(), drafts: {}, tickets: {} }
@@ -106,7 +106,7 @@ export async function runSetup(store: PlanStore, ops: SetupOps, publish: (tag: s
 	const tickets = {} as Record<Seed, ClaimTicket>
 	for (const seed of SEEDS) tickets[seed] = await seedTicket(plan, seed, store, ops)
 	for (const seed of SEEDS) await ops.claim(tickets[seed])
-	for (const user of USERS) await keepUntilFinal(tickets[user], ops.final)
+	for (const seed of SEEDS) await keepUntilFinal(tickets[seed], ops.final)
 	publish(plan.tag)
 	store.clear()
 }
@@ -117,7 +117,6 @@ const SEED_PLANS: Record<Seed, (p: Record<string, Player>) => DepositPlan> = {
 	galactica: (p) => ({ from: "alice", to: p.galactica!.address, kind: "public", amount: DEMO_SEED.galactica }),
 }
 
-/** The demo merchants' addresses, which derive from the deployment alone. */
 export const merchantAddresses = (ref: ManifestRef): Promise<AztecAddress[]> =>
 	Promise.all(MERCHANTS.map((actor) => aztecAddressOf(castMember(ref.m, actor))))
 
@@ -242,7 +241,7 @@ export function demoFund(ref: ManifestRef, log: Log): Promise<void> {
 			await fundDemoL1(rpc, s.m, anvilFaucet(rpc, s.m), log)
 			return
 		}
-		const key = l1PrivateKeyFrom(process.env)
+		const key = l1PrivateKeyFrom()
 		await fundDemoL1(rpc, s.m, signerFaucet(l1Signer(rpc, s.m.l1.chainId, privateKeyToAccount(key)), s.m), log)
 		const { galactica } = await enlist(s, ["galactica"] as const)
 		await deployPlayers(s, [galactica], log)

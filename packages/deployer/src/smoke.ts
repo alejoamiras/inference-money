@@ -13,6 +13,7 @@ import {
 	encodeTicket,
 	exitTicketFromTx,
 	exitToL1,
+	finalFate,
 	finishWithdrawal,
 	isExitWithdrawn,
 	L2_DONE,
@@ -64,7 +65,7 @@ export const EXPECTED_DELTAS: Balances = {
 }
 
 /** A step's L2 tx as it went to the node: enough to settle it after a crash, and to tell what the world sees. */
-interface Journaled {
+export interface Journaled {
 	step: SmokeStep
 	hash: string
 	feePayer: string
@@ -233,25 +234,32 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 	},
 }
 
-/** "landed" once checkpointed without a revert; "gone" once the node reports it dropped, or it reverted. */
-async function fateOf(s: Session, j: Journaled): Promise<"landed" | "gone"> {
+/**
+ * "landed" once checkpointed without a revert, as a step's own send waits; "gone" only on finalized evidence, so a
+ * step never runs twice. A tx this node lacks may sit in another's mempool until it expires: that, or a revert not yet
+ * finalized, fails the run until a rerun can tell.
+ */
+export async function fateOf(node: Session["node"], j: Journaled): Promise<"landed" | "gone"> {
+	const fate = await finalFate(node, j.hash, BigInt(j.expiresAt))
+	if (fate !== "unsettled") return fate
 	const hash = TxHash.fromString(j.hash)
-	if ((await s.node.getTxReceipt(hash)).isDropped()) return "gone"
-	const receipt = await waitForTx(s.node, hash, { ...L2_DONE, dontThrowOnRevert: true })
-	return receipt.hasExecutionSucceeded() ? "landed" : "gone"
+	if ((await node.getTxReceipt(hash)).isDropped()) {
+		const until = new Date(Number(j.expiresAt) * 1000).toISOString()
+		throw new Error(`The ${j.step} tx ${j.hash} is in no block, but may still land until ${until}: rerun after that.`)
+	}
+	if ((await waitForTx(node, hash, { ...L2_DONE, dontThrowOnRevert: true })).hasExecutionSucceeded()) return "landed"
+	throw new Error(`The ${j.step} tx ${j.hash} reverted in a block a prune could still undo: rerun once it is finalized.`)
 }
 
 /**
  * Settles a step whose tx went out before a crash: a landed one is done (an exit rebuilds its ticket from the tx), a
- * gone one runs again. A request's commitment cannot be read back from its tx, so an unfinished request is opened
- * anew, as is the request of a lost payment: the payment gate refuses that commitment until the lost tx expires.
+ * gone one runs again. A request's commitment cannot be read back from its tx, so an unfinished request is opened anew.
  */
 async function settleJournal(r: Run, step: SmokeStep): Promise<TourStep | undefined> {
 	const j = r.state.sent
 	if (j?.step !== step || !STORY[step].hidden || step === "request") return undefined
-	if ((await fateOf(r.s, j)) === "gone") {
+	if ((await fateOf(r.s.node, j)) === "gone") {
 		delete r.state.sent
-		if (step === "pay") r.state.done = r.state.done.filter((d) => d !== "request")
 		save(r)
 		return undefined
 	}
