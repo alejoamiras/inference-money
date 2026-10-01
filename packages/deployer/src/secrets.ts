@@ -1,5 +1,6 @@
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { Hex } from "viem"
+import { TESTNET } from "./networks"
 
 /**
  * The keyed-run variables. A command gets them through its environment alone (env-exec's approved process, or a
@@ -81,11 +82,20 @@ const forms = (value: string): string[] =>
 	/^0x[0-9a-f]+$/i.test(value) ? [value, value.slice(2)] : /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? urlForms(value) : [value]
 
 /**
+ * The committed default Sepolia endpoint, a valid SEPOLIA_RPC_URL, is public: as a needle it would match the source that
+ * pins it, and fail every scan.
+ */
+const isPublicEndpoint = (value: string): boolean =>
+	value.trim().replace(/\/+$/, "").toLowerCase() === TESTNET.defaultL1RpcUrl.toLowerCase()
+
+/**
  * Every credential-named variable of `env` in every form text could carry it, longest first, lowercased: hex with and
  * without 0x, and every URL form. A keyless environment yields none.
  */
 export function secretNeedles(env: NodeJS.ProcessEnv = process.env): string[] {
-	const values = Object.entries(env).flatMap(([k, v]) => (SECRET_NAME.test(k) && v && v.length >= MIN_SECRET ? [v] : []))
+	const values = Object.entries(env).flatMap(([k, v]) =>
+		SECRET_NAME.test(k) && v && v.length >= MIN_SECRET && !isPublicEndpoint(v) ? [v] : [],
+	)
 	return [...new Set(values.flatMap(forms).map((n) => n.toLowerCase()))].sort((a, b) => b.length - a.length)
 }
 

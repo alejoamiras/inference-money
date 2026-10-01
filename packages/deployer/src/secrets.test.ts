@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { TESTNET } from "./networks"
 import { aztecSecretFrom, containsSecret, l1PrivateKeyFrom, scrubbedEnv, secretNeedles } from "./secrets"
 
 const KEY: `0x${string}` = `0x${"0b".repeat(32)}`
@@ -47,13 +48,14 @@ describe("keyed-run secrets", () => {
 		expect(String(r.stdout).trim(), String(r.stderr)).toBe(`${FR} absent absent`)
 	})
 
-	it("takes needles from every credential-named variable, in every form, and nothing else", () => {
+	it("takes needles from every credential-named variable, in every form, and nothing else, not the public default RPC", () => {
 		const needles = secretNeedles({ TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: RPC, PATH: "/usr/bin:/bin", X_TOKEN: "short" })
 		expect(needles).toContain(KEY)
 		expect(needles).toContain(KEY.slice(2))
 		expect(needles).toContain("abc123defghi456jkl")
 		expect(needles.some((n) => n.includes("/usr/bin") || n === "short")).toBe(false)
 		expect(secretNeedles({ PATH: "/bin", HOME: "/home/x" })).toEqual([])
+		expect(secretNeedles({ SEPOLIA_RPC_URL: `${TESTNET.defaultL1RpcUrl.toUpperCase()}/` })).toEqual([])
 		expect(containsSecret(`log: ${KEY.slice(2).toUpperCase()}`, needles)).toBe(true)
 		expect(containsSecret(`tx 0x${"ab".repeat(31)}ff`, needles)).toBe(false)
 	})

@@ -44,6 +44,8 @@ A keyed command runs in a process whose environment the owner fills, one approva
 | `deployments/testnet-admin.env.example` | admin secret (generated) |
 | `deployments/testnet-fund.env.example` | L1 key, `SEPOLIA_RPC_URL` |
 
+`SEPOLIA_RPC_URL` is your own endpoint, or the committed public default (`networks.ts`), which the scan and the redaction treat as public.
+
 The deploy run never sees the admin secret, and the admin run never sees the L1 key. The deploy keys lose every role at deployment; `verify` fails if one keeps any.
 
 **Testnet, in order:** `admin address` (commit the printed address into the deploy template); `probe` + `deploy testnet` + `demo fund` (one run, one L1 key, which must already hold Sepolia ETH for gas and 50 Circle Sepolia USDC, since `demo fund` transfers what A_demo and B_demo lack and nothing checks first); `admin accept` + `merchants add <galactica> <supplier>` (their addresses: `demo status`); then, keyless, `demo setup` and `smoke --record deployments/testnet-tour.json`.
