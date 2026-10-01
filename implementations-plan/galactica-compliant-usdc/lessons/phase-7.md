@@ -18,3 +18,19 @@ Status: **green 2026-10-01.**
 4. **The public-recipient preflight is a pure check on a list synced whole** (`assertPublicRecipient(syncMerchantList(...), recipient)`), so the node never learns which recipient a deposit is for. It is not wired into `submitDeposit`: that would widen its node type for every caller, and the bridge refuses the claim anyway, leaving the deposit returnable.
 5. **The L2 does not assert a non-zero depositor**, though the plan's input-validation list names one. No message can name zero: a direct deposit names its caller and the bound router names the Permit2 signer it pulled from, so a zero depositor only fails to consume, like any other wrong one.
 6. The old app's e2e still deposits publicly to, and exits publicly from, the connected user account, which the rules now refuse. Its typecheck and component tests stay green; the e2e moves to the showcase in P10, as planned.
+
+## Codex, arc 3 (GPT-6 Astra, high; session `01a0f55a…4a0a`)
+
+**Round 1** (review of `galactica-compliant-usdc-messages..HEAD`): no theft, redirection, unbacked mint or binding bypass found; three findings, all verified against the code and fixed in `8867f55`.
+1. *Medium, accepted.* A deposit returned by someone else (say the recipient of a refused gift) left its depositor without the return's tx hash, which `exitTicketFromTx` needs. `depositFate(ticket, node, manifest)` now finds the tx that consumed the message by its nullifier and reads whether it paid the depositor; the binding spec recovers the stranger's payout from its deposit ticket alone.
+2. *Medium, accepted.* The first-claim race ran both claims through `Promise.allSettled`, so the loser could fail in the binding preflight once the winner landed, which proves nothing about the sequencer. The harness's `sendTogether` now holds every submission until both claims are proven against the unbound account; the spec asserts two submissions, one landing, and a nullifier rejection for the other.
+3. *Low, accepted.* The guard matched rule text, so `if false { assert(…) }` passed it. `flow_is` pins each guarded body's branches to its rule conditions and refuses loops, matches and closures; two mutants cover it (34 in all). The header now says the guard pins text and shape and the TXE suites prove enforcement.
+
+The round-1 prompt omitted the plan's two verbatim review rules (no over-engineering, comment quality); round 2 carries them, as every later arc prompt must.
+
+**Round 2** (same session, with the verbatim rules): not converged; three findings, all accepted and fixed in `d8f56a5`.
+1. *Medium.* One tx can batch a claim of deposit A with a return of deposit B for the same depositor and amount, so "the consuming tx emitted the depositor's withdrawal" does not prove A was returned. `depositFate` now reports `{ consumed, l2TxHash, withdrawal }`, with `withdrawal` documented as a candidate; finishing it pays the depositor either way.
+2. *Low.* `flow_is` required whitespace after `if`, so `if(false) { … }` passed; it now takes `if` followed by any non-identifier character (mutant `paren_branch`, 35 in all).
+3. *Low.* The recovery spec recorded the recovered withdrawal on the books but never collected it; it now withdraws on L1 and asserts the stranger's USDC rises by the deposit.
+
+**Round 3:** converged ("no material findings remain in arc 3 at `d8f56a5`").
