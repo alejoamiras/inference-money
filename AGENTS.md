@@ -37,6 +37,7 @@ bun run --cwd apps/showcase test:components      # vitest: components, build tar
 BRIDGE_MANIFEST=<file> bun run --cwd apps/showcase build   # a deployed manifest with its published demo; build:testnet pins deployments/testnet.json
 bun run test:e2e [-- tour.spec.ts]                # own network + deploy + sidecar + demo setup + build + Playwright, then reap
 bun run --cwd apps/showcase test:proving         # real proofs in the browser, unconstrained and on 2 CPUs → test-results/proving.json
+SHOWCASE_URL=<url> bun run --cwd apps/showcase test:testnet   # the served showcase, live on testnet (a Workers preview, or production)
 
 bun run bridge <command>                         # the operator CLI; every command and the keyed-run recipe: docs/operations.md
 bun run bridge verify deployments/testnet.json   # keyless strict read-back (--node/--l1-rpc: your own endpoints)

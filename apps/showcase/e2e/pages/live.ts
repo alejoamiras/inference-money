@@ -4,7 +4,7 @@ import { TESTIDS } from "../../src/lib/testids"
 
 /** One USDC in base units. */
 export const USDC = 1_000_000n
-/** The first open syncs every demo account into a fresh store. */
+/** The first open syncs every demo account into a fresh store; a long-lived testnet deployment takes longer. */
 const WALLET_READY_MS = 10 * 60_000
 /** A claim waits for its message, a payout for its epoch's proof. */
 const RUN_MS = 10 * 60_000
@@ -28,6 +28,8 @@ export interface FeedEntry {
 	step: string
 	chain: string
 	source: string
+	/** The tx on a public explorer, where the network has one. */
+	href?: string
 }
 
 const byField = (page: Page, name: string) => page.locator(`[data-testid="${TESTIDS.field}"][data-field="${name}"]`)
@@ -55,11 +57,12 @@ async function countRuns(page: Page): Promise<void> {
 }
 
 /** Live mode with the page's wallet open, after checking the page is cross-origin isolated (bb.js needs it). */
-export async function openLive(page: Page, reload = false): Promise<void> {
-	if (reload) await page.reload()
+export async function openLive(page: Page, opts: { reload?: boolean; readyMs?: number } = {}): Promise<void> {
+	if (opts.reload) await page.reload()
 	else await page.goto("/#live")
 	expect(await page.evaluate(() => crossOriginIsolated), "the page is cross-origin isolated").toBe(true)
-	await expect(page.getByTestId(TESTIDS.walletStatus)).toHaveAttribute("data-status", "ready", { timeout: WALLET_READY_MS })
+	const timeout = opts.readyMs ?? WALLET_READY_MS
+	await expect(page.getByTestId(TESTIDS.walletStatus)).toHaveAttribute("data-status", "ready", { timeout })
 	await expect(page.getByTestId(TESTIDS.tryIt)).toBeEnabled()
 	await countRuns(page)
 }
@@ -105,6 +108,7 @@ export function feed(page: Page): Promise<FeedEntry[]> {
 				step: (r as HTMLElement).dataset.step ?? "",
 				chain: (r as HTMLElement).dataset.chain ?? "",
 				source: r.querySelector(`[data-testid="${sourceId}"]`)?.textContent ?? "",
+				href: r.querySelector("a")?.getAttribute("href") ?? undefined,
 			})),
 		TESTIDS.feedSource,
 	)

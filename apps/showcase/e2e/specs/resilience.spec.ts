@@ -47,7 +47,7 @@ test("[A13] a reload while a payout is on its way resumes it, and it pays out on
 	await door.held
 	const mark = me.rpc.calls.length
 	expect(await usdcOf(run.anvilUrl, manifest, aDemo), "nothing paid out before the reload").toBe(held)
-	await openLive(page, true)
+	await openLive(page, { reload: true })
 	door.release("abort")
 
 	await expect.poll(() => usdcOf(run.anvilUrl, manifest, aDemo), { timeout: PAID_OUT_MS }).toBe(held + 3n * CENT)

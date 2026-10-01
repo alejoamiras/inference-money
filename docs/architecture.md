@@ -22,6 +22,16 @@
 
 The depositor is the address the USDC came from on Ethereum. A direct deposit names its caller. `Permit2DepositRouter` calls the portal's router-only `depositToAztec{Public,Private}For`, which name the Permit2 signer the router pulled from. The portal accepts those calls from one router only: the one `initialize` bound after checking that it names this portal and its token. A claim must present the same depositor; any other address hashes to a message that does not exist.
 
+## Showcase
+
+`apps/showcase` is a static page that shows the bridge with the demo cast, never a visitor's own wallet. A build embeds one manifest, that deployment's recorded acceptance run (the tour) and the users' tag; nothing overrides them at runtime.
+
+**Guided tour.** Replays the recording scene by scene: each step's verdict, and what an observer of each chain sees, linked to the real txs on testnet. It loads no Aztec SDK and sends nothing.
+
+**Try it yourself.** The page's own embedded wallet (one PXE in the browser, its store in OPFS per deployment) holds the cast's accounts, whose keys are public, and signs A_demo's and B_demo's Ethereum txs the same way. A step is checked before anything is proven: a refusal quotes the contract's rule and sends nothing. A step the float can't afford replays the recording and says so. Unfinished cross-chain steps (a deposit to claim, a withdrawal to pay out) and payment records persist in `localStorage` per deployment, so a reload resumes them; the page pays a withdrawal out once its epoch's proof is on Ethereum. On a nullifier conflict with another visitor, the page checks its own last send before one retry.
+
+**Headers.** COOP and COEP make the page cross-origin isolated, which bb.js's threaded wasm needs. The CSP lets it connect only to itself, the Aztec node, the L1 RPC and, when it proves, bb.js's CRS hosts, and frames nothing.
+
 ## Merchant token
 
 `contracts/aztec/token` is aztec-standards' Token with a merchant list and its rules. Every upstream function keeps its ABI and upstream's storage comes first, so integrations written against upstream keep working.
