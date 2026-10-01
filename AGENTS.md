@@ -7,7 +7,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | Path | What |
 |---|---|
 | `contracts/evm` | Foundry: `TokenPortal` (L1 escrow, Aztec messaging) and `Permit2DepositRouter` |
-| `contracts/aztec` | Aztec.nr: `token` (the merchant fork of aztec-standards' Token), `token_bridge`, `token_minter_proxy`, `claim_secret`, `merchant_stamp`, `keystone` (cross-toolchain vectors) |
+| `contracts/aztec` | Aztec.nr: `token` (the merchant fork of aztec-standards' Token), `token_bridge`, `token_minter_proxy`, `claim_secret`, `merchant_stamp`, `portal_messages` (the L1↔L2 message contents), `keystone` (cross-toolchain vectors) |
 | `packages/bridge-core` | Framework-agnostic protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw, the manifest schema, the merchant list and payment requests |
 | `packages/local-network` | Per-run anvil + Aztec local network (`toolchain.json`'s node): registry-claimed ports, owned process groups |
 | `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
