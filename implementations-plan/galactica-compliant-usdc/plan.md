@@ -1119,7 +1119,7 @@ Pass: green locally on a fresh network, and green in CI within 90 min.
 
 Layers: browser e2e, local network.
 
-**P13. Testnet live check.**
+**P13. Testnet live check.** ✓ 2026-10-01 (green against the hosted Workers preview of `1e4bb74`: the served build is the committed deployment, all four cheats refused with nothing sent, galactica's refund proven in the browser, A_demo's deposit; 2.7 min; [lessons](lessons/phase-13.md))
 
 Work:
 - `playwright.testnet.config.ts`: `baseURL` is `SHOWCASE_URL`. For this phase that's the hosted Workers preview URL of the showcase branch (Ask 8), so headers, CSP and isolation are tested as served. A local `vite preview` is only for development.
