@@ -983,7 +983,7 @@ Pass:
 
 Layers: unit, integration, local end to end.
 
-**P9. Testnet, through keyed runs the owner approves one by one.**
+**P9. Testnet, through keyed runs the owner approves one by one.** ✓ 2026-10-01 (bridge `0x0c179967…1924`, deployed by the owner's imported Sepolia key; every keyed run exit 0 after two scan/harness fixes; demo setup resumed after an out-of-gas deposit, now sent with headroom; smoke 25 min, every leg settled; arc-4 boundary codex pass converged in 4 rounds; [lessons](lessons/phase-9.md))
 
 Each request follows the keyed-run recipe (Off-chain surfaces); `<scan-trap>` is defined there.
 

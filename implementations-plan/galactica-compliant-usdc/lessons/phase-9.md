@@ -1,6 +1,6 @@
 # Phase 9 — Testnet, through keyed runs
 
-Status: **in progress**: step 1 done (the admin address `0x094fe37a…6915`); step 2 deployed and funded (bridge `0x0c179967…1924`, `deployments/testnet.json`), its scan a false positive (finding 4); step 3 done (admin accepted, galactica and supplier listed); demo setup and the recorded smoke are next.
+Status: **done** 2026-10-01. The gate passed in full: strict `verify --tour` green, `demo status`, `secrets:scan` clean, HEAD clean and pushed.
 
 ## Findings
 
@@ -20,6 +20,16 @@ Status: **in progress**: step 1 done (the admin address `0x094fe37a…6915`); st
 | `deploy-dbc95cd0` | `probe:testnet`, `bridge deploy testnet`, `bridge demo fund` | deployed, verified, funded; exit 1 from the scan (finding 4) |
 | `deploy-scan-87b7d4a0` | `secrets:scan` alone, on the deploy template | `found=false`; exit 0 |
 | `admin-accept-016ec12e` | `bridge admin accept`, `bridge merchants add <galactica> <supplier>` | both roles accepted; 2 merchants in 1 tx; scan clean; exit 0 |
+
+## Demo setup and the acceptance run (keyless)
+
+| Run | Started | Took | Result |
+|---|---|---|---|
+| `demo setup` | 14:46Z | 1 min | bob's binding deposit out of gas (finding 5) |
+| `demo setup`, resumed | 15:37Z | 50 min | alice's stored ticket reused, bob's deposit re-sent, all three claims made in minutes; about 40 min waiting for them to finalize before publishing the users' tag |
+| `smoke --record` | 16:27Z | 25 min | passed: deposit + claim 1.5 min, request, pay and refund about 70 s each, both refusals 2–4 s, exit to L1 withdrawal about 20 min (the exit's epoch must be proven on L1) |
+
+The previous plan's smoke took 2 h because it waited for finality after every claim; this one waits only where the plan requires it.
 
 ## Codex, arc 4 boundary (GPT-6 Astra, high; session `01a0f807…a9e9`, account alejo-gmail)
 
