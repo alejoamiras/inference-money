@@ -156,11 +156,14 @@ if [ "${#filters[@]}" -eq 0 ]; then
     exit 1
   }
   missing=0
+  # Colour escapes stripped once. Never pipe into `grep -q` here: it exits at the first match, the writer dies of
+  # SIGPIPE, and pipefail turns a passing test into a missing one.
+  results=$(sed -E 's/\x1b\[[0-9;]*m//g' "$log")
   while IFS= read -r name; do
     [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
-    # Colour escapes stripped; the name must follow `Testing ` or a `::` module path, so an entry cannot be
-    # satisfied by a longer name ending in it. Root-level tests (keystone) print with no path.
-    if ! sed -E 's/\x1b\[[0-9;]*m//g' "$log" | grep -qE "Testing ([A-Za-z0-9_]+::)*${name} \.\.\. ok"; then
+    # The name must follow `Testing ` or a `::` module path, so an entry cannot be satisfied by a longer name ending
+    # in it. Root-level tests (keystone) print with no path.
+    if ! grep -qE "Testing ([A-Za-z0-9_]+::)*${name} \.\.\. ok" <<<"$results"; then
       echo "run-txe-tests.sh: required test '$name' did not pass" >&2
       missing=1
     fi
