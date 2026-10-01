@@ -1141,7 +1141,11 @@ Layers: live-testnet browser.
 
 ### Arc 6: hardening
 
-**P14. `/harden security medium` on `contracts/`, EVM and Noir.**
+**P14. `/harden security medium` on `contracts/`, EVM and Noir.** ✓ 2026-10-01 (run `2026-10-01-contracts` on `6f3b0b3`, six clusters × Claude + Codex; report: https://claude.ai/artifact/61eDLDu7BmAkdSTfKxw6sD; [lessons](lessons/phase-14.md))
+
+Triage of `verified.md`:
+- **C-001, Low, accepted:** a public deposit whose recipient is at or above the field modulus is locked for good, since no `AztecAddress` can rebuild its content. The fix is a range check in `TokenPortal._depositPublic` after the amount check. It changes the portal's bytes, so P15 runs the redeploy chain; the owner chose that on 2026-10-01 over fixing without a redeploy or documenting only.
+- Dropped at reduce: `transfer_public_to_public` has no merchant rule. That is the documented design (Rule proof shapes, above; `public_to_public_is_unrestricted`).
 
 Deliver the stakeholder report as an Artifact. The skill's `audit/` output is a vulnerability inventory, so it stays out of git (`audit/` goes in `.git/info/exclude`); the triage below is the committed record.
 
