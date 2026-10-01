@@ -10,7 +10,8 @@ import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
 /// @title Permit2DepositRouter
 /// @notice One signature + one transaction deposit into a single, immutably bound `TokenPortal`. The Permit2 witness
 /// binds the L2 intent (recipient, secret hash, public/private) to the signed transfer, and only the signer may
-/// submit it, so a leaked signature cannot be redirected. Ownerless: no sweep, no setters.
+/// submit it, so a leaked signature cannot be redirected. The portal's message names the signer as the depositor.
+/// Ownerless: no sweep, no setters.
 contract Permit2DepositRouter is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -25,7 +26,6 @@ contract Permit2DepositRouter is ReentrancyGuard {
     IERC20 public immutable TOKEN;
 
     error NotAContract();
-    error PortalNotInitialized();
     error ZeroAmount();
     /// @dev The L2 side holds amounts as u128; a larger deposit could never be claimed.
     error AmountExceedsL2Max();
@@ -47,11 +47,12 @@ contract Permit2DepositRouter is ReentrancyGuard {
         bool isPrivate
     );
 
-    /// @dev Reverts on an uninitialized portal: its `underlying` would bind the zero token forever.
-    constructor(ISignatureTransfer permit2, ITokenPortal portal) {
-        if (address(permit2).code.length == 0 || address(portal).code.length == 0) revert NotAContract();
-        IERC20 token = portal.underlying();
-        if (address(token) == address(0) || portal.l2Bridge() == bytes32(0)) revert PortalNotInitialized();
+    /// @dev Deployed before the portal is initialized: the portal's `initialize` refuses a router that names another
+    /// portal or token, so only code presence is checked here.
+    constructor(ISignatureTransfer permit2, ITokenPortal portal, IERC20 token) {
+        if (address(permit2).code.length == 0 || address(portal).code.length == 0 || address(token).code.length == 0) {
+            revert NotAContract();
+        }
         PERMIT2 = permit2;
         PORTAL = portal;
         TOKEN = token;
@@ -91,8 +92,8 @@ contract Permit2DepositRouter is ReentrancyGuard {
 
         TOKEN.forceApprove(address(PORTAL), amount);
         (key, index) = isPrivate
-            ? PORTAL.depositToAztecPrivate(amount, secretHash)
-            : PORTAL.depositToAztecPublic(aztecRecipient, amount, secretHash);
+            ? PORTAL.depositToAztecPrivateFor(_depositor(), amount, secretHash)
+            : PORTAL.depositToAztecPublicFor(_depositor(), aztecRecipient, amount, secretHash);
         TOKEN.forceApprove(address(PORTAL), 0);
         _checkSettled(before);
 
@@ -104,8 +105,8 @@ contract Permit2DepositRouter is ReentrancyGuard {
         return keccak256(abi.encode(DEPOSIT_WITNESS_TYPEHASH, aztecRecipient, secretHash, isPrivate));
     }
 
-    // The two guards below are virtual only so the formal suite's canaries can delete one rule at a time and
-    // watch the matching proof fail.
+    // The hooks below are virtual only so the formal suite's canaries can delete one rule at a time and watch the
+    // matching proof fail.
 
     function _checkIntent(uint256 amount, bytes32 aztecRecipient, bool isPrivate) internal pure virtual {
         if (amount == 0) revert ZeroAmount();
@@ -116,5 +117,11 @@ contract Permit2DepositRouter is ReentrancyGuard {
 
     function _checkSettled(uint256 before) internal view virtual {
         if (TOKEN.balanceOf(address(this)) != before) revert ResidualBalance();
+    }
+
+    /// @dev The Permit2 owner the funds were pulled from. The L2 side binds the deposit to it, so naming anyone else
+    /// would let a signer's deposit count as another's.
+    function _depositor() internal view virtual returns (address) {
+        return msg.sender;
     }
 }

@@ -31,8 +31,9 @@ contract WitnessHashTest is Test {
     Permit2DepositRouter internal router;
 
     function setUp() public {
+        MockUsdc usdc = new MockUsdc();
         router = new Permit2DepositRouter(
-            ISignatureTransfer(address(new MockPermit2())), ITokenPortal(address(new MockTokenPortal(new MockUsdc())))
+            ISignatureTransfer(address(new MockPermit2())), ITokenPortal(address(new MockTokenPortal(usdc))), usdc
         );
     }
 

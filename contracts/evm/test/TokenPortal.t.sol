@@ -10,19 +10,22 @@ import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
+import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
 import {FeeOnTransferERC20, HookERC20, PlainERC20, SenderSurchargeERC20} from "./mocks/TestTokens.sol";
 
-/// Direct calls into the portal, bypassing the router: the canonical hashes and the guards must hold for anyone who
-/// calls it, not only for the router's callers.
+/// Direct calls into the portal, bypassing the router: the message formats and the guards hold for anyone who calls
+/// it, and only the bound router may name a depositor other than the caller.
 contract TokenPortalTest is Test {
     bytes32 internal constant BRIDGE = bytes32(uint256(0x4B));
     bytes32 internal constant TO = bytes32(uint256(0x1234));
     bytes32 internal constant SECRET_HASH = bytes32(uint256(0x5EC));
 
     address internal alice = makeAddr("alice");
+    address internal signer = makeAddr("signer");
     CapturingInbox internal inbox;
     CapturingOutbox internal outbox;
     FakeRegistry internal registry;
+    StubRouter internal router;
 
     function setUp() public {
         inbox = new CapturingInbox();
@@ -31,8 +34,7 @@ contract TokenPortalTest is Test {
     }
 
     function _portal(IERC20 token) internal returns (TokenPortal portal) {
-        portal = new TokenPortal();
-        portal.initialize(address(registry), address(token), BRIDGE);
+        (portal, router) = initializedPortal(address(registry), address(token), BRIDGE);
     }
 
     /// A portal over a plain token, with `amount` minted to alice and approved.
@@ -44,11 +46,24 @@ contract TokenPortalTest is Test {
         token.approve(address(portal), amount);
     }
 
-    function test_depositPublic_commitsCanonicalHash() public {
+    function _publicContent(bytes32 to, uint256 amount, address depositor) internal pure returns (bytes32) {
+        return
+            Hash.sha256ToField(
+                abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", to, amount, depositor)
+            );
+    }
+
+    function _privateContent(uint256 amount, address depositor) internal pure returns (bytes32) {
+        return Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256,address)", amount, depositor));
+    }
+
+    function test_depositPublic_namesTheCaller() public {
         (TokenPortal portal, PlainERC20 token) = _funded(1_000);
-        bytes32 content = Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", TO, 1_000));
+        bytes32 content = _publicContent(TO, 1_000, alice);
         vm.expectEmit(address(portal));
-        emit TokenPortal.DepositToAztecPublic(TO, 1_000, SECRET_HASH, keccak256(abi.encode(content, SECRET_HASH)), 0);
+        emit TokenPortal.DepositToAztecPublic(
+            alice, TO, 1_000, SECRET_HASH, keccak256(abi.encode(content, SECRET_HASH)), 0
+        );
         vm.prank(alice);
         (bytes32 key, uint256 index) = portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
 
@@ -63,12 +78,78 @@ contract TokenPortalTest is Test {
         assertEq(token.balanceOf(alice), 0, "alice paid");
     }
 
-    function test_depositPrivate_commitsCanonicalHash() public {
+    function test_depositPrivate_namesTheCaller() public {
         (TokenPortal portal,) = _funded(7);
+        bytes32 content = _privateContent(7, alice);
+        vm.expectEmit(address(portal));
+        emit TokenPortal.DepositToAztecPrivate(alice, 7, SECRET_HASH, keccak256(abi.encode(content, SECRET_HASH)), 0);
         vm.prank(alice);
         portal.depositToAztecPrivate(7, SECRET_HASH);
-        assertEq(inbox.lastContentHash(), Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", 7)));
+        assertEq(inbox.lastContentHash(), content);
         assertEq(inbox.lastSecretHash(), SECRET_HASH);
+    }
+
+    /// The router pays, and the message and the event name the signer it passes, never the router.
+    function test_depositFor_namesTheRoutersDepositor() public {
+        PlainERC20 token = new PlainERC20("Tok", "TOK");
+        TokenPortal portal = _portal(token);
+        token.mint(address(router), 30);
+        vm.startPrank(address(router));
+        token.approve(address(portal), 30);
+
+        bytes32 pub = _publicContent(TO, 10, signer);
+        vm.expectEmit(address(portal));
+        emit TokenPortal.DepositToAztecPublic(signer, TO, 10, SECRET_HASH, keccak256(abi.encode(pub, SECRET_HASH)), 0);
+        portal.depositToAztecPublicFor(signer, TO, 10, SECRET_HASH);
+        assertEq(inbox.lastContentHash(), pub, "the public message names the signer");
+
+        bytes32 priv = _privateContent(20, signer);
+        vm.expectEmit(address(portal));
+        emit TokenPortal.DepositToAztecPrivate(signer, 20, SECRET_HASH, keccak256(abi.encode(priv, SECRET_HASH)), 1);
+        portal.depositToAztecPrivateFor(signer, 20, SECRET_HASH);
+        vm.stopPrank();
+
+        assertEq(inbox.lastContentHash(), priv, "the private message names the signer");
+        assertEq(token.balanceOf(address(portal)), 30, "the router paid");
+    }
+
+    /// Naming a depositor is the router's alone: a funded holder, the initializer and a stranger are all refused
+    /// before anything is pulled.
+    function test_depositFor_rejectsAnyoneButTheRouter() public {
+        (TokenPortal portal, PlainERC20 token) = _funded(100);
+        address[3] memory callers = [alice, address(this), makeAddr("stranger")];
+        for (uint256 i = 0; i < callers.length; i++) {
+            vm.startPrank(callers[i]);
+            vm.expectRevert(TokenPortal.NotRouter.selector);
+            portal.depositToAztecPublicFor(signer, TO, 100, SECRET_HASH);
+            vm.expectRevert(TokenPortal.NotRouter.selector);
+            portal.depositToAztecPrivateFor(signer, 100, SECRET_HASH);
+            vm.stopPrank();
+        }
+        assertEq(inbox.sent(), 0, "no message");
+        assertEq(token.balanceOf(alice), 100, "nothing pulled");
+    }
+
+    /// A router bound to another portal or token would deposit against the wrong reserve, so `initialize` refuses it
+    /// and binds nothing; the router naming both is accepted.
+    function test_initialize_refusesARouterBoundElsewhere() public {
+        PlainERC20 token = new PlainERC20("Tok", "TOK");
+        TokenPortal portal = new TokenPortal();
+        address otherPortal = address(new StubRouter(makeAddr("other portal"), address(token)));
+        address otherToken = address(new StubRouter(address(portal), makeAddr("other token")));
+        StubRouter bound = new StubRouter(address(portal), address(token));
+
+        vm.expectRevert(TokenPortal.RouterMismatch.selector);
+        portal.initialize(address(registry), address(token), BRIDGE, otherPortal);
+        vm.expectRevert(TokenPortal.RouterMismatch.selector);
+        portal.initialize(address(registry), address(token), BRIDGE, otherToken);
+        // No code, no binding to read.
+        vm.expectRevert();
+        portal.initialize(address(registry), address(token), BRIDGE, makeAddr("eoa"));
+        assertEq(address(portal.registry()), address(0), "a refused initialize bound a registry");
+
+        portal.initialize(address(registry), address(token), BRIDGE, address(bound));
+        assertEq(portal.router(), address(bound), "router");
     }
 
     function test_withdraw_consumesAndDebitsExactly() public {

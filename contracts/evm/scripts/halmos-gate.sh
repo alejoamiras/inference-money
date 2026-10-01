@@ -10,9 +10,11 @@ cd "$(dirname "$0")/.."
 
 EXPECTED=(
   "FormalPortalTest check_deposit_rejectsAmountAboveU128"
+  "FormalPortalTest check_depositFor_rejectsNonRouter"
   "FormalPortalTest check_initialize_rejectsNonInitializer"
   "FormalPortalTest check_initializedBindingsCannotChange"
   "FormalRouterTest check_deposit_conservesUserFunds"
+  "FormalRouterTest check_deposit_namesItsCallerAsDepositor"
   "FormalRouterTest check_deposit_privateRequiresZeroRecipient"
   "FormalRouterTest check_deposit_publicRequiresRecipient"
   "FormalRouterTest check_deposit_rejectsAmountAboveU128"
@@ -44,18 +46,20 @@ self_test() {
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: tmp is local
   trap "rm -rf '$tmp'" EXIT
-  good="Running 3 tests for test/FormalPortal.t.sol:FormalPortalTest
+  good="Running 4 tests for test/FormalPortal.t.sol:FormalPortalTest
 [PASS] check_deposit_rejectsAmountAboveU128(bytes32,uint256,bytes32) (paths: 1)
-[PASS] check_initialize_rejectsNonInitializer(address,address,bytes32) (paths: 3)
-[PASS] check_initializedBindingsCannotChange(address,bytes32) (paths: 2)
-Symbolic test result: 3 passed; 0 failed; time: 0.25s
-Running 5 tests for test/FormalRouter.t.sol:FormalRouterTest
+[PASS] check_depositFor_rejectsNonRouter(address,address,bytes32,uint256,bytes32) (paths: 3)
+[PASS] check_initialize_rejectsNonInitializer(address,address,bytes32,address) (paths: 3)
+[PASS] check_initializedBindingsCannotChange(address,bytes32,address) (paths: 2)
+Symbolic test result: 4 passed; 0 failed; time: 0.31s
+Running 6 tests for test/FormalRouter.t.sol:FormalRouterTest
 [PASS] check_deposit_conservesUserFunds(uint128,uint128,uint128,bool) (paths: 478)
+[PASS] check_deposit_namesItsCallerAsDepositor(address,uint128,bool) (paths: 8)
 [PASS] check_deposit_privateRequiresZeroRecipient(uint128,bytes32) (paths: 7)
 [PASS] check_deposit_publicRequiresRecipient(uint128) (paths: 6)
 [PASS] check_deposit_rejectsAmountAboveU128(uint256,bytes32,bool) (paths: 2)
 [PASS] check_deposit_rejectsZeroAmount(bytes32,bytes32,bool) (paths: 2)
-Symbolic test result: 5 passed; 0 failed; time: 22.73s"
+Symbolic test result: 6 passed; 0 failed; time: 24.10s"
   printf '%s\n' "$good" >"$tmp/good"
   verify "$tmp/good" 2>/dev/null || {
     echo "SELF-TEST FAIL: the expected log was rejected" >&2
@@ -65,7 +69,7 @@ Symbolic test result: 5 passed; 0 failed; time: 22.73s"
   sed 's/check_deposit_rejectsAmountAboveU128(bytes32,uint256,bytes32)/check_unrelated(uint256)/' "$tmp/good" >"$tmp/swap"
   sed '/check_deposit_publicRequiresRecipient/d' "$tmp/good" >"$tmp/missing"
   sed 's/^\[PASS\] check_deposit_rejectsZeroAmount/[FAIL] check_deposit_rejectsZeroAmount/;
-    s/^Symbolic test result: 5 passed; 0 failed/Symbolic test result: 4 passed; 1 failed/' "$tmp/good" >"$tmp/failing"
+    s/^Symbolic test result: 6 passed; 0 failed/Symbolic test result: 5 passed; 1 failed/' "$tmp/good" >"$tmp/failing"
   for bad in swap missing failing; do
     if verify "$tmp/$bad" 2>/dev/null; then
       echo "SELF-TEST FAIL: the '$bad' log was accepted" >&2

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.27;
 
+import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
 import {ISignatureTransfer} from "../src/interfaces/ISignatureTransfer.sol";
 import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
@@ -8,6 +9,7 @@ import {MockPermit2} from "./mocks/MockPermit2.sol";
 import {MockTokenPortal} from "./mocks/MockPortal.sol";
 import {MockUsdc} from "./mocks/MockUsdc.sol";
 import {
+    RouterNamesItself,
     RouterWithoutCap,
     RouterWithoutPrivateRule,
     RouterWithoutPublicRule,
@@ -26,6 +28,7 @@ import {ProofCanary} from "./mocks/ProofCanary.sol";
 ///   check_deposit_rejectsAmountAboveU128
 ///   check_deposit_privateRequiresZeroRecipient
 ///   check_deposit_publicRequiresRecipient
+///   check_deposit_namesItsCallerAsDepositor — for ANY caller, the portal is told the caller deposited
 ///
 /// Threat model: Permit2 is the success-always mock (signature validity is Permit2's own domain, pinned by the fork
 /// suite) and the portal is the non-hashing mock, because halmos 0.3.3 cannot model sha256. What is proven is the
@@ -39,6 +42,7 @@ contract FormalRouterTest is ProofCanary {
     uint256 internal constant USER_BALANCE = 1_000_000 * 1e6;
     uint256 internal constant MAX_DONATION = 1_000 * 1e6;
     string internal constant ACCEPTED = "a forbidden intent was accepted";
+    string internal constant MISNAMED = "the deposit named someone other than its caller";
 
     MockUsdc internal usdc;
     MockPermit2 internal permit2;
@@ -49,7 +53,7 @@ contract FormalRouterTest is ProofCanary {
         usdc = new MockUsdc();
         permit2 = new MockPermit2();
         portal = new MockTokenPortal(usdc);
-        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)));
+        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)), usdc);
         usdc.mint(USER, USER_BALANCE);
         vm.prank(USER);
         usdc.approve(address(permit2), type(uint256).max);
@@ -75,6 +79,10 @@ contract FormalRouterTest is ProofCanary {
 
     function check_deposit_publicRequiresRecipient(uint128 amountRaw) public {
         provePublicNamesRecipient(router, amountRaw);
+    }
+
+    function check_deposit_namesItsCallerAsDepositor(address caller, uint128 amountRaw, bool isPrivate) public {
+        proveNamesCaller(router, caller, amountRaw, isPrivate);
     }
 
     function proveConservation(
@@ -126,6 +134,20 @@ contract FormalRouterTest is ProofCanary {
         );
     }
 
+    /// Any funded caller other than the contracts in play: the L2 claim binds the deposit to whoever the portal is
+    /// told, so it must be the caller Permit2 pulled from, never the router or anyone else.
+    function proveNamesCaller(Permit2DepositRouter r, address caller, uint128 amountRaw, bool isPrivate) public {
+        vm.assume(caller != address(0) && caller != address(r) && caller != address(portal));
+        vm.assume(caller != address(permit2) && caller != address(usdc));
+        uint256 amount = bound(uint256(amountRaw), 1, USER_BALANCE);
+        usdc.mint(caller, amount);
+        vm.prank(caller);
+        usdc.approve(address(permit2), amount);
+        vm.prank(caller);
+        r.deposit(amount, isPrivate ? bytes32(0) : RECIPIENT, SECRET_HASH, isPrivate, 0, 1, hex"");
+        assertEq(portal.lastDepositor(), caller, MISNAMED);
+    }
+
     /// Runs one deposit and reports what moved, whether or not it reverted.
     function _depositOutcome(Permit2DepositRouter r, uint256 amount, uint256 donation, uint256 short, bool isPrivate)
         internal
@@ -166,14 +188,14 @@ contract FormalRouterTest is ProofCanary {
 
     // ── Canaries (forge) ─────────────────────────────────────────────────────────────────
 
-    function _mutantBase() internal view returns (ISignatureTransfer, ITokenPortal) {
-        return (ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)));
+    function _mutantBase() internal view returns (ISignatureTransfer, ITokenPortal, IERC20) {
+        return (ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)), usdc);
     }
 
     /// With the settle check deleted, a portal pulling 1 short leaves it in the router and the portal underpaid.
     function test_canary_conservation_failsWithoutTheSettleCheck() public {
-        (ISignatureTransfer p, ITokenPortal t) = _mutantBase();
-        RouterWithoutSettleCheck mutant = new RouterWithoutSettleCheck(p, t);
+        (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
+        RouterWithoutSettleCheck mutant = new RouterWithoutSettleCheck(p, t, token);
         _assertProofFails(
             abi.encodeCall(this.proveConservation, (mutant, 100e6, 5e6, 1, false)), "portal delta != amount"
         );
@@ -187,28 +209,37 @@ contract FormalRouterTest is ProofCanary {
     }
 
     function test_canary_zeroAmount_failsWithoutTheGuard() public {
-        (ISignatureTransfer p, ITokenPortal t) = _mutantBase();
-        RouterWithoutZeroCheck mutant = new RouterWithoutZeroCheck(p, t);
+        (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
+        RouterWithoutZeroCheck mutant = new RouterWithoutZeroCheck(p, t, token);
         _assertProofFails(abi.encodeCall(this.proveRejectsZero, (mutant, RECIPIENT, SECRET_HASH, false)), ACCEPTED);
     }
 
     function test_canary_u128Cap_failsWithoutTheGuard() public {
-        (ISignatureTransfer p, ITokenPortal t) = _mutantBase();
-        RouterWithoutCap mutant = new RouterWithoutCap(p, t);
+        (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
+        RouterWithoutCap mutant = new RouterWithoutCap(p, t, token);
         uint256 over = uint256(type(uint128).max) + 1;
         usdc.mint(USER, over);
         _assertProofFails(abi.encodeCall(this.proveRejectsAboveU128, (mutant, over, RECIPIENT, false)), ACCEPTED);
     }
 
     function test_canary_privateRule_failsWithoutTheGuard() public {
-        (ISignatureTransfer p, ITokenPortal t) = _mutantBase();
-        RouterWithoutPrivateRule mutant = new RouterWithoutPrivateRule(p, t);
+        (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
+        RouterWithoutPrivateRule mutant = new RouterWithoutPrivateRule(p, t, token);
         _assertProofFails(abi.encodeCall(this.provePrivateNamesNoRecipient, (mutant, 1e6, RECIPIENT)), ACCEPTED);
     }
 
     function test_canary_publicRule_failsWithoutTheGuard() public {
-        (ISignatureTransfer p, ITokenPortal t) = _mutantBase();
-        RouterWithoutPublicRule mutant = new RouterWithoutPublicRule(p, t);
+        (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
+        RouterWithoutPublicRule mutant = new RouterWithoutPublicRule(p, t, token);
         _assertProofFails(abi.encodeCall(this.provePublicNamesRecipient, (mutant, 1e6)), ACCEPTED);
+    }
+
+    /// The real router passes the body for a concrete caller, so the proof's success path is reachable rather than
+    /// vacuous; the mutant fails it on the naming assertion.
+    function test_canary_namesCaller_failsWhenTheRouterNamesItself() public {
+        proveNamesCaller(router, makeAddr("caller"), 1e6, true);
+        (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
+        RouterNamesItself mutant = new RouterNamesItself(p, t, token);
+        _assertProofFails(abi.encodeCall(this.proveNamesCaller, (mutant, USER, 1e6, false)), MISNAMED);
     }
 }

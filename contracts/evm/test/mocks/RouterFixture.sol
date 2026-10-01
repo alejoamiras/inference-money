@@ -12,7 +12,8 @@ import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./Aztec
 import {MockPermit2} from "./MockPermit2.sol";
 
 /// The router over a REAL `TokenPortal` whose Inbox message is captured: deposits are observed through the portal's
-/// balance and `lastMintWas*`. Permit2 is the recording mock; the Sepolia fork suite drives the real one.
+/// balance and `lastMintWas*`, which require the message to name `user`, the signer. Permit2 is the recording mock;
+/// the Sepolia fork suite drives the real one.
 abstract contract RouterFixture is Test {
     bytes32 internal constant L2_BRIDGE = bytes32(uint256(0xB41D6E));
     bytes32 internal constant RECIPIENT = bytes32(uint256(0x1234));
@@ -27,7 +28,8 @@ abstract contract RouterFixture is Test {
     Permit2DepositRouter internal router;
     IERC20 internal token;
 
-    /// Deploys the stack over `token_`, which must already exist; the user approves Permit2 like a real holder.
+    /// Deploys the stack over `token_`, which must already exist, in the deploy order: portal, router, then the
+    /// portal's initialize naming the router. The user approves Permit2 like a real holder.
     function _deployStack(IERC20 token_) internal {
         token = token_;
         permit2 = new MockPermit2();
@@ -35,8 +37,8 @@ abstract contract RouterFixture is Test {
         outbox = new CapturingOutbox();
         registry = new FakeRegistry(address(new FakeRollup(address(inbox), address(outbox))));
         portal = new TokenPortal();
-        portal.initialize(address(registry), address(token_), L2_BRIDGE);
-        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)));
+        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)), token_);
+        portal.initialize(address(registry), address(token_), L2_BRIDGE, address(router));
         vm.prank(user);
         token_.approve(address(permit2), type(uint256).max);
     }
@@ -52,10 +54,12 @@ abstract contract RouterFixture is Test {
     }
 
     function lastMintWasPublic(bytes32 to, uint256 amount) internal view returns (bool) {
-        return inbox.lastContentHash() == _model(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", to, amount));
+        return inbox.lastContentHash()
+            == _model(abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", to, amount, user));
     }
 
     function lastMintWasPrivate(uint256 amount) internal view returns (bool) {
-        return inbox.lastContentHash() == _model(abi.encodeWithSignature("mint_to_private(uint256)", amount));
+        return
+            inbox.lastContentHash() == _model(abi.encodeWithSignature("mint_to_private(uint256,address)", amount, user));
     }
 }
