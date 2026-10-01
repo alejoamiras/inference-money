@@ -39,3 +39,9 @@ Codex's arc-6 boundary review found the reverse direction of C-001, missed by bo
 ## Redeploy #1, superseded
 
 Deploy (`bf31f5a0`) and admin accept (`1f2bdca1`) both exited 0 on `7b2f442`: portal `0x897A91CC…A332`, router `0x3a383bDc…E0a4`, bridge `0x115d7e1a…5d9c`. It was superseded before its demo was published, because the exit fixes change the bridge. Its demo setup was stopped after galactica's claim. The cast's L1 float went back to the deployer: A_demo 20 USDC (`0x64d8d874…0598`) and B_demo 8 (`0xeab27270…f805`). That leaves the deployer at 80.68 USDC. Left on it, all demo funds: the 22 USDC the stopped setup had deposited, 10 of them claimed by galactica publicly.
+
+## Arc-6 review, round 2
+
+The resumed Codex pass on `dd330b4` reported the code changes converged, high confidence, with no new material findings. The encoder covers both exits and both returns. The portal refusal sits before the message and the burn. The tests exercise the ABI-decoded wide address and need the exact refusal text. The deployment finding stays open until the second redeploy commits `testnet.json`, `testnet-demo.json` and `testnet-tour.json` together and `verify --tour` and the live check pass.
+
+The full gate on `1b52e37` (the exit fixes) passed all eight lines: TXE 153/74/19, integration 42 of 42, the local deploy and strict verify, showcase components 64, e2e 7.
