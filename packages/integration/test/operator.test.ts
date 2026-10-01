@@ -11,7 +11,7 @@ import {
 	MERCHANT_MIN_DELAY,
 	signingKeyFor,
 } from "@inference-money/bridge-core"
-import { parseTour, tourHeader } from "@inference-money/demo"
+import { parseTour, TOUR_STEPS, tourHeader } from "@inference-money/demo"
 import {
 	acceptAdmin,
 	accountFor,
@@ -144,12 +144,23 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			expect(await failing()).toEqual([])
 		})
 
+		// A whole, well-formed run, so the deployment's identity is the only thing wrong with it.
 		it("a tour recorded on another deployment", async () => {
 			const foreign = join(dir, "foreign-tour.json")
 			const header = tourHeader(harness().manifest)
-			const step = { id: "claim", actor: "alice", action: "claim", to: "alice", amount: "1", verdict: "settled", world: [] }
+			const refused: Record<string, string> = { "transfer-refused": "transfer", "exit-refused": "exitDestination" }
+			const steps = TOUR_STEPS.map((id) => ({
+				id,
+				actor: "alice",
+				action: "transfer",
+				to: "bob",
+				amount: "1",
+				verdict: refused[id] ? "refused" : "settled",
+				...(refused[id] && { rule: refused[id] }),
+				world: [],
+			}))
 			const contracts = { ...header.contracts, bridge: `0x${"cd".repeat(32)}` }
-			writeFileSync(foreign, JSON.stringify({ ...header, contracts, steps: [step] }))
+			writeFileSync(foreign, JSON.stringify({ ...header, contracts, steps }))
 			const r = await bridge("verify", harness().manifestPath, "--tour", foreign)
 			expect(r.code, r.out).toBe(1)
 			expect(r.out).toContain("contracts.bridge")
