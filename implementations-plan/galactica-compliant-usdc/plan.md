@@ -593,7 +593,8 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
   - `amount > 0`;
   - non-zero recipient and depositor;
   - admin checks (zero or duplicate add, delay bounds, pending-only accept);
-  - message content binds `to`, amount and depositor.
+  - message content binds `to`, amount and depositor;
+  - an exit never pays the portal, and every withdraw names 20-byte addresses (P15, from the arc-6 review).
 - **TS:** zod on the manifest and the tour; preflights before signing or proving; CLI argument parsing.
 - **Secrets:** a missing variable is reported by name only.
 
@@ -1158,6 +1159,12 @@ Pass: the report's Artifact URL is recorded here, and every finding in `verified
 **P15. Fix the accepted findings.**
 
 Each fix lands with a test, and a moved literal moves in all three toolchains in the same commit.
+
+The arc-6 review (Codex, round 1) added two findings, Low and older than this arc. In both, an exit burned into a withdraw no L1 call could pay:
+- a raw call naming a recipient or caller wider than 20 bytes, since an ABI-decoded `EthAddress` holds any field;
+- a merchant exit to the portal, whose payout must lower its own balance.
+
+The owner chose to fix both and redeploy on 2026-10-01. The encoder now refuses the wide address and both exits refuse the portal; the details are in [lessons](lessons/phase-15.md).
 
 Validation gate, the contract checks of P1–P7 with the showcase in place of `apps/web`:
 ```

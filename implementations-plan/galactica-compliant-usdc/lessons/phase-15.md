@@ -1,6 +1,6 @@
 # Phase 15 — Fix the accepted findings
 
-Status: **in progress** 2026-10-01: C-001 fixed and tested; the gate matrix and the testnet redeploy chain follow.
+Status: **in progress** 2026-10-01: C-001 fixed and tested; the arc-6 review found two exit lock-ups, also fixed; the gate matrix and the testnet redeploy chain follow.
 
 ## C-001: the portal refuses a public recipient above the field
 
@@ -25,3 +25,17 @@ Tests:
 First run on `918ab66` (the fix and its docs): six of the eight lines green, two failures, neither in the fix:
 1. `compile.sh --check` found no `aztec-nargo` at the default `~/.aztec/versions/<noir>/bin`, which this host never installed. The gate runs with `NARGO` at the pinned nargo, as every earlier gate here did.
 2. `test:integration`, 41 of 42: the operator spec's "tour recorded on another deployment" wrote a one-step tour. The tour schema has required the whole acceptance run, in order, since P11, so verify rejected the schema before reaching the identity the test asserts on. Arc 5 never ran this suite. The spec now writes a whole, well-formed run whose only fault is the bridge's identity.
+
+Rerun of lines 2 and 6 on `eadb1d3`: both green (integration 42 of 42).
+
+## The exits' mirror of C-001 (arc-6 review, round 1)
+
+Codex's arc-6 boundary review found the reverse direction of C-001, missed by both audit legs. Both issues predate this plan's hardening arc, and the owner chose to fix them and redeploy.
+- **Address width.** An ABI-decoded `EthAddress` holds any field: the type defers its 20-byte check to the kernel, and that check covers only the message's outer portal address. A raw call could therefore pass a recipient or caller of 2^160 or more. The exit would burn the tokens into a withdraw message that Solidity's `address` arguments can never rebuild. `withdraw_content_hash` now refuses any address that does not fit 20 bytes, so every emitter (both exits and both returns) inherits the check. It is a messaged `lt` rather than `EthAddress::validate()`, whose bare range check gives a raw caller no reason. Keystone tests cover a wider recipient, a wider caller, and the widest address passing.
+- **The portal as recipient.** The portal pays out only if its balance drops by exactly the amount, and a transfer to itself drops nothing. A merchant exit to the portal therefore burned the tokens into a message no withdraw could ever pay. bridge-core already refused this, but a direct call skipped bridge-core. Both exits now assert `recipient != config.portal` before the burn. The TXE tests cover the public exit and the private merchant exit.
+- Not refused: a `caller_on_l1` that never calls `withdraw`, the portal included. That is the caller's own choice, the same as upstream, and a withdraw with a zero caller stays open to anyone.
+- TokenBridge class id: `0x0115c9fc…e0e6`, from `0x29d62ee5…2d2b`. The TXE floors are now 74 (bridge) and 19 (keystone).
+
+## Redeploy #1, superseded
+
+Deploy (`bf31f5a0`) and admin accept (`1f2bdca1`) both exited 0 on `7b2f442`: portal `0x897A91CC…A332`, router `0x3a383bDc…E0a4`, bridge `0x115d7e1a…5d9c`. It was superseded before its demo was published, because the exit fixes change the bridge. Its demo setup was stopped after galactica's claim. The cast's L1 float went back to the deployer: A_demo 20 USDC (`0x64d8d874…0598`) and B_demo 8 (`0xeab27270…f805`). That leaves the deployer at 80.68 USDC. Left on it, all demo funds: the 22 USDC the stopped setup had deposited, 10 of them claimed by galactica publicly.
