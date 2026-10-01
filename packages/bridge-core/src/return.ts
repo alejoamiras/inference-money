@@ -101,20 +101,25 @@ export async function returnDeposit(
 
 export type FateNode = NullifierNode & Pick<AztecNode, "getBlock">
 
-export type DepositFate = { state: "unconsumed" } | { state: "claimed" | "returned"; l2TxHash: TxHash }
+/**
+ * `withdrawal`: the consuming tx emitted a withdraw of this amount to the depositor, as a return does and a claim never
+ * does. It is a candidate, not proof of a return: one tx can batch this deposit's claim with another return or exit of
+ * the same amount to the same address. Either way, finishing it on L1 pays the depositor.
+ */
+export type DepositFate = { consumed: false } | { consumed: true; l2TxHash: TxHash; withdrawal: boolean }
 
 /**
- * What became of `t`'s deposit, read from the chain with the ticket alone, since whoever claimed or returned it need not
- * share the tx: "returned" when the tx that consumed its message paid the depositor, "claimed" otherwise. A return is
- * finished like any exit: `exitTicketFromTx(l2TxHash, t.depositor, amount, …)`, then `finishWithdrawal`.
+ * What consumed `t`'s message, read at a checkpoint from the chain with the ticket alone, since whoever claimed or
+ * returned it need not share the tx. A withdrawal is finished like any exit's: `exitTicketFromTx(l2TxHash, t.depositor,
+ * amount, …)`, then `finishWithdrawal`.
  */
 export async function depositFate(t: ClaimTicket, node: FateNode, m: BridgeManifest): Promise<DepositFate> {
 	const nullifier = await messageNullifier(t, m)
 	const [hit] = await node.findLeavesIndexes("checkpointed", MerkleTreeId.NULLIFIER_TREE, [nullifier])
-	if (!hit) return { state: "unconsumed" }
+	if (!hit) return { consumed: false }
 	const block = await node.getBlock(hit.l2BlockNumber, { includeTransactions: true })
 	const effect = block?.body.txEffects.find((e) => e.nullifiers.some((n) => n.equals(nullifier)))
 	if (!effect) throw new Error(`Block ${hit.l2BlockNumber} holds no tx with this deposit's nullifier.`)
 	const payout = await expectedExitMessage(t.depositor, t.draft.intent.amount, m)
-	return { state: effect.l2ToL1Msgs.some((msg) => msg.equals(payout)) ? "returned" : "claimed", l2TxHash: effect.txHash }
+	return { consumed: true, l2TxHash: effect.txHash, withdrawal: effect.l2ToL1Msgs.some((msg) => msg.equals(payout)) }
 }

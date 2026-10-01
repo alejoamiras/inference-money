@@ -100,7 +100,7 @@ flow_is() {
   if printf '%s' "$code" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
     violation "$1 has a loop, match or closure" || return 1
   fi
-  ifs=$(printf '%s' "$code" | grep -oE "(^|[^A-Za-z0-9_])if[[:space:]]+[^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
+  ifs=$(printf '%s' "$code" | grep -oE "(^|[^A-Za-z0-9_])if[^A-Za-z0-9_{][^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
     tr '\n' ' ' | sed -E 's/ $//')
   [ "$ifs" = "$3" ] || violation "$1 branches on [$ifs], not exactly on the rule conditions [$3]"
 }
@@ -334,6 +334,11 @@ true,"
     "assert(
 self.storage.funding_address.at(sender).get_note().address == recipient," \
     "if false { assert(
+self.storage.funding_address.at(sender).get_note().address == recipient,"
+  mutant paren_branch "exit_to_l1_private branches on [as_merchant (false)]" main \
+    "assert(
+self.storage.funding_address.at(sender).get_note().address == recipient," \
+    "if(false) { assert(
 self.storage.funding_address.at(sender).get_note().address == recipient,"
   mutant dead_loop "claim_private has a loop, match or closure" main \
     'assert(self.msg_sender() == recipient, "Only the recipient can claim privately");' \

@@ -61,7 +61,7 @@ describe("returnDeposit", () => {
 })
 
 describe("depositFate", () => {
-	it("reads the deposit's fate from the tx that consumed its message: none, a claim, or a return to the depositor", async () => {
+	it("finds the tx that consumed the deposit's message, and whether it emitted a withdrawal to the depositor", async () => {
 		const t = await ticket("private")
 		const nullifier = await messageNullifier(t, M)
 		const consumer = TxHash.random()
@@ -80,8 +80,8 @@ describe("depositFate", () => {
 					},
 				}),
 			}) as unknown as FateNode
-		expect(await depositFate(t, node(undefined), M)).toEqual({ state: "unconsumed" })
-		expect(await depositFate(t, node([new Fr(9)]), M)).toEqual({ state: "claimed", l2TxHash: consumer })
-		expect(await depositFate(t, node([new Fr(9), payout]), M)).toEqual({ state: "returned", l2TxHash: consumer })
+		expect(await depositFate(t, node(undefined), M)).toEqual({ consumed: false })
+		expect(await depositFate(t, node([new Fr(9)]), M)).toEqual({ consumed: true, l2TxHash: consumer, withdrawal: false })
+		expect(await depositFate(t, node([new Fr(9), payout]), M)).toEqual({ consumed: true, l2TxHash: consumer, withdrawal: true })
 	})
 })

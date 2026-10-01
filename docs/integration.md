@@ -41,8 +41,8 @@ bridge-core raises typed errors before any signature or proof: `PublicDepositToU
 ## Using bridge-core
 
 - **Before a first private claim**, `claimBinding(wallet, manifest, recipient, depositor)` answers `"binds"`: show "this binds the account to 0x… for good" and get consent. `fundingAddress(wallet, manifest, account)` reads the binding; only a wallet holding the account's keys can.
-- **A claim that reports `consumed-unknown`** found its message already consumed, by an earlier claim or by a return. It is never a mint: `depositFate(ticket, node, manifest)` reads which.
-- **Returns**: `waitReturnable`, then `returnDeposit(ticket, …)` gives an exit ticket for the depositor; `finishWithdrawal` pays it out on Ethereum, from any account. A depositor whose deposit someone else returned needs only the deposit ticket: `depositFate` names the return's tx, and `exitTicketFromTx(tx, depositor, amount, …)` builds the withdrawal.
+- **A claim that reports `consumed-unknown`** found its message already consumed, by an earlier claim or by a return. It is never a mint: `depositFate(ticket, node, manifest)` finds the consuming tx and whether it emitted a withdrawal to the depositor.
+- **Returns**: `waitReturnable`, then `returnDeposit(ticket, …)` gives an exit ticket for the depositor; `finishWithdrawal` pays it out on Ethereum, from any account. A depositor whose deposit someone else returned needs only the deposit ticket: `depositFate` names the return's tx, and `exitTicketFromTx(tx, depositor, amount, …)` builds the withdrawal. A tx that batches a claim with another return or exit of the same amount to the same address also reads as a withdrawal; finishing it pays the depositor either way.
 - **Merchant exits** pass `asMerchant: true`; the bridge proves the sender's listing at the tx's anchor block.
 - **Paying a request twice loses the second payment** (upstream completion is not single-use). `payRequest` refuses a request it has paid or is paying; a facilitator that pays without `payments.ts` needs the same guard.
 

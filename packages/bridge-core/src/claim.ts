@@ -19,7 +19,7 @@ import type { StageSink } from "./types"
 
 /**
  * "consumed-unknown": the message is already consumed, by an earlier claim or by a return; the nullifier alone cannot
- * tell which, so it is never reported as a mint. `depositFate` reads which from the consuming tx.
+ * tell which, so it is never reported as a mint. `depositFate` finds the consuming tx.
  */
 export type ClaimResult = "claimed" | "consumed-unknown"
 

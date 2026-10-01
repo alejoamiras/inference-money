@@ -1,7 +1,20 @@
 import { describe, expect, it } from "bun:test"
 import { claimBinding, depositFate, exitTicketFromTx, fundingAddress, NotFundingAddressError } from "@inference-money/bridge-core"
 import { type Address, isAddressEqual } from "viem"
-import { claimable, claimFor, deposit, l1Actor, l2Actor, l2Balances, openBooks, returnable, returnFor, USDC } from "./actors"
+import {
+	claimable,
+	claimFor,
+	deposit,
+	l1Actor,
+	l2Actor,
+	l2Balances,
+	openBooks,
+	returnable,
+	returnFor,
+	USDC,
+	usdcOf,
+	withdraw,
+} from "./actors"
 import { harness, INTEGRATION, sendTogether } from "./harness"
 
 /** The losing claim's binding repeats the winner's initialization nullifier. */
@@ -18,11 +31,11 @@ describe.skipIf(!INTEGRATION)("funding-address binding", () => {
 		expect(await boundTo(bob)).toBeUndefined()
 
 		const first = books.deposit(await deposit(l1, "private", bob, 2n * USDC))
-		expect(await depositFate(first, node, m)).toEqual({ state: "unconsumed" })
+		expect(await depositFate(first, node, m)).toEqual({ consumed: false })
 		await claimable(first, bob)
 		expect(await claimBinding(wallet, m, bob, first.depositor), "the app warns before this claim").toBe("binds")
 		expect(await claimFor(first)).toBe("claimed")
-		expect((await depositFate(first, node, m)).state).toBe("claimed")
+		expect(await depositFate(first, node, m)).toMatchObject({ consumed: true, withdrawal: false })
 		const bound = await boundTo(bob)
 		expect(bound !== undefined && isAddressEqual(bound, l1.account)).toBe(true)
 
@@ -37,12 +50,15 @@ describe.skipIf(!INTEGRATION)("funding-address binding", () => {
 		expect((await l2Balances(bob)).private).toBe(3n * USDC)
 		await returnable(stranger)
 		await returnFor(stranger)
-		// Bob keeps the return's hash; the stranger finds its payout from its own deposit ticket.
+		// Bob keeps the return's hash; the stranger finds its payout from its own deposit ticket and collects it on L1.
 		const fate = await depositFate(stranger, node, m)
-		if (fate.state !== "returned") throw new Error(`the refused deposit reads ${fate.state}`)
+		if (!(fate.consumed && fate.withdrawal)) throw new Error(`the refused deposit reads ${JSON.stringify(fate)}`)
 		const payout = await exitTicketFromTx(fate.l2TxHash, other.account, USDC, node, outbox, m)
 		if (typeof payout === "string") throw new Error(`the return's withdrawal reads ${payout}`)
 		books.withdrawal(payout)
+		const before = await usdcOf(other.account)
+		await withdraw(payout, other)
+		expect(await usdcOf(other.account)).toBe(before + USDC)
 		await books.settle()
 	})
 
