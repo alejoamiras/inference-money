@@ -5,7 +5,7 @@
 #
 #   - aztec-nargo's test runner does not resolve TXE oracles; @aztec-labs/txe serves them over JSON-RPC.
 #   - The server resolves dependency contracts from the crate's target/ as "<dep_package>-<Contract>.json", and
-#     they must be transpiled artifacts (the committed proxy; aztec-standards' published Token and test contracts).
+#     they must be transpiled artifacts (the committed token and proxy; aztec-standards' published test contracts).
 #   - The server's dependency set is the committed ../toolchain lockfile (frozen), never an ad-hoc install.
 #   - Pass criterion: the crate's committed txe-manifest.txt names every test that must pass (at least the crate's
 #     floor), so a dropped `mod test;` or a silently skipped file cannot read as green. nargo alone exits 0 on zero
@@ -59,7 +59,7 @@ case "$crate" in
     stage_standard test_authorization_contract-AuthorizationContract.json
     ;;
   token_bridge)
-    stage_standard token_contract-Token.json
+    cp "$aztec_root/token/target/merchant_token-Token.json" "$tb/target/"
     cp "$aztec_root/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json" "$tb/target/"
     ;;
 esac
