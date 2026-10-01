@@ -1045,6 +1045,7 @@ Work:
   - it writes `test-results/proving.json`;
   - if the quota doesn't bind the browser's workers on this host, the constrained run moves to a reference laptop, and P10 asks the owner for it.
 - **Decision rule:** live proving if the median is at most 90 s unconstrained and 240 s on 2 CPUs, and peak memory is at most 3 GB. Otherwise the build ships simulate-plus-recorded-proof. The decision goes in lessons and in this plan.
+  - **Decided 2026-10-01: live proving.** Per-step medians 7.6 s unconstrained and 21.4 s at worst on 2 CPUs (the quota bound), peak 1.25 GB; the open-and-pay pair takes 13.9 s and 40.3 s ([lessons](lessons/phase-10.md)).
 - **AGENTS.md:** remove the test-wallet grant rule, and update the layout, commands and the "one network per bundle" rule.
 
 Validation gate:
