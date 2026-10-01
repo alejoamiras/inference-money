@@ -24,8 +24,10 @@ owns_sidecar() {
 stop_sidecar() {
   owns_sidecar || return 0
   kill -TERM -- "-$SIDECAR_PGID" 2>/dev/null || true
-  for _ in $(seq 1 20); do owns_sidecar || return 0; sleep 1; done
+  for _ in $(seq 1 20); do owns_sidecar || break; sleep 1; done
   if owns_sidecar; then kill -KILL -- "-$SIDECAR_PGID" 2>/dev/null || true; fi
+  # Its wallet stores live in its own pid's dir, which a killed sidecar leaves behind, and `secrets:scan` fails on.
+  rm -rf "$HOME/.cache/inference-money/wallet-tmp/$SIDECAR_PGID"
 }
 
 # shellcheck disable=SC2317,SC2329  # invoked by the EXIT trap
