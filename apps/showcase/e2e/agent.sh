@@ -35,9 +35,14 @@ stop_sidecar() {
     for _ in $(seq 1 20); do owns_sidecar || break; sleep 1; done
     if owns_sidecar; then kill -KILL -- "-$SIDECAR_PGID" 2>/dev/null || true; fi
   fi
-  # Its wallet stores live in its own pid's dir, which a killed sidecar leaves behind and `secrets:scan` fails on; once
-  # no process holds that pid, nothing can be using the dir.
-  kill -0 "$SIDECAR_PGID" 2>/dev/null || rm -rf "$HOME/.cache/inference-money/wallet-tmp/$SIDECAR_PGID"
+  # Its wallet stores live in its own pid's dir, which a killed sidecar leaves behind and `secrets:scan` fails on. The
+  # dir goes once the whole group has exited; a group still standing, ours or a reuse of its id, keeps it.
+  for _ in $(seq 1 5); do kill -0 -- "-$SIDECAR_PGID" 2>/dev/null || break; sleep 1; done
+  if kill -0 -- "-$SIDECAR_PGID" 2>/dev/null; then
+    log "sidecar group $SIDECAR_PGID still runs; its wallet dir stays for the next wallet run's reaper"
+  else
+    rm -rf "$HOME/.cache/inference-money/wallet-tmp/$SIDECAR_PGID"
+  fi
 }
 
 # shellcheck disable=SC2317,SC2329  # invoked by the EXIT trap
