@@ -10,6 +10,7 @@ import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec-labs/stdlib/messaging"
 import { type Address, type Hex, isAddressEqual, zeroAddress } from "viem"
 import { tokenArtifact, tokenBridgeArtifact } from "./artifacts"
+import { assertExitDestination } from "./binding"
 import { type FeeChoice, feeFor, L2_DONE, type SponsorUnavailableError, sponsorFailure } from "./claim"
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
@@ -142,6 +143,7 @@ export async function exitToL1(
 	opts: { fee?: FeeChoice } = {},
 ): Promise<ExitTicket> {
 	assertExitIntent(e, m)
+	if (e.kind === "private" && !e.asMerchant) await assertExitDestination(wallet, m, e.from, e.recipientL1)
 	const fee = feeFor(e.kind, m, opts.fee)
 	let txHash: TxHash
 	try {
@@ -149,30 +151,34 @@ export async function exitToL1(
 	} catch (err) {
 		throw (fee && sponsorFailure(err, "withdrawal")) || err
 	}
-	const located = await locateExit(e, txHash, node, m).catch((cause: unknown) => {
+	const located = await locateWithdrawal(e.recipientL1, e.amount, txHash, node, m).catch((cause: unknown) => {
 		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
 	})
 	if (located === "reverted") throw new ExitRevertedError(txHash)
 	return located
 }
 
-async function locateExit(e: ExitIntent, txHash: TxHash, node: ExitNode, m: BridgeManifest): Promise<ExitTicket | "reverted"> {
+/**
+ * The withdrawal `txHash` emitted to `recipient` for `amount`, once checkpointed, or "reverted" when the tx reverted
+ * without it. Exits and returns emit the same message, so both locate it here.
+ */
+export async function locateWithdrawal(
+	recipient: Address,
+	amount: bigint,
+	txHash: TxHash,
+	node: ExitNode,
+	m: BridgeManifest,
+): Promise<ExitTicket | "reverted"> {
 	// Only `getTxReceipt` is read.
 	const receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
-	const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
+	const expected = await expectedExitMessage(recipient, amount, m)
 	const found = await occurrencesInTx(node, txHash, expected)
 	// A revert proves nothing burned only alongside an effect that lacks the message: setup effects survive a revert.
 	if (!found) throw new Error(`Exit ${txHash} is checkpointed, but the node returned no effect for it.`)
 	const [index, ...rest] = found
 	if (index === undefined && receipt.hasExecutionReverted()) return "reverted"
 	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
-	return {
-		l2TxHash: txHash,
-		recipient: e.recipientL1,
-		amount: e.amount,
-		messageHash: expected.toString() as Hex,
-		messageIndexInTx: index,
-	}
+	return { l2TxHash: txHash, recipient, amount, messageHash: expected.toString() as Hex, messageIndexInTx: index }
 }
 
 /** Consumed on the L1 Outbox; a message whose epoch is not proven yet cannot have been. */

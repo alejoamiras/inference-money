@@ -7,6 +7,7 @@ import { deriveClaimSecret } from "./claim-secret"
 import { isUserRejection } from "./errors"
 import { type AwaitL1ReceiptOptions, awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
+import { type MerchantList, merchantStatus } from "./merchants"
 import { assertReaderChain, assertSigningContext, NetworkMismatchError } from "./network"
 import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
@@ -57,6 +58,22 @@ const DEPOSIT_EVENT = getAbiItem({ abi: PERMIT2_DEPOSIT_ROUTER_ABI, name: "Depos
 const ZERO_WORD = pad("0x0")
 /** Blocks per `eth_getLogs` call; providers cap the range. */
 export const LOG_SCAN_CHUNK = 5_000n
+
+/** A public deposit funds merchants only; one to anyone else could never be claimed, only returned. */
+export class PublicDepositToUserError extends Error {
+	constructor(readonly recipient: AztecAddress) {
+		super(`Public deposits fund merchants only, and ${recipient} is not one. Deposit privately instead.`)
+		this.name = "PublicDepositToUserError"
+	}
+}
+
+/**
+ * Refuses a public deposit to anyone but a switched-on merchant in `list` (synced whole: `syncMerchantList`), before
+ * any signature. A merchant switched off after the deposit lands can no longer claim it; the depositor can return it.
+ */
+export function assertPublicRecipient(list: MerchantList, recipient: AztecAddress): void {
+	if (!merchantStatus(list, recipient).merchant) throw new PublicDepositToUserError(recipient)
+}
 
 /** The router's intent rules plus what makes an L2 claim impossible (a zero or off-curve recipient). */
 export async function assertDepositIntent(i: DepositIntent): Promise<void> {

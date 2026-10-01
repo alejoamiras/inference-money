@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test"
-import { TOKEN_REFUSALS, tokenRefusalOf } from "./rules"
+import { BRIDGE_REFUSALS, bridgeRefusalOf, TOKEN_REFUSALS, tokenRefusalOf } from "./rules"
 
 const TOKEN_SOURCE = new URL("../../../contracts/aztec/token/src/main.nr", import.meta.url).pathname
+const BRIDGE_SOURCE = new URL("../../../contracts/aztec/token_bridge/src/main.nr", import.meta.url).pathname
 
 describe("token refusals", () => {
 	it("each appears verbatim as a string literal in the token's Noir source", async () => {
@@ -17,5 +18,18 @@ describe("token refusals", () => {
 		expect(tokenRefusalOf(new Error("Assertion failed: Only the merchant admin"))).toBe("notAdmin")
 		expect(tokenRefusalOf(`Simulation error: ${TOKEN_REFUSALS.payment}`)).toBe("payment")
 		expect(tokenRefusalOf(new Error("Balance too low"))).toBeUndefined()
+	})
+})
+
+describe("bridge refusals", () => {
+	it("each appears verbatim as a string literal in the bridge's Noir source", async () => {
+		const source = await Bun.file(BRIDGE_SOURCE).text()
+		for (const text of Object.values(BRIDGE_REFUSALS)) expect(source, text).toContain(`"${text}"`)
+	})
+
+	it("maps a simulation error to the rule it names", () => {
+		expect(bridgeRefusalOf(new Error(`Assertion failed: ${BRIDGE_REFUSALS.exitDestination} 'bound'`))).toBe("exitDestination")
+		expect(bridgeRefusalOf(`Simulation error: ${BRIDGE_REFUSALS.publicClaimToUser}`)).toBe("publicClaimToUser")
+		expect(bridgeRefusalOf(new Error("Balance too low"))).toBeUndefined()
 	})
 })

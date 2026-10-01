@@ -4,6 +4,7 @@ import { NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { getAddress, zeroAddress } from "viem"
+import { ExitDestinationError } from "./binding"
 import { SponsorUnavailableError } from "./claim"
 import {
 	type ExitIntent,
@@ -29,6 +30,8 @@ beforeAll(async () => {
 	message = await expectedExitMessage(RECIPIENT, AMOUNT, M)
 })
 
+/** A wallet whose account is bound to RECIPIENT, the funding address every user exit here goes to. */
+const boundWallet = (hooks: Parameters<typeof fakeWallet>[0] = {}) => fakeWallet({ utility: () => [new Fr(BigInt(RECIPIENT))], ...hooks })
 const intent = (o: Partial<ExitIntent> = {}): ExitIntent => ({ kind: "private", from, recipientL1: RECIPIENT, amount: AMOUNT, ...o })
 const CHECKPOINTED = receiptAt(TxStatus.CHECKPOINTED)
 const REVERTED = { ...CHECKPOINTED, executionResult: "reverted", hasExecutionSucceeded: () => false, hasExecutionReverted: () => true }
@@ -41,13 +44,13 @@ describe("exitToL1", () => {
 		["portal", M.l1.portal],
 		["router", M.l1.router],
 	])("refuses a %s recipient before any wallet call", async (_, recipientL1) => {
-		const w = fakeWallet()
+		const w = boundWallet()
 		await expect(exitToL1(intent({ recipientL1 }), w.wallet, effectNode([message]), M)).rejects.toThrow(/could never be paid out/)
 		expect(w.sent.length + w.authWits.length).toBe(0)
 	})
 
 	it("burns privately through the proxy with a sponsored witness exit, and locates its message among several", async () => {
-		const w = fakeWallet()
+		const w = boundWallet()
 		const t = await exitToL1(intent(), w.wallet, effectNode([new Fr(1), message]), M)
 		expect(w.authWits).toEqual([{ from: from.toString(), caller: M.l2.proxy.address }])
 		expect(w.sent[0]).toMatchObject({
@@ -67,29 +70,39 @@ describe("exitToL1", () => {
 	})
 
 	it("flags a merchant's private exit, which the bridge then checks against the merchant list", async () => {
-		const w = fakeWallet()
+		const w = boundWallet()
 		await exitToL1(intent({ asMerchant: true }), w.wallet, effectNode([message]), M)
 		expect(w.sent[0]?.args[1]?.at(-1)).toBe(1n)
 	})
 
+	it("refuses a user's private exit anywhere but its funding address before any witness or burn", async () => {
+		for (const w of [fakeWallet(), fakeWallet({ utility: () => [new Fr(0xbeefn)] })]) {
+			await expect(exitToL1(intent(), w.wallet, effectNode([message]), M)).rejects.toBeInstanceOf(ExitDestinationError)
+			expect(w.sent.length + w.authWits.length).toBe(0)
+		}
+		const merchant = fakeWallet()
+		await exitToL1(intent({ asMerchant: true }), merchant.wallet, effectNode([message]), M)
+		expect(merchant.sent).toHaveLength(1)
+	})
+
 	it("authorizes a public burn in the same batch as the exit, paid by the wallet unless sponsorship is chosen", async () => {
-		const w = fakeWallet()
+		const w = boundWallet()
 		await exitToL1(intent({ kind: "public" }), w.wallet, effectNode([message]), M)
 		expect(w.authWits).toHaveLength(0)
 		expect(w.sent[0]).toMatchObject({ calls: ["set_authorized", "exit_to_l1_public"], feePayer: undefined })
-		const sponsored = fakeWallet()
+		const sponsored = boundWallet()
 		await exitToL1(intent({ kind: "public" }), sponsored.wallet, effectNode([message]), M, { fee: "sponsored" })
 		expect(sponsored.sent[0]).toMatchObject({ feePayer: M.l2.sponsoredFpc })
 	})
 
 	it("surfaces a sponsor that cannot pay as SponsorUnavailableError, with nothing burned", async () => {
-		const w = fakeWallet({
+		const w = boundWallet({
 			send: () => {
 				throw new Error("Not enough balance for fee payer to pay for transaction")
 			},
 		})
 		await expect(exitToL1(intent(), w.wallet, effectNode([message]), M)).rejects.toBeInstanceOf(SponsorUnavailableError)
-		const unsponsored = fakeWallet({
+		const unsponsored = boundWallet({
 			send: () => {
 				throw new Error("Not enough balance for fee payer to pay for transaction")
 			},
@@ -109,7 +122,7 @@ describe("exitToL1", () => {
 		],
 		["a checkpoint wait that fails", () => effectNode([message], () => Promise.reject(new Error("receipt 503"))), /receipt 503/],
 	])("after the burn, %s still yields its hash for recovery", async (_, node, cause) => {
-		const w = fakeWallet()
+		const w = boundWallet()
 		const err = await exitToL1(intent(), w.wallet, node(), M).catch((e: unknown) => e)
 		expect(err).toBeInstanceOf(ExitUnconfirmedError)
 		expect(err).toMatchObject({ l2TxHash: w.txHash, recipient: RECIPIENT, amount: AMOUNT })
@@ -119,7 +132,7 @@ describe("exitToL1", () => {
 	it("reads a revert whose effect carries no withdraw message as nothing burned", async () => {
 		const err = await exitToL1(
 			intent(),
-			fakeWallet().wallet,
+			boundWallet().wallet,
 			effectNode([], async () => REVERTED),
 			M,
 		).catch((e: unknown) => e)
@@ -127,7 +140,7 @@ describe("exitToL1", () => {
 		expect((err as ExitRevertedError).message).toMatch(/nothing was burned/)
 
 		const noEffect = { getTxEffect: async () => undefined, getTxReceipt: async () => REVERTED } as unknown as ExitNode
-		const unread = await exitToL1(intent(), fakeWallet().wallet, noEffect, M).catch((e: unknown) => e)
+		const unread = await exitToL1(intent(), boundWallet().wallet, noEffect, M).catch((e: unknown) => e)
 		expect(unread, "a revert without a readable effect proves nothing").toBeInstanceOf(ExitUnconfirmedError)
 	})
 })

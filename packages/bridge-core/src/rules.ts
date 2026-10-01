@@ -19,6 +19,25 @@ export const TOKEN_REFUSALS = {
 
 export type TokenRule = keyof typeof TOKEN_REFUSALS
 
+/** The bridge's refusals, found verbatim in its Noir source by `rules.test.ts`. */
+export const BRIDGE_REFUSALS = {
+	paused: "Bridge is paused",
+	publicClaimToUser: "Public claims are for merchants only",
+	relayedPrivateClaim: "Only the recipient can claim privately",
+	notFundingAddress: "Deposit is not from this account's funding address",
+	merchantDepositReturn: "A merchant's public deposit is claimed, not returned",
+	publicExitByUser: "Public exits are for merchants only",
+	exitDestination: "Withdrawals from a user account go only to its funding address",
+} as const
+
+export type BridgeRule = keyof typeof BRIDGE_REFUSALS
+
+/** The bridge rule an error's message carries (a simulation failure or a revert), or undefined. */
+export function bridgeRefusalOf(error: unknown): BridgeRule | undefined {
+	const message = error instanceof Error ? error.message : String(error)
+	return (Object.entries(BRIDGE_REFUSALS) as [BridgeRule, string][]).find(([, text]) => message.includes(text))?.[0]
+}
+
 // Longest first: "Only the merchant admin" is a prefix of two other refusals.
 const BY_LENGTH = (Object.entries(TOKEN_REFUSALS) as [TokenRule, string][]).sort(([, a], [, b]) => b.length - a.length)
 
