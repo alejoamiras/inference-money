@@ -47,3 +47,13 @@ Verdict: not converged, six findings, all verified and accepted:
 6. **Low, comments.** `.git` holds plaintext too (config, reflogs, `COMMIT_EDITMSG`), so it is scanned rather than excused; the redundant `scanLine` comment went.
 
 Codex also confirmed: checkpointed acceptance is recoverable while the old keys exist, reusing the payment commitment is correct once absence is established safely, the chunk overlap is right, and every seed claim finalizes before its secret goes.
+
+## Codex, arc 4 round 3 (same session; the loop's cap)
+
+Verdict: not converged, one finding, accepted:
+
+1. **High, a deployer address does not identify a deployment.** One bundle could run `deploy testnet` twice; `destroy` shown the first, handed over, would delete the keys still controlling the second. A bundle is now bound to its one deployment: the first successful `deploy testnet` under `disposable exec` records the bridge beside the keys (0600, never overwritten), a second deploy is refused, and `destroy` takes only the recorded deployment's manifest. Residual, documented at `destroy`: a deploy that crashed after creating contracts leaves them unrecorded and unreferenced.
+
+Codex confirmed the round-2 fixes: the SDK loads only after the hold, the lock race is closed, the receipt ordering is fixed for one node's view, the scan follows in-root links once, and the finalized role proof rejects pre-deploy zeros and incomplete handovers.
+
+The loop stopped at its three-round cap with this fix unreviewed; the arc-4 boundary pass after P9 reviews it together with P9's changes.

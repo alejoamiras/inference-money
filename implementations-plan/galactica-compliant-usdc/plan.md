@@ -341,14 +341,14 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 
 **The disposable fallback** (the owner's decision of 2026-09-30, an exception to "no agent generates operational keys", for testnet only). It lets P9 run while the owner is away.
 - `bridge disposable init` (P8) generates an L1 deploy key (viem `generatePrivateKey`), an L2 deployer secret and an interim admin secret (`Fr.random`). They go into `~/.cache/inference-money/disposable/testnet.env`, mode 0600, outside every checkout, and are never printed, logged or passed on argv. It prints only the addresses: the owner funds the L1 one at the faucets, once, whenever convenient. It refuses to overwrite an existing file.
-- `bridge disposable exec <command…>` runs one `bridge` command with only the values that command needs in the child's environment. It uses the same redaction, the same `<scan-trap>` scan and the same rule of nothing else running while it's live, from the keyed worktree. It refuses a file that isn't 0600 and owned by this user. The agent never reads the file itself. The L1 RPC is the pinned public endpoint.
+- `bridge disposable exec <command…>` runs one `bridge` command with only the values that command needs in the child's environment. A bundle makes one deployment: its first successful `deploy testnet` records the bridge beside the keys, and a second is refused. It uses the same redaction, the same `<scan-trap>` scan and the same rule of nothing else running while it's live, from the keyed worktree. It refuses a file that isn't 0600 and owned by this user. The agent never reads the file itself. The L1 RPC is the pinned public endpoint.
 - Deploy keys lose every role at deployment (Least privilege), so only the admin role outlives the fallback. The manifest marks it `l2.interimAdmin`, and `verify` warns while that holds.
 - **The switch**, once the owner is back:
   1. the keyed `admin-address` run;
   2. `bridge disposable exec admin propose deployments/testnet.json <owner admin>`;
   3. the keyed `admin accept`;
   4. `verify`;
-  5. `bridge disposable destroy deployments/testnet.json`, which deletes the file only for the deployment the disposable keys made, once its last finalized block shows the manifest's (non-disposable) admin holding both roles with nothing pending.
+  5. `bridge disposable destroy deployments/testnet.json`, which deletes the file only for the deployment the bundle recorded, once its last finalized block shows the manifest's (non-disposable) admin holding both roles with nothing pending.
 
   No redeploy. Delivery waits for the switch.
 - Residual: the file sits on disk until the switch, readable by any same-user process for that whole time, not just during one run. That is accepted for testnet keys holding test funds.

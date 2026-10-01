@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { Hex } from "viem"
@@ -86,6 +86,36 @@ describe("the disposable fallback", () => {
 
 		const leaked = () => ({ found: true, files: 1, skipped: 0, walletDirs: [] })
 		expect(await disposableExec(accept, { ...opts, argv: () => CHILD, out: sink().stream, err: sink().stream, scan: leaked })).toBe(1)
+	})
+
+	it("binds a bundle to the deployment its deploy made: a second deploy is refused, and destroy takes only that one", async () => {
+		const [keys, checkout] = [temp(), temp()]
+		const file = join(keys, "testnet.env")
+		const { l1 } = await disposableInit(file)
+		const m = { ...MANIFEST, l1: { ...MANIFEST.l1, deployer: l1 }, l2: { ...MANIFEST.l2, admin: someone.toString() as Hex } }
+		const out = join(checkout, "deployments", "testnet.json")
+		const writes = `const fs = require("node:fs"); fs.mkdirSync(${JSON.stringify(dirname(out))}); fs.writeFileSync(${JSON.stringify(out)}, ${JSON.stringify(JSON.stringify(m))})`
+		const clean = () => ({ found: false, files: 0, skipped: 0, walletDirs: [] })
+		const opts = {
+			file,
+			root: checkout,
+			keyedRoot: checkout,
+			scan: clean,
+			argv: () => ["-e", writes],
+			out: sink().stream,
+			err: sink().stream,
+		}
+		expect(await disposableExec(["deploy", "testnet"], opts)).toBe(0)
+		await expect(disposableExec(["deploy", "testnet"], opts)).rejects.toThrow("one deployment per bundle")
+
+		const roles = async (): Promise<Roles> => NOBODY
+		const other = {
+			path: "other.json",
+			m: { ...m, l2: { ...m.l2, bridge: { ...m.l2.bridge, address: `0x${"cd".repeat(32)}` as Hex } } },
+		}
+		await expect(disposableDestroy(other, { file, roles })).rejects.toThrow("names another")
+		await disposableDestroy({ path: "testnet.json", m }, { file, roles })
+		expect(existsSync(file)).toBe(false)
 	})
 
 	it("destroy removes the keys only on finalized proof that the manifest's admin, not a disposable one, holds both roles alone", async () => {
