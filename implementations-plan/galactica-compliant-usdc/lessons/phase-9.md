@@ -38,3 +38,9 @@ The arc-4 loop stopped at its cap with `cd59491` unreviewed (phase-8.md); this p
 
 1. **High: a `destroy` in flight could delete a bundle drawn after it.** Two destroys could both pass their checks; one deletes, `init` draws a new bundle, and the other, resuming, deletes the new keys. `init`, `exec` and `destroy` now hold the bundle's lock (`withStateDir`, beside the file) for their whole run.
 2. **High: the marker's directory entry was not flushed**, so a host crash could keep the keys and lose the marker. The marker, the recorded bridge (now written atomically), the keys and the deletion each sync their directory, with `run-state.ts`'s `writeDurably` and `syncDir`.
+
+**Round 3 (the cap):** confirmed both round-2 fixes; not converged, one finding, accepted:
+
+1. **High: the round-2 lock broke `exec`'s cancellation.** `withStateDir` registered its signal handler before `runRedacted`'s reaper, so a SIGINT or SIGTERM released the bundle and exited while the detached, secret-bearing child kept running, unscanned. `exec` now takes the lock with `StateDir.acquire` and releases it in `finally`, so `runRedacted` reaps the child and the scan runs first; `init` and `destroy`, which spawn nothing, keep `withStateDir`. A test emits SIGTERM mid-run and requires the child gone, the scan run and the bundle free.
+
+Past the cap with one fix unreviewed, the loop continues for a confirming round, per the owner's standing call on loops at the cap: minimal fixes only.
