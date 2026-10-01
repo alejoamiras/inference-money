@@ -60,13 +60,39 @@ describe("LiveMode", () => {
 		)
 	})
 
-	it.each<[string, Draft, string]>([
-		["paying a friend", { actor: "alice", action: "send", to: "bob", amount: "0.01" }, TOKEN_REFUSALS.transfer],
-		["cashing out elsewhere", { actor: "alice", action: "withdraw", to: "B_demo", amount: "0.01" }, BRIDGE_REFUSALS.exitDestination],
-		["a request between users", { actor: "bob", action: "request", to: "alice", amount: "" }, TOKEN_REFUSALS.request],
-		["paying a user's unstamped request", { actor: "alice", action: "pay", to: "bob", amount: "0.01" }, TOKEN_REFUSALS.payment],
-	])("shows %s refused with the contract's own rule, verbatim", async (_, draft, rule) => {
-		const { engine } = fakeEngine((d) => classify(new Error(`Simulation error: ${rule}`), d))
+	/** A simulation's error carries the rule; bridge-core's exit check, which runs first, words it for the CLI. */
+	const simulated = (rule: string) => new Error(`Simulation error: ${rule}`)
+	const exitCheck = Object.assign(new Error("This account withdraws only to its funding address 0x1, not 0x2."), {
+		name: "ExitDestinationError",
+	})
+
+	it.each<[string, Draft, string, Error]>([
+		[
+			"paying a friend",
+			{ actor: "alice", action: "send", to: "bob", amount: "0.01" },
+			TOKEN_REFUSALS.transfer,
+			simulated(TOKEN_REFUSALS.transfer),
+		],
+		[
+			"cashing out elsewhere",
+			{ actor: "alice", action: "withdraw", to: "B_demo", amount: "0.01" },
+			BRIDGE_REFUSALS.exitDestination,
+			exitCheck,
+		],
+		[
+			"a request between users",
+			{ actor: "bob", action: "request", to: "alice", amount: "" },
+			TOKEN_REFUSALS.request,
+			simulated(TOKEN_REFUSALS.request),
+		],
+		[
+			"paying a user's unstamped request",
+			{ actor: "alice", action: "pay", to: "bob", amount: "0.01" },
+			TOKEN_REFUSALS.payment,
+			simulated(TOKEN_REFUSALS.payment),
+		],
+	])("shows %s refused with the contract's own rule, verbatim", async (_, draft, rule, thrown) => {
+		const { engine } = fakeEngine((d) => classify(thrown, d))
 		render(<LiveMode header={null} engine={engine} wallet={ready} />)
 		await act(async () => {
 			fireEvent.change(field("ACT AS").getByRole("combobox"), { target: { value: draft.actor } })

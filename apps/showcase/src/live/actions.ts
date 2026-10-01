@@ -207,12 +207,15 @@ async function send(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 	return { kind: "settled", detail, rows: await aztecRows(ctx, since, ["transfer"]) }
 }
 
-/** `asMerchant` skips the SDK's own destination check for everyone, so a refusal shown is the bridge contract's. */
+/**
+ * A merchant's exit may go anywhere, its merchant status proven at the anchor block; a user's goes only to its funding
+ * address, which bridge-core checks before any witness or burn.
+ */
 async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | "B_demo", `0x${string}`>): Promise<Outcome> {
 	const since = ctx.demo.sent.length
 	const amount = d.amount as bigint
 	const recipientL1 = wallets[d.to as "A_demo" | "B_demo"]
-	const exit = { kind: "private", from: address(ctx, d.actor), recipientL1, amount, asMerchant: true } as const
+	const exit = { kind: "private", from: address(ctx, d.actor), recipientL1, amount, asMerchant: isMerchant(d.actor) } as const
 	const ticket = await exitToL1(exit, ctx.demo.wallet, ctx.demo.node, ctx.m)
 	ctx.tickets.putExit({ id: crypto.randomUUID(), actor: d.actor, since: Date.now(), ticket: encodeTicket("exit", ticket) })
 	const detail = `Burned on Aztec. The ${usdc2(amount)} USDC pays out to ${HOLDER_NAME[d.to]} once Ethereum accepts this block's proof; this page sends it then.`

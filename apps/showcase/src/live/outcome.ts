@@ -22,6 +22,9 @@ const WHY: Partial<Record<string, (d: ValidDraft) => string>> = {
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+/** bridge-core's check of a user's exit destination: it runs before the contract's, and words the rule for its CLI. */
+const isExitDestination = (e: unknown): boolean => e instanceof Error && e.name === "ExitDestinationError"
+
 /** The plain sentence for a failure that is no rule: what the visitor can do about it, never a stack trace. */
 function failure(e: unknown): string {
 	const text = message(e)
@@ -37,7 +40,7 @@ function failure(e: unknown): string {
 /** Sorts what an action threw into a refusal (the contract's rule text) or a failure. */
 export function classify(e: unknown, d: ValidDraft): Outcome {
 	const token = tokenRefusalOf(e)
-	const bridge = token ? undefined : bridgeRefusalOf(e)
+	const bridge = token ? undefined : (bridgeRefusalOf(e) ?? (isExitDestination(e) ? "exitDestination" : undefined))
 	const rule = token ?? bridge
 	if (rule) {
 		const text = token ? TOKEN_REFUSALS[token] : BRIDGE_REFUSALS[bridge as keyof typeof BRIDGE_REFUSALS]
