@@ -37,3 +37,12 @@ Scope: the showcase arc's own commits (P10–P13 and the socket fix); P9's commi
 4. **Medium: a malformed stored field still threw outside the per-entry catch.** Stored records are parsed with zod schemas (an entry that fails is skipped), and each claim entry is decoded alone: one that no longer decodes is dropped instead of blocking later claims.
 5. **Medium: the payout exclusion ended with the component.** It is now page-wide, in `finishPayouts`. Not taken: persisting the Ethereum payout tx before broadcast. A reload inside its inclusion window can send a second `withdraw`, which the Outbox reverts; the cost is one reverted tx's gas from a demo wallet, and guarding it means signing and sending in separate steps.
 6. **Medium: the sidecar's wallet dir could survive a SIGKILL that had not finished**, and a dead leader did not prove its group gone. The dir goes once the whole group has exited; a group still standing keeps it.
+
+**Round 3 (the cap):** confirmed the claim, privacy, gate, serialization and sidecar fixes; not converged, four findings, three accepted:
+
+1. **High: two runs could share the send journal.** Live → tour → live remounts live mode with a fresh run guard, so a second withdrawal could start while the first proved, and the first burn's hash could be stored with the second's amount. Runs are now one at a time page-wide (`runDraft` chains on the previous), and only the run that set the journal clears it.
+2. **High: retirement read the receipt before the finalized boundary**, so a tx included between the two reads could be retired on a stale absence. `locate` now asks bridge-core's `finalFate`, which reads the boundary first, and retires only a dropped burn that `finalFate` calls gone.
+3. **Medium: the codec revives any JSON**, so a tampered ticket (`{"ticket":{}}`) decoded and then threw outside the per-entry catch, blocking every payout behind it. Decoded exit and claim tickets are checked for the fields the page reads; one that fails is unreadable, and its entry is dropped.
+4. Rejected: "round-2 exits stored without `expiresAt` vanish after upgrading." No build that wrote that shape ever shipped: the hosted preview is `1e4bb74`, from before round 1, and stores exits as `{ id, actor, since, ticket }`, which the schema still reads through the ticket path.
+
+Past the cap with fixes unreviewed, the loop continues for a confirming round, per the owner's standing call on loops at the cap: minimal fixes only.
