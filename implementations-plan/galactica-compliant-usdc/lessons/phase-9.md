@@ -33,3 +33,8 @@ The arc-4 loop stopped at its cap with `cd59491` unreviewed (phase-8.md); this p
 4. **Medium: withdrawals and the deployer's USDC refills kept bare estimates.** Crediting a balance emptied since the estimate costs more (zero to nonzero), and the demo accounts' keys are public. One helper, `withGasHeadroom`, now covers deposits, withdrawals and every deployer EVM write.
 5. **Low: the public-endpoint exemption compared strings.** `:443/` and the committed Aztec node URL still made needles; URLs are now normalized and both committed endpoints exempted.
 6. **Low: comments.** The headroom comment cited the incident and stated its cause as fact; the marker comment narrated. Both rewritten.
+
+**Round 2:** confirmed the six fixes; not converged, two findings, both accepted:
+
+1. **High: a `destroy` in flight could delete a bundle drawn after it.** Two destroys could both pass their checks; one deletes, `init` draws a new bundle, and the other, resuming, deletes the new keys. `init`, `exec` and `destroy` now hold the bundle's lock (`withStateDir`, beside the file) for their whole run.
+2. **High: the marker's directory entry was not flushed**, so a host crash could keep the keys and lose the marker. The marker, the recorded bridge (now written atomically), the keys and the deletion each sync their directory, with `run-state.ts`'s `writeDurably` and `syncDir`.
