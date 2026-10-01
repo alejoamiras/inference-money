@@ -12,11 +12,13 @@ export interface KeyValue {
  * failed (no storage, quota, blocked site data) is kept in memory instead, so nothing this page wrote reads back as
  * absent before a reload.
  */
-export function localKeyValue(prefix: string, storage: Storage | undefined = globalThis.localStorage): KeyValue {
+export function localKeyValue(prefix: string, storage?: Storage): KeyValue {
 	const unsaved = new Map<string, string | undefined>()
 	const attempt = <T>(fn: (s: Storage) => T, fallback: T): T => {
 		try {
-			return storage ? fn(storage) : fallback
+			// Read here, inside the catch: with site data blocked, the `localStorage` getter itself throws.
+			const s = storage ?? globalThis.localStorage
+			return s ? fn(s) : fallback
 		} catch {
 			return fallback
 		}

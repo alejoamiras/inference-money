@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { browserPaymentStore, localKeyValue } from "./store"
 import { tickets } from "./tickets"
 
@@ -49,16 +49,31 @@ describe("browser stores", () => {
 		})
 	})
 
-	it("list pending deposits and exits oldest first, and skip an entry that no longer parses", () => {
+	it("list pending deposits and exits oldest first, and skip an entry that no longer parses as one", () => {
 		const kv = localKeyValue("im/a/")
 		const t = tickets(kv)
 		t.putExit({ id: "e2", actor: "alice", since: 2, ticket: "t2" })
 		t.putExit({ id: "e1", actor: "bob", since: 1, ticket: "t1" })
 		kv.set("exit:broken", "{")
+		kv.set("exit:null", "null")
+		kv.set("exit:undated", JSON.stringify({ id: "u", actor: "alice", ticket: "t" }))
 		t.putDeposit({ id: "d1", user: "alice", since: 3, draft: "d" })
 		expect(t.exits().map((e) => e.id)).toEqual(["e1", "e2"])
 		t.dropExit("e1")
 		expect(t.exits().map((e) => e.id)).toEqual(["e2"])
 		expect(t.deposits()).toEqual([{ id: "d1", user: "alice", since: 3, draft: "d" }])
+	})
+
+	it("keep working in memory when reading localStorage itself throws, as with site data blocked", () => {
+		const denied = vi.spyOn(globalThis, "localStorage", "get").mockImplementation(() => {
+			throw new DOMException("denied", "SecurityError")
+		})
+		try {
+			const kv = localKeyValue("im/blocked/")
+			kv.set("x", "1")
+			expect([kv.get("x"), kv.keys()]).toEqual(["1", ["x"]])
+		} finally {
+			denied.mockRestore()
+		}
 	})
 })

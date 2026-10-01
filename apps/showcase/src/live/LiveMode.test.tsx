@@ -106,6 +106,29 @@ describe("LiveMode", () => {
 		expect(screen.queryAllByTestId(TESTIDS.feedRow)).toHaveLength(0)
 	})
 
+	it("never checks payouts twice at once, which would send the same payout twice", async () => {
+		const { engine } = fakeEngine()
+		const gates: (() => void)[] = []
+		let calls = 0
+		let open = 0
+		let most = 0
+		engine.payouts = async () => {
+			calls++
+			most = Math.max(most, ++open)
+			await new Promise<void>((r) => gates.push(r))
+			open--
+			return []
+		}
+		render(<LiveMode header={null} engine={engine} wallet={ready} />)
+		await act(async () => fireEvent.click(chip("refund")))
+		await tryIt()
+		expect(calls).toBe(1)
+		await act(async () => gates.shift()?.())
+		await waitFor(() => expect(calls).toBe(2))
+		await act(async () => gates.shift()?.())
+		expect(most).toBe(1)
+	})
+
 	it("checks the amount before anything runs, and waits for the wallet before it lets anything run", async () => {
 		const { engine, runs } = fakeEngine()
 		const { rerender } = render(<LiveMode header={null} engine={engine} wallet={ready} />)

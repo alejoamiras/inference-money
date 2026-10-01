@@ -10,6 +10,8 @@ export interface SentTx {
 	feePayer: string
 	expiresAt: bigint
 	anchorTs: bigint
+	/** The node rejected this send. It may still hold an earlier copy of the same tx. */
+	refused?: true
 }
 
 /**
@@ -21,7 +23,7 @@ export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: Sen
 		get(target, key, receiver) {
 			if (key !== "sendTx") return Reflect.get(target, key, receiver)
 			return (tx: Tx) => {
-				const record = {
+				const record: SentTx = {
 					hash: tx.getTxHash().toString(),
 					feePayer: tx.data.feePayer.toString(),
 					expiresAt: tx.data.expirationTimestamp,
@@ -29,7 +31,10 @@ export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: Sen
 				}
 				sent.push(record)
 				onSend?.(record)
-				return target.sendTx(tx)
+				return target.sendTx(tx).catch((e: unknown) => {
+					record.refused = true
+					throw e
+				})
 			}
 		},
 	})

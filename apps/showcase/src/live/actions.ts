@@ -1,13 +1,17 @@
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
-import { TxHash } from "@aztec-labs/aztec.js/tx"
+import { waitForTx } from "@aztec-labs/aztec.js/node"
+import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import {
 	type BridgeManifest,
 	type ClaimTicket,
 	decodeClaimTicket,
 	decodeDepositDraft,
+	ExitRevertedError,
 	encodeTicket,
 	exitToL1,
+	isClaimConsumed,
+	L2_DONE,
 	type ListOptions,
 	openRequest,
 	payRequest,
@@ -34,7 +38,7 @@ import {
 	type User,
 	usdcOf,
 } from "@inference-money/demo"
-import type { Tickets } from "@/demo/tickets"
+import type { PendingDeposit, PendingExit, Tickets } from "@/demo/tickets"
 import type { DemoWallet } from "@/demo/wallet"
 import { type Explorer, type FeedRow, PUBLIC_TEXT, rowOf } from "@/tour/player"
 import { HOLDER_NAME } from "@/ui/cards"
@@ -131,20 +135,42 @@ async function deposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Out
 
 const NOTHING_TO_CLAIM = "There is nothing to claim: deposit first."
 
-/** The oldest deposit of `user`'s this page sent, as a claim ticket; a string says why there is none to claim. */
-async function claimable(ctx: LiveCtx, user: User): Promise<{ id: string; ticket: ClaimTicket } | string> {
-	const p = ctx.tickets.deposits().find((x) => x.user === user)
-	if (!p) return NOTHING_TO_CLAIM
-	if (p.claim) return { id: p.id, ticket: decodeClaimTicket(p.claim) }
-	if (!p.draft) return NOTHING_TO_CLAIM
-	const found = await reconcileDeposit(decodeDepositDraft(p.draft), l1CtxOf(demoL1(ctx.l1RpcUrl, ctx.m, user)), ctx.m)
+/**
+ * Whether `p`'s claim still holds at a checkpoint; its record goes once the claim is final. One no longer checkpointed
+ * was pruned with its epoch, which makes the deposit claimable again.
+ */
+async function stillClaimed(ctx: LiveCtx, p: PendingDeposit, t: ClaimTicket): Promise<boolean> {
+	if (await isClaimConsumed(t, ctx.demo.node, ctx.m, "finalized")) {
+		ctx.tickets.dropDeposit(p.id)
+		return true
+	}
+	return isClaimConsumed(t, ctx.demo.node, ctx.m)
+}
+
+type Claimable = { p: PendingDeposit; ticket: ClaimTicket } | string
+
+async function fromDraft(ctx: LiveCtx, p: PendingDeposit, draft: string): Promise<Claimable> {
+	const found = await reconcileDeposit(decodeDepositDraft(draft), l1CtxOf(demoL1(ctx.l1RpcUrl, ctx.m, p.user)), ctx.m)
 	if (found === "pending") return "That deposit is still confirming on Ethereum; try again in a minute."
 	if (found === "not-deposited") {
 		ctx.tickets.dropDeposit(p.id)
 		return "That deposit never reached Ethereum; deposit again."
 	}
-	ctx.tickets.putDeposit({ ...p, draft: undefined, claim: encodeTicket("claim", found) })
-	return { id: p.id, ticket: found }
+	const next = { ...p, draft: undefined, claim: encodeTicket("claim", found) }
+	ctx.tickets.putDeposit(next)
+	return { p: next, ticket: found }
+}
+
+/** The oldest deposit of `user`'s this page sent and holds no claim of, as a claim ticket; a string says why there is none. */
+async function claimable(ctx: LiveCtx, user: User): Promise<Claimable> {
+	for (const p of ctx.tickets.deposits()) {
+		if (p.user !== user) continue
+		if (p.draft) return fromDraft(ctx, p, p.draft)
+		if (!p.claim) continue
+		const ticket = decodeClaimTicket(p.claim)
+		if (!(p.claimed && (await stillClaimed(ctx, p, ticket)))) return { p, ticket }
+	}
+	return NOTHING_TO_CLAIM
 }
 
 async function claimDeposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Outcome> {
@@ -155,7 +181,7 @@ async function claimDeposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promis
 	if (typeof found === "string") return { kind: "failed", detail: found }
 	const since = ctx.demo.sent.length
 	await castClaim(session(ctx), found.ticket, () => report("simulate", "Waiting for the deposit's message to reach Aztec."))
-	ctx.tickets.dropDeposit(found.id)
+	ctx.tickets.putDeposit({ ...found.p, claimed: true })
 	const amount = usdc2(found.ticket.draft.intent.amount)
 	return { kind: "settled", detail: `${HOLDER_NAME[user]} claimed ${amount} USDC.`, rows: await aztecRows(ctx, since, ["claim"]) }
 }
@@ -220,20 +246,31 @@ async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | 
 	const amount = d.amount as bigint
 	const recipientL1 = wallets[d.to as "A_demo" | "B_demo"]
 	const exit = { kind: "private", from: address(ctx, d.actor), recipientL1, amount, asMerchant: isMerchant(d.actor) } as const
-	const ticket = await exitToL1(exit, ctx.demo.wallet, ctx.demo.node, ctx.m)
-	ctx.tickets.putExit({ id: crypto.randomUUID(), actor: d.actor, since: Date.now(), ticket: encodeTicket("exit", ticket) })
+	const entry: PendingExit = { id: crypto.randomUUID(), actor: d.actor, since: Date.now() }
+	const onSent = (h: TxHash) => {
+		entry.sent = { l2TxHash: h.toString(), recipient: recipientL1, amount: amount.toString() }
+		ctx.tickets.putExit(entry)
+	}
+	const ticket = await exitToL1(exit, ctx.demo.wallet, ctx.demo.node, ctx.m, { onSent }).catch((e: unknown) => {
+		if (e instanceof ExitRevertedError) ctx.tickets.dropExit(entry.id)
+		throw e
+	})
+	ctx.tickets.putExit({ ...entry, ticket: encodeTicket("exit", ticket) })
 	const detail = `Burned on Aztec. The ${usdc2(amount)} USDC pays out to ${HOLDER_NAME[d.to]} once Ethereum accepts this block's proof; this page sends it then.`
 	return { kind: "settled", detail, rows: await aztecRows(ctx, since, ["exit"]) }
 }
 
+/** Whether the node's copy of `hash` landed, waited for while pending; false when the node never held it. */
 async function landed(ctx: LiveCtx, hash: string): Promise<boolean> {
-	const receipt = await ctx.demo.node.getTxReceipt(TxHash.fromString(hash))
-	return receipt.isMined() && receipt.hasExecutionSucceeded()
+	const txHash = TxHash.fromString(hash)
+	if ((await ctx.demo.node.getTxReceipt(txHash)).status === TxStatus.DROPPED) return false
+	return (await waitForTx(ctx.demo.node, txHash, { ...L2_DONE, dontThrowOnRevert: true })).hasExecutionSucceeded()
 }
 
 /**
- * On a duplicate nullifier, first checks this attempt's own last send: if it landed, the action went through. Else
- * another tx spent the same note first, which the wallet's sync before the next send resolves, so it runs once more.
+ * On a duplicate nullifier, a send the node refused may be a copy of a tx it already holds: that tx's fate decides, and
+ * no retry runs while it is pending. Only a conflict with another tx (a refused send the node never held, or one found
+ * before this send) runs once more, after the wallet's sync.
  */
 export async function withConflictRetry(ctx: LiveCtx, attempt: () => Promise<Outcome>, kinds: readonly TxKind[]): Promise<Outcome> {
 	const since = ctx.demo.sent.length
@@ -241,8 +278,8 @@ export async function withConflictRetry(ctx: LiveCtx, attempt: () => Promise<Out
 		return await attempt()
 	} catch (e) {
 		if (!DUPLICATE_NULLIFIER.test(message(e))) throw e
-		const own = ctx.demo.sent.length > since ? ctx.demo.sent.at(-1) : undefined
-		if (own && (await landed(ctx, own.hash))) {
+		const last = ctx.demo.sent.length > since ? ctx.demo.sent.at(-1) : undefined
+		if (last?.refused && (await landed(ctx, last.hash))) {
 			return { kind: "settled", detail: "It went through: the network had it already.", rows: await aztecRows(ctx, since, kinds) }
 		}
 		return attempt()

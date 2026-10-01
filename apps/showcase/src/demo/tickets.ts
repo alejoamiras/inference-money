@@ -1,7 +1,7 @@
 import type { Actor, User } from "@inference-money/demo"
 import type { KeyValue } from "./store"
 
-/** A deposit this page sent: its draft until it mines, then its claim ticket until the claim lands. */
+/** A deposit this page sent: its draft until it mines, then its claim ticket until the claim is final. */
 export interface PendingDeposit {
 	id: string
 	user: User
@@ -10,6 +10,8 @@ export interface PendingDeposit {
 	draft?: string
 	/** `encodeTicket("claim", …)`. */
 	claim?: string
+	/** Claimed at a checkpoint, and kept until the claim is final: a pruned epoch undoes it, and only this secret claims again. */
+	claimed?: true
 }
 
 /** An exit this page sent, until its withdrawal pays out on Ethereum. */
@@ -17,8 +19,10 @@ export interface PendingExit {
 	id: string
 	actor: Actor
 	since: number
-	/** `encodeTicket("exit", …)`. */
-	ticket: string
+	/** The burn the node accepted, kept before its wait: after a reload the withdrawal is located from it. */
+	sent?: { l2TxHash: string; recipient: string; amount: string }
+	/** `encodeTicket("exit", …)`, once the withdrawal is located. */
+	ticket?: string
 }
 
 /** The page's unfinished cross-chain steps, which a reload resumes. */
@@ -31,15 +35,18 @@ export interface Tickets {
 	dropExit(id: string): void
 }
 
-/** Oldest first; an entry that no longer parses is skipped, never thrown. */
+const isEntry = (v: unknown): v is { id: string; since: number } =>
+	typeof v === "object" && v !== null && typeof Reflect.get(v, "id") === "string" && typeof Reflect.get(v, "since") === "number"
+
+/** Oldest first; an entry that no longer parses as one is skipped, never thrown. */
 function read<T extends { since: number }>(kv: KeyValue, kind: string): T[] {
 	return kv
 		.keys()
 		.filter((k) => k.startsWith(`${kind}:`))
 		.flatMap((k) => {
 			try {
-				const raw = kv.get(k)
-				return raw === undefined ? [] : [JSON.parse(raw) as T]
+				const v: unknown = JSON.parse(kv.get(k) ?? "null")
+				return isEntry(v) ? [v as unknown as T] : []
 			} catch {
 				return []
 			}

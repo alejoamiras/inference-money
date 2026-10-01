@@ -34,11 +34,16 @@ function useChains(engine: LiveEngine | undefined, running: RefObject<boolean>) 
 	const [balances, setBalances] = useState<Partial<Record<Holder, bigint>>>()
 	const [payouts, setPayouts] = useState<Payout[]>([])
 	const addRow = useCallback((row: FeedRow) => setRows((r) => [row, ...r.filter((x) => x.key !== row.key)]), [])
-	const refresh = useCallback(async () => {
-		if (!engine) return
-		const [b, p] = await Promise.all([engine.balances().catch(() => undefined), engine.payouts(addRow).catch(() => undefined)])
-		if (b) setBalances(b)
-		if (p) setPayouts(p)
+	const tail = useRef(Promise.resolve())
+	// One check at a time: two overlapping ones would each send the same payout.
+	const refresh = useCallback(() => {
+		if (!engine) return Promise.resolve()
+		tail.current = tail.current.then(async () => {
+			const [b, p] = await Promise.all([engine.balances().catch(() => undefined), engine.payouts(addRow).catch(() => undefined)])
+			if (b) setBalances(b)
+			if (p) setPayouts(p)
+		})
+		return tail.current
 	}, [engine, addRow])
 	useEffect(() => {
 		void refresh()

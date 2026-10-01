@@ -31,13 +31,14 @@ function failure(e: unknown): string {
 	if (/Balance too low/.test(text))
 		return "There is not enough private balance for that. Try a smaller amount, or reset the demo balances."
 	if (e instanceof Error && e.name === "PaymentRefusedError") return text
+	if (e instanceof Error && e.name === "ExitUnconfirmedError")
+		return "Sent, but Aztec has not confirmed it yet. This page pays it out once it lands, so don't withdraw it again."
 	if (/Existing nullifier|Duplicate nullifier/i.test(text))
 		return "Another visitor spent the same demo funds at the same moment. Try again."
 	if (/fetch|network|timed? ?out|ECONN/i.test(text)) return `The network did not answer: ${text}. Try again.`
 	return text
 }
 
-/** Sorts what an action threw into a refusal (the contract's rule text) or a failure. */
 export function classify(e: unknown, d: ValidDraft): Outcome {
 	const token = tokenRefusalOf(e)
 	const bridge = token ? undefined : (bridgeRefusalOf(e) ?? (isExitDestination(e) ? "exitDestination" : undefined))
