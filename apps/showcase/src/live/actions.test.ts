@@ -9,6 +9,9 @@ import type { LiveCtx } from "./actions"
 import { replay, runDraft, withConflictRetry } from "./actions"
 import type { Outcome } from "./outcome"
 
+/** Requests the page opened, in order, each held open until `hold` settles. */
+const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as Promise<void> | undefined }))
+
 /** Where a claim this page made stands on L2, and how many claims it sent. */
 const claims = vi.hoisted(() => ({ state: "checkpointed" as "checkpointed" | "finalized" | "pruned", sent: 0 }))
 
@@ -19,7 +22,15 @@ vi.mock("@inference-money/bridge-core", async (original) => ({
 	reconcileDeposit: async () => "pending",
 	decodeClaimTicket: (s: string) => {
 		if (s === "unreadable") throw new Error("not a claim ticket")
+		if (s === "tampered") return {}
 		return { draft: { intent: { amount: 10_000n } } }
+	},
+	syncMerchantList: async () => ({}),
+	openRequest: async () => {
+		requests.order.push("open")
+		await requests.hold
+		requests.order.push("opened")
+		return { commitment: 1 }
 	},
 	isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") =>
 		claims.state === "finalized" || (claims.state === "checkpointed" && at === "checkpointed"),
@@ -135,8 +146,28 @@ describe("claim", () => {
 		claims.state = "finalized"
 		expect([await claim(), store.size]).toEqual([nothing, 0])
 		store.set("d2", { id: "d2", user: "bob", since: 1, claim: "unreadable" })
+		store.set("d4", { id: "d4", user: "bob", since: 1, claim: "tampered" })
 		store.set("d3", { id: "d3", user: "bob", since: 2, claim: "ticket" })
 		claims.state = "pruned"
 		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
+	})
+})
+
+describe("runDraft", () => {
+	it("runs one live action at a time, page-wide, as a remount of live mode would otherwise start a second", async () => {
+		const base = ctxWith(false)
+		const cast = { galactica: { address: "0xg" }, alice: { address: "0xa" } }
+		const ctx: LiveCtx = { ...base, demo: { ...base.demo, cast } as unknown as DemoWallet }
+		let release = () => {}
+		requests.hold = new Promise<void>((r) => {
+			release = r
+		})
+		const draft = { actor: "galactica", action: "request", to: "alice" } as const
+		const runs = [runDraft(ctx, draft, WALLETS, () => {}), runDraft(ctx, draft, WALLETS, () => {})]
+		await vi.waitFor(() => expect(requests.order).toEqual(["open"]))
+		release()
+		requests.hold = undefined
+		await Promise.all(runs)
+		expect(requests.order).toEqual(["open", "opened", "open", "opened"])
 	})
 })

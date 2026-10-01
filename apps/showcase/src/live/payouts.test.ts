@@ -40,7 +40,13 @@ function ctxWith(status: TxStatus, entries: PendingExit[], finalTs = 0n) {
 		dropExit: (id: string) => store.delete(id),
 	} as unknown as Tickets
 	const node = {
-		getTxReceipt: async () => ({ status, isDropped: () => status === TxStatus.DROPPED }),
+		getTxReceipt: async () => ({
+			status,
+			isDropped: () => status === TxStatus.DROPPED,
+			isPending: () => status === TxStatus.PENDING,
+			isMined: () => status === TxStatus.CHECKPOINTED,
+			hasExecutionReverted: () => false,
+		}),
 		getBlockData: async () => ({ header: { globalVariables: { timestamp: finalTs } } }),
 	}
 	const demo = { node } as unknown as DemoWallet
@@ -79,8 +85,9 @@ describe("finishPayouts", () => {
 		chain.located = "ticket"
 		const before = chain.paid
 		const unreadable: PendingExit = { id: "1", actor: "alice", since: 0, ticket: "not a ticket" }
+		const tampered: PendingExit = { id: "3", actor: "alice", since: 0, ticket: '{"protocolVersion":2,"kind":"exit","ticket":{}}' }
 		const legacy: PendingExit = { id: "2", actor: "alice", since: 1, ticket: encodeTicket("exit", TICKET) }
-		const mixed = ctxWith(TxStatus.CHECKPOINTED, [unreadable, legacy])
+		const mixed = ctxWith(TxStatus.CHECKPOINTED, [unreadable, tampered, legacy])
 		expect([await pass(mixed.ctx), chain.paid - before, mixed.store.size]).toEqual([[], 1, 0])
 	})
 

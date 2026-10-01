@@ -31,6 +31,7 @@ import {
 	l1CtxOf,
 	MERCHANTS,
 	type Merchant,
+	type SentTx,
 	sendPrivate,
 	sponsoredFee,
 	type Tour,
@@ -166,7 +167,10 @@ async function fromDraft(ctx: LiveCtx, p: PendingDeposit, draft: DepositDraft): 
 /** `p`'s records, decoded; nothing when they no longer decode, since such an entry can neither claim nor be shown. */
 function decodedDeposit(p: PendingDeposit): { draft?: DepositDraft; ticket?: ClaimTicket } | undefined {
 	try {
-		return { draft: p.draft ? decodeDepositDraft(p.draft) : undefined, ticket: p.claim ? decodeClaimTicket(p.claim) : undefined }
+		const ticket = p.claim ? decodeClaimTicket(p.claim) : undefined
+		// The codec revives whatever JSON it holds, so a tampered entry decodes too.
+		if (ticket && typeof ticket.draft?.intent?.amount !== "bigint") return undefined
+		return { draft: p.draft ? decodeDepositDraft(p.draft) : undefined, ticket }
 	} catch {
 		return undefined
 	}
@@ -262,10 +266,11 @@ async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | 
 	const exit = { kind: "private", from: address(ctx, d.actor), recipientL1, amount, asMerchant: isMerchant(d.actor) } as const
 	const entry: PendingExit = { id: crypto.randomUUID(), actor: d.actor, since: Date.now() }
 	// The burn is stored as it leaves for the node: neither a lost response nor a reload can lose it.
-	ctx.demo.onNextSend.fn = (tx) => {
+	const journal = (tx: SentTx) => {
 		entry.sent = { l2TxHash: tx.hash, recipient: recipientL1, amount: amount.toString(), expiresAt: tx.expiresAt.toString() }
 		ctx.tickets.putExit(entry)
 	}
+	ctx.demo.onNextSend.fn = journal
 	try {
 		const ticket = await exitToL1(exit, ctx.demo.wallet, ctx.demo.node, ctx.m)
 		ctx.tickets.putExit({ ...entry, ticket: encodeTicket("exit", ticket) })
@@ -273,7 +278,7 @@ async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | 
 		if (e instanceof ExitRevertedError) ctx.tickets.dropExit(entry.id)
 		throw e
 	} finally {
-		ctx.demo.onNextSend.fn = undefined
+		if (ctx.demo.onNextSend.fn === journal) ctx.demo.onNextSend.fn = undefined
 	}
 	const detail = `Burned on Aztec. The ${usdc2(amount)} USDC pays out to ${HOLDER_NAME[d.to]} once Ethereum accepts this block's proof; this page sends it then.`
 	return { kind: "settled", detail, rows: await aztecRows(ctx, since, ["exit"]) }
@@ -319,12 +324,21 @@ const KINDS: Record<LiveAction, readonly TxKind[]> = {
  * Runs a draft live: refusals come back with the contract's rule text before anything is proven or sent; an Ethereum
  * step the demo wallet cannot afford, or a claim with nothing to claim, replays the recording and says so.
  */
-export async function runDraft(
+/** Page-wide: a remount resets live mode's own guard, and two runs would share the wallet's journal of the next send. */
+let runs: Promise<unknown> = Promise.resolve()
+
+export function runDraft(
 	ctx: LiveCtx,
 	d: ValidDraft,
 	wallets: Record<"A_demo" | "B_demo", `0x${string}`>,
 	report: Report,
 ): Promise<Outcome> {
+	const run = runs.then(() => runOne(ctx, d, wallets, report))
+	runs = run.catch(() => undefined)
+	return run
+}
+
+async function runOne(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | "B_demo", `0x${string}`>, report: Report): Promise<Outcome> {
 	report("simulate")
 	const run: Record<LiveAction, () => Promise<Outcome>> = {
 		deposit: () => deposit(ctx, d, report),

@@ -3,6 +3,7 @@ import {
 	decodeExitTicket,
 	type ExitTicket,
 	encodeTicket,
+	finalFate,
 	finishWithdrawal,
 	isExitWithdrawn,
 	locateWithdrawal,
@@ -30,28 +31,26 @@ const NOT_PROVEN = /not proven on Ethereum yet/
 const CHECKPOINTED: readonly TxStatus[] = [TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED]
 const UNKNOWN = "Aztec does not hold this burn right now; it stays listed until it can no longer land."
 
+/** The codec revives whatever JSON it holds, so a tampered ticket decodes too: it must hold what the page reads. */
 function decoded(ticket: string | undefined): ExitTicket | undefined {
 	try {
-		return ticket === undefined ? undefined : decodeExitTicket(ticket)
+		const t = ticket === undefined ? undefined : decodeExitTicket(ticket)
+		const whole = t?.l2TxHash instanceof TxHash && typeof t.recipient === "string" && typeof t.amount === "bigint"
+		return whole && typeof t.messageHash === "string" && Number.isInteger(t.messageIndexInTx) ? t : undefined
 	} catch {
 		return undefined
 	}
 }
 
 /**
- * Whether a tx the node does not hold may still land. Only until it expires: once the finalized tip is past its expiry,
- * any block that could have held it is final, and the node would know it.
+ * Where `p`'s burn stands, read again on every pass: a pruned checkpoint can undo a burn located before. One the node
+ * does not hold is retired only once `finalFate` proves it gone (a finalized block past its expiry, read first).
  */
-async function canStillLand(ctx: LiveCtx, expiresAt: bigint): Promise<boolean> {
-	const final = await ctx.demo.node.getBlockData("finalized")
-	return final === undefined || final.header.globalVariables.timestamp <= expiresAt
-}
-
-/** Where `p`'s burn stands, read again on every pass: a pruned checkpoint can undo a burn located before. */
 async function locate(ctx: LiveCtx, p: PendingExit, sent: NonNullable<PendingExit["sent"]>) {
 	const hash = TxHash.fromString(sent.l2TxHash)
+	const fate = await finalFate(ctx.demo.node, sent.l2TxHash, BigInt(sent.expiresAt))
 	const receipt = await ctx.demo.node.getTxReceipt(hash)
-	if (receipt.isDropped()) return (await canStillLand(ctx, BigInt(sent.expiresAt))) ? "unknown" : "none"
+	if (receipt.isDropped()) return fate === "gone" ? "none" : "unknown"
 	if (!CHECKPOINTED.includes(receipt.status)) return "waiting"
 	const cached = decoded(p.ticket)
 	if (cached) return cached
