@@ -16,31 +16,50 @@ use merchant_stamp::{
     DOM_SEP__MERCHANT_STAMP, DOM_SEP__MERCHANT_STAMP_PAD, MERCHANT_SIDE_SLOT, pad,
     REQUEST_OPENED_EFFECT, stamp,
 };
-use token_portal_content_hash_lib::{
-    get_mint_to_private_content_hash, get_mint_to_public_content_hash, get_withdraw_content_hash,
-};
+use portal_messages::{mint_to_private_content_hash, mint_to_public_content_hash, withdraw_content_hash};
 
 fn main() {}
+
+global DEPOSITOR: EthAddress = EthAddress::from_field(0xD0D0);
 
 #[test]
 fn mint_to_public_matches_l1() {
     let to = AztecAddress::from_field(0x1234);
-    let h = get_mint_to_public_content_hash(to, 1_000_000);
-    assert(h == 0x00fb464b41c6a08b28bfe9b8a11c1c4dcd2d4c9c66e703988cb76eb00e140dcc);
+    let h = mint_to_public_content_hash(to, 1_000_000, DEPOSITOR);
+    assert(h == 0x00dbc90158731bb184636b606f4a34496eb320d1215f259c4c53afeea7629e23);
 }
 
 #[test]
 fn mint_to_private_matches_l1() {
-    let h = get_mint_to_private_content_hash(1_000_000);
-    assert(h == 0x00009b1ee836fa551bb50bb45e2c8e698cc680c6e68e429370625119a2c63954);
+    let h = mint_to_private_content_hash(1_000_000, DEPOSITOR);
+    assert(h == 0x006bfc126e408142a4cc801b6780b5c8c7ad7bfc7cb23d1a2cbb731a958c2a07);
 }
 
 #[test]
 fn withdraw_matches_l1() {
     let recipient = EthAddress::from_field(0xBEEF);
     let caller = EthAddress::zero();
-    let h = get_withdraw_content_hash(recipient, 1_000_000, caller);
+    let h = withdraw_content_hash(recipient, 1_000_000, caller);
     assert(h == 0x00ac390e12f1097130e1a7c2e5eea30780cd11d12002b8de22d608cf10a60775);
+}
+
+// A deposit's content must commit to its depositor across the whole 160-bit range: flipping the lowest bit of any
+// address must move both hashes, or a claim could present a neighbouring address.
+#[test]
+fn fuzz_deposit_hashes_bind_the_depositor(high: u32, low: u128, amount: u128, to: Field) {
+    let two_128 = 0x100000000000000000000000000000000;
+    let depositor = EthAddress::from_field(high as Field * two_128 + low as Field);
+    let neighbour = EthAddress::from_field(high as Field * two_128 + (low ^ 1) as Field);
+    assert(
+        mint_to_private_content_hash(amount, depositor) != mint_to_private_content_hash(amount, neighbour),
+        "the private deposit hash ignores the depositor",
+    );
+    let recipient = AztecAddress::from_field(to);
+    assert(
+        mint_to_public_content_hash(recipient, amount, depositor)
+            != mint_to_public_content_hash(recipient, amount, neighbour),
+        "the public deposit hash ignores the depositor",
+    );
 }
 
 // ─── Recipient-committed private-claim secret derivation ─────────────

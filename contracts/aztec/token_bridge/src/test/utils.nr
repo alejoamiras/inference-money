@@ -1,5 +1,5 @@
 // Deploys and wires the production trio (proxy, standards Token, bridge) as the deployer does. Test messages are hashed
-// with the same token_portal_content_hash_lib the claims use, so they cannot drift from what the bridge expects.
+// with the same portal_messages lib the claims use, so they cannot drift from what the bridge expects.
 
 use crate::TokenBridge;
 use aztec::{
@@ -9,7 +9,7 @@ use aztec::{
 use token::Token;
 use token_minter_proxy::TokenMinterProxy;
 use claim_secret_lib::derive_claim_secret;
-use token_portal_content_hash_lib::{get_mint_to_private_content_hash, get_mint_to_public_content_hash};
+use portal_messages::{mint_to_private_content_hash, mint_to_public_content_hash};
 
 /// The L1 portal identity the bridge binds at construction; arbitrary but must match the
 /// `sender` of every injected L1→L2 message.
@@ -17,6 +17,13 @@ pub global PORTAL: EthAddress = EthAddress::from_field(0x707741);
 
 pub unconstrained fn portal() -> EthAddress {
     PORTAL
+}
+
+/// The Ethereum address every injected deposit message names; a claim must present the same one.
+pub global DEPOSITOR: EthAddress = EthAddress::from_field(0xD0D0);
+
+pub unconstrained fn depositor() -> EthAddress {
+    DEPOSITOR
 }
 
 /// The full wired trio: (env, admin, proxy, token, bridge). Admin owns both proxy and bridge
@@ -64,10 +71,10 @@ pub unconstrained fn fund_private(
     salt: Field,
     bridge: AztecAddress,
 ) {
-    let content = get_mint_to_private_content_hash(amount);
+    let content = mint_to_private_content_hash(amount, DEPOSITOR);
     let secret_hash = aztec::hash::compute_secret_hash([derive_claim_secret(salt, recipient)]);
     let leaf = env.send_l1_to_l2_message_from_secret_hash(content, secret_hash, PORTAL, bridge);
-    env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, amount, salt, leaf));
+    env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, amount, salt, leaf, DEPOSITOR));
 }
 
 /// Injects an L1→L2 `mint_to_public` message exactly as TokenPortal would commit it, and
@@ -79,7 +86,7 @@ pub unconstrained fn send_mint_to_public_message(
     secret: Field,
     bridge: AztecAddress,
 ) -> Field {
-    let content = get_mint_to_public_content_hash(to, amount);
+    let content = mint_to_public_content_hash(to, amount, DEPOSITOR);
     env.send_l1_to_l2_message_from_secret_hash(
         content,
         aztec::hash::compute_secret_hash([secret]),

@@ -9,6 +9,7 @@ Aztec.nr side of the USDC bridge, pinned to aztec-nr **v6.0.0-rc.1** (the `noir`
 | `token_minter_proxy` | contract | Sole minter of the standards `Token`; only the bridge may mint or burn, fixed once at bootstrap. |
 | `claim_secret` | lib | `derive_claim_secret(salt, recipient)`: binds a private deposit to its recipient. |
 | `merchant_stamp` | lib | The token's request `stamp`/`pad` nullifiers and side-hint capsule slot, shared with the keystone. |
+| `portal_messages` | lib | The L1↔L2 message contents `TokenPortal.sol` commits: deposits name their depositor, withdraw is canonical. |
 | `keystone` | bin | Literal vectors pinning the Noir content hashes, claim-secret derivation and stamps to the Solidity and TS ones. |
 
 The three contract artifacts in `*/target/` are committed: the SDK and deployer import them and CI does not rebuild them
