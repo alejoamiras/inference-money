@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Fr } from "@aztec-labs/aztec.js/fields"
+import { tokenArtifact } from "@inference-money/bridge-core"
 import { MANIFEST } from "../../bridge-core/src/test/fixtures"
 import { parseTour, TOUR_STEPS, type TourStep, type TourStepId, tourHeader, tourMismatches } from "./tour"
 import { aztecWorld, ethereumWorld } from "./world-view"
@@ -41,14 +42,18 @@ describe("tour", () => {
 })
 
 describe("world view", () => {
-	it("shows counts, named public writes, the payer and the expiry, and only labels what stays hidden", () => {
+	it("shows counts, named public writes, a completed payment's amount, the payer and the expiry, and only labels what stays hidden", () => {
 		const supply = { leafSlot: new Fr(7), label: "USDC total supply" }
+		const slot = tokenArtifact.storageLayout.private_balances?.slot as Fr
+		const encrypted = { fields: Array.from({ length: 16 }, (_, i) => new Fr(i + 1)), emittedLength: 16 }
+		// The completion log of a payment on testnet (the recorded tour's pay tx): tag, balances slot, 10 USDC.
+		const completion = { fields: [new Fr(3), slot, new Fr(10_000_000), ...Array(13).fill(Fr.ZERO)], emittedLength: 3 }
 		const effect = {
 			transactionFee: new Fr(5),
 			noteHashes: [1, 2],
 			nullifiers: [1, 2, 3],
 			l2ToL1Msgs: [1],
-			privateLogs: [1, 2],
+			privateLogs: [encrypted, completion],
 			publicLogs: [],
 			publicDataWrites: [
 				{ leafSlot: new Fr(7), value: new Fr(1_000_000) },
@@ -59,6 +64,8 @@ describe("world view", () => {
 		expect(world).toContainEqual({ chain: "aztec", label: "USDC total supply", value: "1000000", visibility: "readable" })
 		expect(world).toContainEqual({ chain: "aztec", label: "other public writes", value: "1", visibility: "readable" })
 		expect(world).toContainEqual({ chain: "aztec", label: "messages to Ethereum", value: "1", visibility: "readable" })
+		expect(world).toContainEqual({ chain: "aztec", label: "encrypted logs", value: "1", visibility: "readable" })
+		expect(world).toContainEqual({ chain: "aztec", label: "amount", value: "10000000", visibility: "readable" })
 		expect(world.filter((w) => w.visibility === "hidden")).toEqual([
 			{ chain: "aztec", label: "sender", visibility: "hidden" },
 			{ chain: "aztec", label: "amount", visibility: "hidden" },

@@ -242,7 +242,13 @@
 				{
 					"chain": "aztec",
 					"label": "encrypted logs",
-					"value": "1",
+					"value": "0",
+					"visibility": "readable"
+				},
+				{
+					"chain": "aztec",
+					"label": "amount",
+					"value": "10000000",
 					"visibility": "readable"
 				},
 				{
@@ -259,11 +265,6 @@
 				{
 					"chain": "aztec",
 					"label": "recipient",
-					"visibility": "hidden"
-				},
-				{
-					"chain": "aztec",
-					"label": "amount",
 					"visibility": "hidden"
 				}
 			]

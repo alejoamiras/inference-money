@@ -10,7 +10,7 @@ export interface EffectView {
 	noteHashes: readonly unknown[]
 	nullifiers: readonly unknown[]
 	l2ToL1Msgs: readonly unknown[]
-	privateLogs: readonly unknown[]
+	privateLogs: readonly { fields: readonly Fr[]; emittedLength: number }[]
 	publicLogs: readonly unknown[]
 	publicDataWrites: readonly { leafSlot: Fr; value: Fr }[]
 }
@@ -39,19 +39,34 @@ export async function totalSupplySlot(m: BridgeManifest): Promise<KnownSlot> {
 	}
 }
 
+const BALANCES_SLOT = tokenArtifact.storageLayout.private_balances?.slot
+
+/**
+ * The amounts of partial notes the token completed from private, which is how a payment into a request lands: the
+ * token emits each one unencrypted, as a private log of three fields (the tag, the balances slot and the amount).
+ */
+function completedAmounts(logs: EffectView["privateLogs"]): bigint[] {
+	return logs.flatMap((l) =>
+		l.emittedLength === 3 && BALANCES_SLOT && l.fields[1]?.equals(BALANCES_SLOT) ? [(l.fields[2] as Fr).toBigInt()] : [],
+	)
+}
+
 /**
  * An Aztec tx as the world sees it: counts of what it created, every public write (named when the slot is known), the
- * fee payer and the expiry, all read from the chain. `hidden` names what the demo knows the tx carried but nobody else
- * can read (sender, recipient, amount); those items never carry a value.
+ * amount of any partial note completed from private, the fee payer and the expiry, all read from the chain. `hidden`
+ * names what the demo knows the tx carried but nobody else can read (sender, recipient, amount); those items never
+ * carry a value.
  */
 export function aztecWorld(effect: EffectView, sent: Commitments, known: readonly KnownSlot[], hidden: readonly string[]): WorldItem[] {
+	const completed = completedAmounts(effect.privateLogs)
 	const items = [
 		readable("aztec", "fee payer", sent.feePayer),
 		readable("aztec", "expires at", sent.expiresAt.toString()),
 		readable("aztec", "fee", effect.transactionFee.toBigInt().toString()),
 		readable("aztec", "nullifiers", String(effect.nullifiers.length)),
 		readable("aztec", "new notes", String(effect.noteHashes.length)),
-		readable("aztec", "encrypted logs", String(effect.privateLogs.length)),
+		readable("aztec", "encrypted logs", String(effect.privateLogs.length - completed.length)),
+		...completed.map((amount) => readable("aztec", "amount", amount.toString())),
 	]
 	let unnamed = 0
 	for (const w of effect.publicDataWrites) {
@@ -90,7 +105,7 @@ export const withdrawWorld = (recipient: string, amount: bigint): WorldItem[] =>
 export const HIDDEN: Record<"claim" | "request" | "pay" | "transfer" | "exit", readonly string[]> = {
 	claim: ["recipient"],
 	request: ["recipient", "payer"],
-	pay: ["payer", "recipient", "amount"],
+	pay: ["payer", "recipient"],
 	transfer: ["sender", "recipient", "amount"],
 	exit: ["sender"],
 }

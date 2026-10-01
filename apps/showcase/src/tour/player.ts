@@ -40,7 +40,7 @@ export const PUBLIC_TEXT: Record<TourStep["action"], string> = {
 	deposit: "A deposit into the portal, in the clear.",
 	claim: "A private transaction minted USDC.",
 	request: "A private transaction.",
-	pay: "A private transaction.",
+	pay: "A private payment whose amount is public.",
 	refund: "A private transaction.",
 	transfer: "A private transaction.",
 	exit: "A private transaction burned USDC and messaged Ethereum.",
