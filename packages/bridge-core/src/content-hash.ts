@@ -7,8 +7,8 @@
 
 // keccak256(signature)[:4]
 const SELECTOR = {
-	mintToPublic: "bc6a9bd3", // mint_to_public(bytes32,uint256)
-	mintToPrivate: "8b3af5e8", // mint_to_private(uint256)
+	mintToPublic: "05829b7e", // mint_to_public(bytes32,uint256,address)
+	mintToPrivate: "69248b42", // mint_to_private(uint256,address)
 	withdraw: "69328dec", // withdraw(address,uint256,address)
 } as const
 
@@ -38,14 +38,14 @@ async function sha256ToField(data: Uint8Array<ArrayBuffer>): Promise<`0x${string
 	return `0x00${hex.slice(0, 62)}`
 }
 
-/** Public mint: the recipient (an Aztec address as bytes32) is bound in the hash. */
-export function mintToPublicContentHash(toBytes32: string, amount: bigint): Promise<`0x${string}`> {
-	return sha256ToField(bytesFromHex(SELECTOR.mintToPublic + word(toBytes32) + wordFromBigInt(amount)))
+/** Public mint: the recipient (an Aztec address as bytes32) and the L1 depositor are bound in the hash. */
+export function mintToPublicContentHash(toBytes32: string, amount: bigint, depositor: string): Promise<`0x${string}`> {
+	return sha256ToField(bytesFromHex(SELECTOR.mintToPublic + word(toBytes32) + wordFromBigInt(amount) + word(depositor)))
 }
 
-/** Private mint: no recipient; `claim_private` binds it through the claim secret. */
-export function mintToPrivateContentHash(amount: bigint): Promise<`0x${string}`> {
-	return sha256ToField(bytesFromHex(SELECTOR.mintToPrivate + wordFromBigInt(amount)))
+/** Private mint: the L1 depositor is bound in the hash; `claim_private` binds the recipient through the claim secret. */
+export function mintToPrivateContentHash(amount: bigint, depositor: string): Promise<`0x${string}`> {
+	return sha256ToField(bytesFromHex(SELECTOR.mintToPrivate + wordFromBigInt(amount) + word(depositor)))
 }
 
 /** L2->L1 withdraw; `recipient` and `caller` are L1 addresses (`caller` zero = anyone may submit). */

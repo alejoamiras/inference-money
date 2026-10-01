@@ -44,6 +44,8 @@ export interface ClaimTicket {
 	/** The Inbox message key. */
 	messageHash: Hex
 	leafIndex: bigint
+	/** The L1 address the message names as depositor (the Permit2 signer); a claim must present it. */
+	depositor: Address
 }
 
 /** `not-deposited` only after an error-free scan through a finalized block past the permit deadline. */
@@ -169,7 +171,7 @@ export function ticketFromReceiptLogs(d: DepositDraft, logs: Log[], m: BridgeMan
 	if (events.length !== 1) throw new Error(`Expected exactly one router Deposit event in the receipt, found ${events.length}.`)
 	const [event] = events
 	if (!event || !isThisDeposit(event.args, d)) throw new Error("The mined Deposit event does not match this deposit.")
-	return { draft: d, messageHash: event.args.key, leafIndex: event.args.index }
+	return { draft: d, messageHash: event.args.key, leafIndex: event.args.index, depositor: event.args.depositor }
 }
 
 /** Waits for the sent deposit to mine. A revert or timeout throws with the draft untouched, so it can be re-checked. */
@@ -215,7 +217,7 @@ async function scanForDeposit(
 			strict: true,
 		})
 		const hit = logs.find((l) => isAddressEqual(l.address, m.l1.router) && isThisDeposit(l.args, d))
-		if (hit) return { draft: d, messageHash: hit.args.key, leafIndex: hit.args.index }
+		if (hit) return { draft: d, messageHash: hit.args.key, leafIndex: hit.args.index, depositor: hit.args.depositor }
 	}
 	return undefined
 }
