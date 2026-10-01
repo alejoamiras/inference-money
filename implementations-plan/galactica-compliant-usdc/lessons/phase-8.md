@@ -1,10 +1,14 @@
 # Phase 8 — Operator CLI, keyed runs, demo, acceptance run
 
-Status: **in progress** (gate rerun after the codex round-1 fixes).
+Status: **done** 2026-10-01, gate passed on cd59491.
 
 ## Gate evidence
 
-- Line 1 on 50c58d3 plus part of the round-1 fixes: build, lint, typecheck, unit (deployer 38) and integration 42/42 (1172 s) — `P8 GATE LINE 1: PASS`. Rerun after the fixes below.
+- Line 1 on cd59491: build, lint, typecheck, unit (deployer 46, bridge-core 160, web 93) and integration 42/42 (1196 s) — `P8 GATE LINE 1: PASS`. Two earlier runs on mixed trees (50c58d3 and eb198ba plus uncommitted fixes) also passed, 1172 s and 1177 s.
+- `gh stack push` (four branches) and `keyed-worktree.sh sync` at cd59491 (`origin/keyed/testnet`, install with `--ignore-scripts`).
+- Local chain, RUN_ID=p8, on cd59491: `deploy local`; `demo setup`; `smoke --record` and a repeat `smoke`, both "smoke passed", each refusing `transfer` and `exitDestination`; `verify --tour` and `export`. From the keyed worktree: `verify` (every check passed against a fresh forge build), `demo status` (a PXE reading every cast balance), and `pause on`/`off` with `BRIDGE_PROVE=1`, a real ClientIVC proof (2.9 s). `net:down`; chain exit 0.
+- The gate's closing `secrets:scan` reported `walletDirs=2` while the line-1 integration ran beside it: both were that run's live stores (its test process and a CLI child of the operator spec). The scan is strict on purpose, since nothing runs beside a keyed run, so it was rerun alone once the integration ended: `found=false files=2323 skipped=0 walletDirs=0`, exit 0.
+- The disposable fallback's keys are drawn (`disposable init`, file 0600); the owner funds L1 `0x1301F05c9481adF4907b8c9CC41c5CCA04E0D94e` only if P9 runs on the fallback.
 
 ## Findings
 
