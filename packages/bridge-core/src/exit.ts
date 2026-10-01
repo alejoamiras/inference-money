@@ -132,16 +132,15 @@ async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: R
  * bridge's only path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry
  * entry batched into the same tx for a public one. A sponsor that cannot pay is a {@link SponsorUnavailableError} with
  * nothing burned. The send returns its hash before any wait, so every failure after it, the wait for the checkpoint
- * and `onSent` included, is an {@link ExitUnconfirmedError} carrying that hash; only a checkpointed revert with no
- * withdraw message in its effect, which burned nothing, is an {@link ExitRevertedError}. `onSent` gets the hash before
- * the wait: persist it there, since {@link exitTicketFromTx} resumes from it.
+ * included, is an {@link ExitUnconfirmedError} carrying that hash; only a checkpointed revert with no withdraw message
+ * in its effect, which burned nothing, is an {@link ExitRevertedError}.
  */
 export async function exitToL1(
 	e: ExitIntent,
 	wallet: Wallet,
 	node: ExitNode,
 	m: BridgeManifest,
-	opts: { fee?: FeeChoice; onSent?: (l2TxHash: TxHash) => void } = {},
+	opts: { fee?: FeeChoice } = {},
 ): Promise<ExitTicket> {
 	assertExitIntent(e, m)
 	if (e.kind === "private" && !e.asMerchant) await assertExitDestination(wallet, m, e.from, e.recipientL1)
@@ -152,11 +151,7 @@ export async function exitToL1(
 	} catch (err) {
 		throw (fee && sponsorFailure(err, "withdrawal")) || err
 	}
-	const locate = async () => {
-		opts.onSent?.(txHash)
-		return locateWithdrawal(e.recipientL1, e.amount, txHash, node, m)
-	}
-	const located = await locate().catch((cause: unknown) => {
+	const located = await locateWithdrawal(e.recipientL1, e.amount, txHash, node, m).catch((cause: unknown) => {
 		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
 	})
 	if (located === "reverted") throw new ExitRevertedError(txHash)

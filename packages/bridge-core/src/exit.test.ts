@@ -129,22 +129,6 @@ describe("exitToL1", () => {
 		expect(((err as Error).cause as Error).message).toMatch(cause)
 	})
 
-	it("hands the burn's hash to onSent before the wait, and one that throws still yields the hash for recovery", async () => {
-		const w = boundWallet()
-		const seen: string[] = []
-		const wait = () => {
-			seen.push("wait")
-			return Promise.resolve(CHECKPOINTED)
-		}
-		await exitToL1(intent(), w.wallet, effectNode([message], wait), M, { onSent: (h) => seen.push(h.toString()) })
-		expect(seen.slice(0, 2)).toEqual([w.txHash.toString(), "wait"])
-		const failing = () => {
-			throw new Error("quota")
-		}
-		const err = await exitToL1(intent(), boundWallet().wallet, effectNode([message]), M, { onSent: failing }).catch((e: unknown) => e)
-		expect(err).toBeInstanceOf(ExitUnconfirmedError)
-	})
-
 	it("reads a revert whose effect carries no withdraw message as nothing burned", async () => {
 		const err = await exitToL1(
 			intent(),
