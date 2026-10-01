@@ -11,6 +11,8 @@ Status: **in progress**: every gate line but `build:testnet`, which needs P9's v
 | unconstrained | 7.6 s | 6.9 s | 7.0 s | 13.9 s | 13.6 s | 0.91 GB / 0.62 GB | none |
 | 2 CPUs (`CPUQuota=200%`) | 21.4 s | 19.8 s | 20.6 s | 40.3 s | 34.2 s | 1.25 GB / 0.62 GB | bound: 1,303 s throttled |
 
+A clean rerun on 7c42a8f, with nothing edited during it, agrees: unconstrained 7.5 / 6.6 / 6.9 / 13.5 s, on 2 CPUs 21.4 / 19.6 / 20.5 / 40.1 s, peak 1.17 GB.
+
 Every median is far under the rule (90 s unconstrained, 240 s on 2 CPUs) and so is the peak (3 GB), on both readings of "the median": per step, which is what a visitor waits for on each click, and per open-and-pay pair. So the showcase proves live; it never falls back to a recorded proof for lack of speed.
 
 What the numbers do and don't say:
