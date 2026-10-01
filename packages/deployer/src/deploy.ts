@@ -27,8 +27,8 @@ export interface DeployContext {
 
 /**
  * The one deploy order both networks run: the deployer account and the standard contracts the bridge calls in public
- * (no-ops where present), then the portal, the three deployer-bound L2 instances and their wiring, then
- * `portal.initialize` (which needs the bridge address) and the router (which needs an initialized portal). Returns the
+ * (no-ops where present), then the portal and the router that names it, the three deployer-bound L2 instances and
+ * their wiring, then `portal.initialize`, which needs the bridge address and checks the router's binding. Returns the
  * manifest; verifying it before it is written is the caller's step.
  */
 export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
@@ -39,11 +39,12 @@ export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 	await ensureStandardContracts(c.wallet, c.node, { from: deployer, ...(c.fees.tx ? { fee: { paymentMethod: c.fees.tx } } : {}) }, c.log)
 	const portal = await deployPortal(c.l1, c.evm)
 	c.log(`portal ${portal.address}`)
-	const l2 = await deployBridgeL2(c.wallet, deployer, c.fees, portal.address, c.log)
-	await initializePortal(c.l1, c.evm, portal.address, registry, c.usdc, l2.bridge.address)
-	c.log("portal initialized")
-	const router = await deployRouter(c.l1, c.evm, c.permit2, portal.address)
+	const router = await deployRouter(c.l1, c.evm, c.permit2, portal.address, c.usdc)
 	c.log(`router ${router.address}`)
+	const l2 = await deployBridgeL2(c.wallet, deployer, c.fees, portal.address, c.log)
+	const binding = { registry, usdc: c.usdc, l2Bridge: l2.bridge.address, router: router.address }
+	await initializePortal(c.l1, c.evm, portal.address, binding)
+	c.log("portal initialized")
 	return parseManifest({
 		network: c.network,
 		l1: {
