@@ -15,6 +15,9 @@ import {
 	setPaused,
 } from "./admin"
 import { type Command, type Invocation, parseDelay, parseInvocation, USAGE } from "./cli-args"
+import { demoFund, demoReset, demoSetup, demoStatus } from "./demo"
+import { DISPOSABLE_FILE, disposableDestroy, disposableExec, disposableInit, INTERIM_ADMIN } from "./disposable"
+import { exportBundle } from "./export"
 import { deployLocal } from "./local"
 import { localManifestPath, writeManifest } from "./manifest"
 import { TESTNET } from "./networks"
@@ -23,12 +26,11 @@ import { describeError, REDACTED_CHILD, runRedacted } from "./redact"
 import { scanForSecrets } from "./scan"
 import { aztecSecretFrom, KEYED, secretNeedles } from "./secrets"
 import { adminAccount, adminSecretFor, loadManifest, type Session, withSession } from "./session"
+import { smoke } from "./smoke"
 import { deployTestnet } from "./testnet"
 import { verifyManifest } from "./verify-cli"
 
 const log = (m: string) => console.log(m)
-/** Set by `disposable exec` alone: an `admin accept` under it records the admin as interim. */
-export const INTERIM_ADMIN = "BRIDGE_INTERIM_ADMIN"
 type Handler = (inv: Invocation) => Promise<number>
 
 const flag = (inv: Invocation, name: string): string | undefined => {
@@ -47,7 +49,7 @@ const asAdmin = (inv: Invocation, fn: (s: Session, admin: AztecAddress) => Promi
 		return 0
 	})
 
-const HANDLERS: Partial<Record<Command, Handler>> = {
+const HANDLERS: Record<Command, Handler> = {
 	async deploy(inv) {
 		const merchantDelay = flag(inv, "merchant-delay")
 		const opts = { log, ...(merchantDelay ? { merchantDelay: parseDelay(merchantDelay) } : {}) }
@@ -137,6 +139,45 @@ const HANDLERS: Partial<Record<Command, Handler>> = {
 		console.log(localManifestPath(runIdFor()))
 		return 0
 	},
+	async smoke(inv) {
+		await smoke(loadManifest(inv.args[0] as string), { record: flag(inv, "record"), log })
+		return 0
+	},
+	async export(inv) {
+		const out = flag(inv, "out") as string
+		for (const file of exportBundle(loadManifest(inv.args[0] as string).m, out)) log(`wrote ${out}/${file}`)
+		return 0
+	},
+	async "demo setup"(inv) {
+		await demoSetup(loadManifest(inv.args[0] as string), { rotate: inv.flags.rotate === true, log })
+		return 0
+	},
+	async "demo status"(inv) {
+		await demoStatus(loadManifest(inv.args[0] as string), log)
+		return 0
+	},
+	async "demo reset"(inv) {
+		await demoReset(loadManifest(inv.args[0] as string), log)
+		return 0
+	},
+	async "demo fund"(inv) {
+		await demoFund(loadManifest(inv.args[0] as string), log)
+		return 0
+	},
+	async "disposable init"() {
+		const a = await disposableInit()
+		log(`disposable keys written to ${DISPOSABLE_FILE} (0600); fund the L1 address at the Sepolia faucets:`)
+		log(`  L1 deployer    ${a.l1}`)
+		log(`  L2 deployer    ${a.deployer}`)
+		log(`  interim admin  ${a.admin}`)
+		return 0
+	},
+	"disposable exec": (inv) => disposableExec(inv.args),
+	async "disposable destroy"() {
+		await disposableDestroy()
+		log(`destroyed ${DISPOSABLE_FILE}`)
+		return 0
+	},
 	async probe() {
 		const checks = await probeNetwork(TESTNET, process.env.SEPOLIA_RPC_URL || TESTNET.defaultL1RpcUrl)
 		for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
@@ -152,8 +193,6 @@ const HANDLERS: Partial<Record<Command, Handler>> = {
 	},
 }
 
-export const handlerFor = (command: Command): Handler | undefined => HANDLERS[command]
-
 async function main(): Promise<number> {
 	let inv: Invocation
 	try {
@@ -165,12 +204,7 @@ async function main(): Promise<number> {
 	const needles = secretNeedles()
 	// Any environment holding a secret runs the command as a child whose output is redacted line by line.
 	if (needles.length > 0 && process.env[REDACTED_CHILD] !== "1") return runRedacted(process.argv.slice(1), needles)
-	const handler = handlerFor(inv.command)
-	if (!handler) {
-		console.error(`${inv.command} is not available in this build`)
-		return 2
-	}
-	return handler(inv)
+	return HANDLERS[inv.command](inv)
 }
 
 if (import.meta.main) {

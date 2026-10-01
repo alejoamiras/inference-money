@@ -8,10 +8,9 @@ export interface FeesPerGas {
 	feePerL2Gas: bigint
 }
 
-/** The L2 txs a testnet deploy + smoke sends. */
-export const TESTNET_DEPLOY_AND_SMOKE_TXS = [
+/** The L2 txs a testnet deploy sends, paid from the deployer's own Fee Juice: one faucet mint, bridged. */
+export const TESTNET_DEPLOY_TXS = [
 	"deploy deployer account",
-	"deploy smoke recipient account",
 	// Standard contracts the node lacks (testnet: all three), a class and an instance tx each.
 	"publish AuthRegistry class",
 	"publish AuthRegistry instance",
@@ -22,13 +21,28 @@ export const TESTNET_DEPLOY_AND_SMOKE_TXS = [
 	"deploy token_minter_proxy",
 	"deploy Token",
 	"deploy token_bridge",
-	"proxy.set_token",
-	"proxy.set_bridge",
-	"claim_public",
-	"claim_private",
-	"set public burn authwit",
-	"exit_to_l1_public",
-	"exit_to_l1_private",
+	"proxy.set_token + proxy.set_bridge",
+	"propose both admin roles",
+] as const
+
+/** The L2 txs the rest of P9 sends through the sponsor: admin accept, the demo merchants, demo fund and setup, one smoke. */
+export const TESTNET_SPONSORED_TXS = [
+	"deploy admin account",
+	"accept both admin roles",
+	"list galactica and supplier",
+	"deploy galactica",
+	"claim the sponsor's Fee Juice",
+	"deploy alice",
+	"deploy bob",
+	"deploy supplier",
+	"claim alice's binding deposit",
+	"claim bob's binding deposit",
+	"claim galactica's float",
+	"smoke: claim",
+	"smoke: open request",
+	"smoke: pay",
+	"smoke: refund",
+	"smoke: exit",
 ] as const
 
 /**

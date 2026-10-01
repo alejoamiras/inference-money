@@ -12,7 +12,7 @@ import {
 	tokenArtifact,
 	tokenBridgeArtifact,
 } from "@inference-money/bridge-core"
-import { ensureDeployerAccount } from "./deploy-l2"
+import { ensureAccount } from "./deploy-l2"
 import type { Session } from "./session"
 import { entryDelay } from "./token-reads"
 
@@ -57,7 +57,7 @@ export async function proposeAdmin(
 /** Accepts both roles as the account `secret` rebuilds, deploying it through the sponsor first if needed. */
 export async function acceptAdmin(wallet: EmbeddedWallet, m: BridgeManifest, secret: Fr, log: (m: string) => void) {
 	const fees = { accountDeploy: async () => sponsoredPayment(m), tx: sponsoredPayment(m) }
-	const admin = await ensureDeployerAccount(wallet, secret, fees, log)
+	const admin = await ensureAccount(wallet, secret, fees, log, "admin")
 	const calls = [bridgeOf(wallet, m).methods.claim_ownership!(), tokenOf(wallet, m).methods.accept_merchant_admin!()]
 	await new BatchCall(wallet, calls).send({ from: admin, fee: sponsored(m) })
 	return admin

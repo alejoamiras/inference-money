@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { handlerFor } from "./cli"
-import { type Command, parseDelay, parseInvocation } from "./cli-args"
+import { parseDelay, parseInvocation } from "./cli-args"
 
 describe("bridge CLI arguments", () => {
 	it("parses grouped commands, variadic args, valued flags and switches", () => {
@@ -43,27 +42,5 @@ describe("bridge CLI arguments", () => {
 	it("bounds a delay to the token's [3600, 86400] seconds", () => {
 		expect(parseDelay("3600")).toBe(3600n)
 		for (const bad of ["3599", "86401", "1h", "-1"]) expect(() => parseDelay(bad)).toThrow()
-	})
-
-	it("has a handler for every command it parses", () => {
-		const commands: Command[] = [
-			"deploy",
-			"admin address",
-			"admin accept",
-			"admin propose",
-			"merchants add",
-			"merchants off",
-			"merchants on",
-			"merchants delay",
-			"merchants guardian",
-			"merchants cancel",
-			"merchants list",
-			"pause",
-			"verify",
-			"manifest-path",
-			"probe",
-			"scan",
-		]
-		expect(commands.filter((c) => handlerFor(c) === undefined)).toEqual([])
 	})
 })

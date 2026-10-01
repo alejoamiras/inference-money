@@ -6,7 +6,7 @@ import { type BridgeManifest, PROTOCOL_VERSION, parseManifest } from "@inference
 import { REPO_ROOT } from "@inference-money/local-network"
 import { type Address, getAddress, type Hex } from "viem"
 import { deployPortal, deployRouter, initializePortal } from "./deploy-l1"
-import { deployBridgeL2, ensureDeployerAccount, type L2Fees } from "./deploy-l2"
+import { deployBridgeL2, ensureAccount, type L2Fees } from "./deploy-l2"
 import type { BridgeEvmArtifacts } from "./evm"
 import type { L1Signer } from "./l1"
 import { ensureStandardContracts } from "./standard"
@@ -40,7 +40,7 @@ export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 	const info = await c.node.getNodeInfo()
 	const l1c = info.l1ContractAddresses
 	const registry = getAddress(l1c.registryAddress.toString())
-	const deployer = await ensureDeployerAccount(c.wallet, c.deployerSecret, c.fees, c.log)
+	const deployer = await ensureAccount(c.wallet, c.deployerSecret, c.fees, c.log, "deployer")
 	await ensureStandardContracts(c.wallet, c.node, { from: deployer, ...(c.fees.tx ? { fee: { paymentMethod: c.fees.tx } } : {}) }, c.log)
 	const portal = await deployPortal(c.l1, c.evm)
 	c.log(`portal ${portal.address}`)

@@ -1,0 +1,194 @@
+import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { Contract } from "@aztec-labs/aztec.js/contracts"
+import { Fr } from "@aztec-labs/aztec.js/fields"
+import {
+	type BridgeManifest,
+	instanceFromRecord,
+	MERCHANT_MAX_DELAY,
+	MERCHANT_MIN_DELAY,
+	signingKeyFor,
+} from "@inference-money/bridge-core"
+import { parseTour, tourHeader } from "@inference-money/demo"
+import {
+	acceptAdmin,
+	accountFor,
+	bridgeOf,
+	buildBridgeContracts,
+	LOCAL_ADMIN_SECRET,
+	openBridgeWallet,
+	proposeAdmin,
+	readBundle,
+	readDemoFile,
+	tokenOf,
+	verifyDeployment,
+} from "@inference-money/deployer"
+import { REPO_ROOT } from "@inference-money/local-network"
+import { encodeAbiParameters, type Hex, keccak256, pad } from "viem"
+import { l2Actor } from "./actors"
+import { harness, INTEGRATION } from "./harness"
+import { asAdmin, sponsored } from "./token"
+
+const CLI = join(REPO_ROOT, "packages", "deployer", "src", "cli.ts")
+
+/** `bun run bridge …` in a process of its own, as an operator runs it: its exit code and everything it printed. */
+async function bridge(...args: string[]): Promise<{ code: number; out: string }> {
+	const p = Bun.spawn(["bun", CLI, ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
+	const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
+	return { code, out: `${out}${err}` }
+}
+
+async function ok(...args: string[]): Promise<string> {
+	const r = await bridge(...args)
+	expect(r.code, r.out).toBe(0)
+	return r.out
+}
+
+let evm: ReturnType<typeof buildBridgeContracts> | undefined
+
+/** The names of the checks `verify` fails for `m` against the chain as it is now. */
+async function failing(m: BridgeManifest = harness().manifest): Promise<string[]> {
+	const { runId, l1, node } = harness()
+	evm ??= buildBridgeContracts(runId, false, process.env)
+	const checks = await verifyDeployment(m, evm, l1.publicClient, node)
+	return checks.filter((c) => !c.ok).map((c) => c.name)
+}
+
+const bridgeAt = () => bridgeOf(harness().wallet, harness().manifest)
+const tokenAt = () => tokenOf(harness().wallet, harness().manifest)
+
+describe.skipIf(!INTEGRATION)("operator CLI", () => {
+	let dir: string
+	beforeAll(() => {
+		dir = mkdtempSync(join(harness().manifestPath, "..", "operator-"))
+	})
+	afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+	it("[A28] demo setup publishes the users' tag; the acceptance run settles twice and records a tour verify accepts", async () => {
+		const { manifest: m, manifestPath } = harness()
+		await ok("demo", "setup", manifestPath)
+		expect(readDemoFile({ path: manifestPath, m })?.usersTag).toMatch(/^[0-9a-f]{32}$/)
+
+		const tour = join(dir, "tour.json")
+		await ok("smoke", manifestPath, "--record", tour)
+		await ok("smoke", manifestPath)
+		await ok("verify", manifestPath, "--tour", tour)
+		const steps = parseTour(JSON.parse(readFileSync(tour, "utf8"))).steps
+		expect(steps.filter((s) => s.verdict === "refused").map((s) => s.rule)).toEqual(["transfer", "exitDestination"])
+		expect(steps.find((s) => s.id === "withdraw")?.l1?.txHash).toMatch(/^0x[0-9a-f]{64}$/)
+	}, 3_600_000)
+
+	describe("[A28] verify fails exactly the checks a drift breaks, and passes once it is undone", () => {
+		it("a manifest naming another L1 deployer", async () => {
+			const m = harness().manifest
+			expect(await failing()).toEqual([])
+			expect(await failing({ ...m, l1: { ...m.l1, deployer: `0x${"ab".repeat(20)}` } })).toEqual([
+				"portal.initializer == L1 deployer",
+			])
+		})
+
+		it("a manifest whose proxy is not the token's minter", async () => {
+			const m = harness().manifest
+			const proxy = { ...m.l2.proxy, address: `0x${"0e".repeat(32)}` as Hex }
+			expect(await failing({ ...m, l2: { ...m.l2, proxy } })).toContain("token minter == proxy")
+		})
+
+		it("a portal holding less USDC than the L2 supply", async () => {
+			const { manifest: m, l1 } = harness()
+			// MockUsdc is OpenZeppelin's ERC20: balances are the mapping at slot 0.
+			const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [m.l1.portal, 0n]))
+			const held = (await l1.publicClient.getStorageAt({ address: m.l1.usdc, slot })) ?? pad("0x0")
+			await l1.test.setStorageAt({ address: m.l1.usdc, index: slot, value: pad("0x0") })
+			try {
+				expect(await failing()).toEqual(["L2 supply ≤ portal USDC"])
+			} finally {
+				await l1.test.setStorageAt({ address: m.l1.usdc, index: slot, value: held })
+			}
+			expect(await failing()).toEqual([])
+		})
+
+		it("a handover proposed and not withdrawn", async () => {
+			const { wallet, owner, manifest: m } = harness()
+			await proposeAdmin(wallet, m, owner, await l2Actor(), sponsored())
+			try {
+				expect(await failing()).toEqual(["bridge: no ownership transfer pending", "no merchant admin handover pending"])
+			} finally {
+				await bridgeAt().methods.cancel_ownership_transfer!().send(asAdmin())
+				await tokenAt().methods.propose_merchant_admin!(AztecAddress.ZERO).send(asAdmin())
+			}
+			expect(await failing()).toEqual([])
+		})
+
+		it("a paused bridge", async () => {
+			await bridgeAt().methods.set_paused!(true).send(asAdmin())
+			try {
+				expect(await failing()).toEqual(["bridge not paused"])
+			} finally {
+				await bridgeAt().methods.set_paused!(false).send(asAdmin())
+			}
+			expect(await failing()).toEqual([])
+		})
+
+		// The setter reschedules the guardian slot itself; each listed entry keeps its delay until synced.
+		it("a delay setting not yet synced to the merchants", async () => {
+			await tokenAt().methods.set_merchant_delay!(MERCHANT_MIN_DELAY).send(asAdmin())
+			try {
+				const drifted = await failing()
+				expect(drifted.length).toBeGreaterThan(0)
+				expect(drifted.filter((name) => !/^merchant 0x[0-9a-f]{64} delay == setting$/.test(name))).toEqual([])
+			} finally {
+				await tokenAt().methods.set_merchant_delay!(MERCHANT_MAX_DELAY).send(asAdmin())
+			}
+			expect(await failing()).toEqual([])
+		})
+
+		it("a tour recorded on another deployment", async () => {
+			const foreign = join(dir, "foreign-tour.json")
+			const header = tourHeader(harness().manifest)
+			const step = { id: "claim", actor: "alice", action: "claim", to: "alice", amount: "1", verdict: "settled", world: [] }
+			const contracts = { ...header.contracts, bridge: `0x${"cd".repeat(32)}` }
+			writeFileSync(foreign, JSON.stringify({ ...header, contracts, steps: [step] }))
+			const r = await bridge("verify", harness().manifestPath, "--tour", foreign)
+			expect(r.code, r.out).toBe(1)
+			expect(r.out).toContain("contracts.bridge")
+		})
+	})
+
+	it("[A28] export writes a bundle from which a fresh wallet rebuilds and reads the contracts, nothing else needed", async () => {
+		const { manifest: m, manifestPath, node } = harness()
+		const out = join(dir, "export")
+		await ok("export", manifestPath, "--out", out)
+		const bundle = await readBundle(out)
+		expect(bundle.manifest).toEqual(m)
+
+		const fresh = await openBridgeWallet(node, { prove: false })
+		try {
+			const token = await instanceFromRecord(bundle.artifacts.token, bundle.manifest.l2.token)
+			await fresh.registerContract(token, bundle.artifacts.token)
+			const reader = (await fresh.createSchnorrAccount(LOCAL_ADMIN_SECRET, Fr.ZERO, signingKeyFor(LOCAL_ADMIN_SECRET))).address
+			const { result } = await Contract.at(token.address, bundle.artifacts.token, fresh).methods.decimals!().simulate({
+				from: reader,
+			})
+			expect(BigInt(result)).toBe(6n)
+		} finally {
+			await fresh.stop()
+		}
+	})
+
+	it("[A28] admin propose hands both roles to a new admin, who hands them back; verify follows the manifest's admin", async () => {
+		const { wallet, owner, manifest: m, manifestPath } = harness()
+		const secret = Fr.random()
+		await ok("admin", "propose", manifestPath, (await accountFor(wallet, secret)).toString())
+		const next = await acceptAdmin(wallet, m, secret, () => {})
+		try {
+			expect(await failing({ ...m, l2: { ...m.l2, admin: next.toString() as Hex } })).toEqual([])
+			expect(await failing()).toEqual(["bridge owner == admin", "merchant admin == admin"])
+		} finally {
+			await proposeAdmin(wallet, m, next, owner, sponsored())
+			await acceptAdmin(wallet, m, LOCAL_ADMIN_SECRET, () => {})
+		}
+		expect(await failing()).toEqual([])
+	}, 900_000)
+})

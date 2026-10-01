@@ -23,23 +23,23 @@ export interface L2Fees {
 }
 
 /**
- * Registers the Schnorr account `secret` rebuilds in `wallet` (a deployer or an admin), deploying it first unless its
- * initialization nullifier exists. An account deploy does not publish its instance, so the node's contract lookup cannot
- * answer this.
+ * Registers the Schnorr account `secret` rebuilds in `wallet`, deploying it first unless its initialization nullifier
+ * exists. An account deploy does not publish its instance, so the node's contract lookup cannot answer this.
  */
-export async function ensureDeployerAccount(
+export async function ensureAccount(
 	wallet: EmbeddedWallet,
 	secret: Fr,
-	fees: L2Fees,
+	fees: Pick<L2Fees, "accountDeploy">,
 	log: (m: string) => void,
+	label: string,
 ): Promise<AztecAddress> {
 	const manager = await wallet.createSchnorrAccount(secret, Fr.ZERO, signingKeyFor(secret))
 	const { initializationStatus } = await wallet.getContractMetadata(manager.address)
 	if (initializationStatus === ContractInitializationStatus.INITIALIZED) {
-		log(`deployer ${manager.address}: already deployed`)
+		log(`${label} ${manager.address}: already deployed`)
 		return manager.address
 	}
-	log(`deployer ${manager.address}: deploying`)
+	log(`${label} ${manager.address}: deploying`)
 	const deploy = await manager.getDeployMethod()
 	await deploy.send({ from: NO_FROM, fee: { paymentMethod: await fees.accountDeploy(manager.address) } })
 	return manager.address

@@ -32,7 +32,10 @@ import { type Chain, createPublicClient, createTestClient, http, type PublicClie
 export const INTEGRATION = Boolean(process.env.INTEGRATION)
 
 export interface Harness {
+	runId: string
 	manifest: BridgeManifest
+	/** The written manifest, as the operator CLI takes it. */
+	manifestPath: string
 	node: AztecNode
 	/** Holds every actor account; each tx it submits lands in `sent`. */
 	wallet: EmbeddedWallet
@@ -122,7 +125,7 @@ async function open(log: (m: string) => void): Promise<Harness> {
 		cleanup.push(() => netDown(runId, log))
 		await netUp(runId, log)
 	}
-	const { manifest } = await deployLocal(runId, { log })
+	const { manifest, path: manifestPath } = await deployLocal(runId, { log })
 	cleanup.push(enterOwnedTmpDir())
 	const net = resolveEndpoints(runId)
 	const node = createAztecNodeClient(net.nodeUrl)
@@ -136,7 +139,9 @@ async function open(log: (m: string) => void): Promise<Harness> {
 	const test = createTestClient({ chain, mode: "anvil", transport: http(net.anvilUrl) })
 	log(`harness open: run ${runId}, bridge ${manifest.l2.bridge.address}`)
 	return {
+		runId,
 		manifest,
+		manifestPath,
 		node,
 		wallet,
 		sent,

@@ -3,12 +3,20 @@ import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
-import { type BridgeManifest, registerBridgeContracts, registerSponsor, signingKeyFor } from "@inference-money/bridge-core"
+import {
+	type BridgeManifest,
+	memoryPaymentStore,
+	PaymentGate,
+	type PaymentStore,
+	registerBridgeContracts,
+	registerSponsor,
+	signingKeyFor,
+} from "@inference-money/bridge-core"
 import { resolveEndpoints, runIdFor } from "@inference-money/local-network"
 import { localManifestPath, readManifest } from "./manifest"
 import { TESTNET } from "./networks"
 import { aztecSecretFrom, KEYED } from "./secrets"
-import { withBridgeWallet } from "./wallet"
+import { recordingNode, type SentTx, withBridgeWallet } from "./wallet"
 
 /** Fixed and public, like anvil's keys: a local deploy hands both admin roles to it, so the handover runs every time. */
 export const LOCAL_ADMIN_SECRET = new Fr(0xad3170ca1n)
@@ -55,18 +63,38 @@ export const adminSecretFor = (m: BridgeManifest): Fr => (m.network === "local" 
 export interface Session {
 	ref: ManifestRef
 	m: BridgeManifest
+	/** The node, read directly; the wallet sends through the gate's. */
 	node: AztecNode
 	wallet: EmbeddedWallet
 	endpoints: Endpoints
+	/** Every tx the wallet sent, in order. */
+	sent: SentTx[]
+	/** The wallet is bound to it, so `payRequest` accepts the wallet. */
+	gate: PaymentGate
+}
+
+export interface SessionOptions extends EndpointFlags {
+	/** Payment records (default: in memory, for this process only). */
+	payments?: PaymentStore
+	/** Runs as each tx goes to the node, after proving. */
+	onSend?: (tx: SentTx) => void
 }
 
 /** A wallet on the manifest's network with the sponsor and the bridge's contracts registered. */
-export function withSession<T>(ref: ManifestRef, flags: EndpointFlags, fn: (s: Session) => Promise<T>): Promise<T> {
-	const endpoints = endpointsFor(ref, flags)
-	return withBridgeWallet(endpoints.nodeUrl, { prove: provesFor(ref.m) }, async (wallet, node) => {
+export function withSession<T>(ref: ManifestRef, opts: SessionOptions, fn: (s: Session) => Promise<T>): Promise<T> {
+	const endpoints = endpointsFor(ref, opts)
+	const sent: SentTx[] = []
+	const gate = (node: AztecNode) => new PaymentGate(recordingNode(node, sent, opts.onSend), opts.payments ?? memoryPaymentStore())
+	let bound: PaymentGate | undefined
+	const bind = (node: AztecNode, open: (n: AztecNode) => Promise<EmbeddedWallet>) => {
+		bound = gate(node)
+		return bound.bindWallet(open)
+	}
+	return withBridgeWallet(endpoints.nodeUrl, { prove: provesFor(ref.m), bind }, async (wallet, node) => {
+		if (!bound) throw new Error("the session's wallet was opened without its payment gate")
 		await registerSponsor(wallet, ref.m)
 		await registerBridgeContracts(wallet, ref.m)
-		return fn({ ref, m: ref.m, node, wallet, endpoints })
+		return fn({ ref, m: ref.m, node, wallet, endpoints, sent, gate: bound })
 	})
 }
 

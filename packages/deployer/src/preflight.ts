@@ -3,7 +3,7 @@ import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
 import { ManaUsageEstimate } from "@aztec-labs/stdlib/gas"
 import { type Address, createPublicClient, getAddress, http, isAddressEqual, type PublicClient, parseAbi } from "viem"
-import { ESTIMATED_GAS_PER_TX, feeBudget, TESTNET_DEPLOY_AND_SMOKE_TXS } from "./budget"
+import { ESTIMATED_GAS_PER_TX, feeBudget, TESTNET_DEPLOY_TXS, TESTNET_SPONSORED_TXS } from "./budget"
 import type { NetworkPins } from "./networks"
 
 export interface Check {
@@ -78,15 +78,22 @@ export function checkAssets(a: { usdcDecimals: number; usdcVersion: string; perm
  * The deploy + smoke pay with Fee Juice minted from the L1 faucet; the SponsoredFPC only pays for the
  * private smoke legs and is topped up right before them, so its balance here is informational.
  */
-export function checkFeePath(f: { faucetMint: bigint; budget: bigint; sponsorPublished: boolean; sponsorBalance: bigint }): Check[] {
+export function checkFeePath(f: {
+	faucetMint: bigint
+	deployBudget: bigint
+	sponsoredBudget: bigint
+	sponsorPublished: boolean
+	sponsorBalance: bigint
+}): Check[] {
 	const fj = (v: bigint) => `${(Number(v / 10n ** 14n) / 1e4).toFixed(2)} FJ`
+	const enough = f.sponsorBalance >= f.sponsoredBudget
 	return [
-		check("fee faucet mint ≥ budget", f.faucetMint >= f.budget, `${fj(f.faucetMint)} per mint vs budget ${fj(f.budget)}`),
+		check("fee faucet mint ≥ deploy budget", f.faucetMint >= f.deployBudget, `${fj(f.faucetMint)} per mint vs ${fj(f.deployBudget)}`),
 		check("SponsoredFPC published", f.sponsorPublished, f.sponsorPublished ? "instance found" : "no instance at the canonical address"),
 		check(
-			"SponsoredFPC balance (informational)",
+			"SponsoredFPC balance vs the sponsored budget (informational)",
 			true,
-			f.sponsorBalance >= f.budget ? fj(f.sponsorBalance) : `${fj(f.sponsorBalance)} < budget: the smoke tops it up first`,
+			enough ? `${fj(f.sponsorBalance)} ≥ ${fj(f.sponsoredBudget)}` : `${fj(f.sponsorBalance)}: \`demo fund\` tops it up first`,
 		),
 	]
 }
@@ -135,11 +142,17 @@ export async function probeNetwork(pins: NetworkPins, l1RpcUrl: string): Promise
 		getFeeJuiceBalance(fpc, node),
 		node.getPredictedMinFees(ManaUsageEstimate.Limit),
 	])
-	const budget = feeBudget({ txCount: TESTNET_DEPLOY_AND_SMOKE_TXS.length, gasPerTx: ESTIMATED_GAS_PER_TX, predicted, headroom: 3n })
+	const budget = (txs: readonly string[]) => feeBudget({ txCount: txs.length, gasPerTx: ESTIMATED_GAS_PER_TX, predicted, headroom: 3n })
 	return [
 		...checkNodeIdentity(info, pins),
 		...checkL1Wiring(wiring, pins),
 		...checkAssets(assets, pins),
-		...checkFeePath({ faucetMint: assets.faucetMint, budget, sponsorPublished: fpcInstance !== undefined, sponsorBalance: balance }),
+		...checkFeePath({
+			faucetMint: assets.faucetMint,
+			deployBudget: budget(TESTNET_DEPLOY_TXS),
+			sponsoredBudget: budget(TESTNET_SPONSORED_TXS),
+			sponsorPublished: fpcInstance !== undefined,
+			sponsorBalance: balance,
+		}),
 	]
 }

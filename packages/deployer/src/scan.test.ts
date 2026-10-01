@@ -21,7 +21,7 @@ function fixture() {
 	mkdirSync(repo)
 	execFileSync("git", ["init", "-q"], { cwd: repo })
 	writeFileSync(join(repo, "notes.md"), "nothing here\n")
-	const roots = { cache: join(root, "cache"), wallets: join(root, "wallets") }
+	const roots = { cache: join(root, "cache"), wallets: join(root, "wallets"), skip: [join(root, "cache", "disposable")] }
 	mkdirSync(roots.cache)
 	return { repo, roots }
 }
@@ -32,6 +32,11 @@ afterEach(() => {
 describe("scanForSecrets", () => {
 	it("finds a run's secret leaked into the checkout or the caches, and in a keyless run looks for none", () => {
 		const { repo, roots } = fixture()
+		// Where the values belong (the disposable keys) or third-party code sits (installed dependencies) is not a leak.
+		for (const dir of [join(roots.cache, "disposable"), join(roots.cache, "keyed", "node_modules", "dep")]) {
+			mkdirSync(dir, { recursive: true })
+			writeFileSync(join(dir, "file"), SECRETS.TESTNET_ADMIN_SECRET)
+		}
 		expect(scanForSecrets(repo, NEEDLES, roots)).toMatchObject({ found: false, walletDirs: [] })
 
 		writeFileSync(join(repo, "notes.md"), `key ${SECRETS.TESTNET_ADMIN_SECRET.slice(2).toUpperCase()}\n`)
