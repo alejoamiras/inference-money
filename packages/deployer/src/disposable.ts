@@ -1,5 +1,5 @@
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync } from "node:fs"
+import { basename, dirname, join, resolve } from "node:path"
 import type { Writable } from "node:stream"
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
@@ -12,7 +12,7 @@ import { generatePrivateKey, privateKeyToAddress } from "viem/accounts"
 import { type Command, type Invocation, parseInvocation } from "./cli-args"
 import { TESTNET } from "./networks"
 import { runRedacted } from "./redact"
-import { DISPOSABLE_DIR, keyedWorktree } from "./run-state"
+import { DISPOSABLE_DIR, keyedWorktree, syncDir, withStateDir, writeDurably } from "./run-state"
 import { scanFailed, scanForSecrets, scanLine } from "./scan"
 import { aztecSecretFrom, KEYED, l1PrivateKeyFrom, scrubbedEnv, secretNeedles } from "./secrets"
 import type { ManifestRef } from "./session"
@@ -39,6 +39,10 @@ export interface DisposableAddresses {
  */
 export async function disposableInit(file = DISPOSABLE_FILE): Promise<DisposableAddresses> {
 	mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+	return withBundle(file, () => drawBundle(file))
+}
+
+async function drawBundle(file: string): Promise<DisposableAddresses> {
 	const l1Key = generatePrivateKey()
 	const [deployerSecret, adminSecret] = [Fr.random(), Fr.random()]
 	const admin = await accountOf(adminSecret)
@@ -48,9 +52,16 @@ export async function disposableInit(file = DISPOSABLE_FILE): Promise<Disposable
 		`${KEYED.adminSecret}=${adminSecret}`,
 		`${ADMIN_ADDRESS}=${admin}`,
 	]
-	writeFileSync(file, `${lines.join("\n")}\n`, { mode: 0o600, flag: "wx" })
+	writeDurably(file, `${lines.join("\n")}\n`)
+	syncDir(dirname(file))
 	return { l1: privateKeyToAddress(l1Key), deployer: await accountOf(deployerSecret), admin }
 }
+
+/**
+ * Holds `file`'s bundle while `fn` runs: `init`, `exec` and `destroy` exclude each other, so a `destroy` that passed its
+ * checks can't delete a bundle drawn after another `destroy` removed the one it checked.
+ */
+const withBundle = <T>(file: string, fn: () => Promise<T>): Promise<T> => withStateDir(".lock", basename(file), fn, dirname(file))
 
 /** Refuses a file another user owns or anyone else can read or write, and a symlink, before reading a byte. */
 export function assertOwnerOnly(file: string, uid = process.getuid?.()): void {
@@ -118,9 +129,22 @@ function bindsDeployment(inv: Invocation, file: string): boolean {
 		const prior = recordedBridge(file)
 		throw new Error(prior ? `These disposable keys already deployed bridge ${prior}: one deployment per bundle.` : UNRECORDED)
 	}
-	fsyncSync(fd)
-	closeSync(fd)
+	try {
+		fsyncSync(fd)
+	} finally {
+		closeSync(fd)
+	}
+	syncDir(dirname(file))
 	return true
+}
+
+/** Atomic and flushed, so a crash leaves the empty marker or the bridge, never a torn address. */
+function recordBridge(file: string, bridge: string): void {
+	const tmp = `${deploymentFile(file)}.${process.pid}.tmp`
+	rmSync(tmp, { force: true })
+	writeDurably(tmp, `${bridge}\n`)
+	renameSync(tmp, deploymentFile(file))
+	syncDir(dirname(file))
 }
 
 function childEnv(inv: Invocation, file: string): NodeJS.ProcessEnv {
@@ -141,6 +165,10 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 	const inv = parseInvocation(command)
 	if (inv.command.startsWith("disposable")) throw new Error("disposable exec runs a bridge command, not another disposable one")
 	const file = opts.file ?? DISPOSABLE_FILE
+	return withBundle(file, () => execUnder(inv, command, file, root, opts))
+}
+
+async function execUnder(inv: Invocation, command: string[], file: string, root: string, opts: ExecOptions): Promise<number> {
 	const env = childEnv(inv, file)
 	const needles = secretNeedles(env)
 	const argv = opts.argv ? opts.argv(command) : [CLI, ...command]
@@ -148,7 +176,7 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 	const code = await runRedacted(argv, needles, opts.out ?? process.stdout, opts.err ?? process.stderr, env)
 	if (binds && code === 0) {
 		const m = parseManifest(JSON.parse(readFileSync(join(root, "deployments", "testnet.json"), "utf8")))
-		writeFileSync(deploymentFile(file), `${m.l2.bridge.address}\n`, { mode: 0o600 })
+		recordBridge(file, m.l2.bridge.address)
 	}
 	const scan = (opts.scan ?? scanForSecrets)(root, needles)
 	if (scanFailed(scan)) {
@@ -182,8 +210,13 @@ function assertRecorded(file: string, ref: ManifestRef): void {
  * the deploy holds no roles at all), and a prune can undo a switch short of finalized; with the keys gone, a role left
  * with them could never move again. Anything less, a failed read or an unrecorded deploy included, keeps the file.
  */
-export async function disposableDestroy(ref: ManifestRef, opts: { file?: string; roles?: typeof finalRoles } = {}): Promise<void> {
+export function disposableDestroy(ref: ManifestRef, opts: { file?: string; roles?: typeof finalRoles } = {}): Promise<void> {
 	const file = opts.file ?? DISPOSABLE_FILE
+	if (!existsSync(file)) return Promise.resolve()
+	return withBundle(file, () => destroyUnder(ref, file, opts.roles ?? finalRoles))
+}
+
+async function destroyUnder(ref: ManifestRef, file: string, roles: typeof finalRoles): Promise<void> {
 	if (!existsSync(file)) return
 	const values = readValues(file)
 	assertRecorded(file, ref)
@@ -194,7 +227,7 @@ export async function disposableDestroy(ref: ManifestRef, opts: { file?: string;
 		[KEYED.deployerSecret, KEYED.adminSecret].map(async (name) => (await accountOf(aztecSecretFrom(name, values))).toField()),
 	)
 	const admin = Fr.fromHexString(ref.m.l2.admin ?? "0x0")
-	const r = await (opts.roles ?? finalRoles)(ref)
+	const r = await roles(ref)
 	if (!r.token.equals(Fr.fromHexString(ref.m.l2.token.address))) {
 		throw new Error(`Bridge ${ref.m.l2.bridge.address} is configured with token ${r.token}, not ${ref.path}'s.`)
 	}
@@ -206,4 +239,5 @@ export async function disposableDestroy(ref: ManifestRef, opts: { file?: string;
 	}
 	rmSync(file)
 	rmSync(deploymentFile(file), { force: true })
+	syncDir(dirname(file))
 }

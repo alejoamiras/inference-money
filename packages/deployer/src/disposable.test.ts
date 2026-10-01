@@ -145,6 +145,27 @@ describe("the disposable fallback", () => {
 		expect(existsSync(file)).toBe(true)
 	})
 
+	it("one operation per bundle: while a destroy is in flight, another destroy and an init refuse", async () => {
+		const file = join(temp(), "testnet.env")
+		const { l1 } = await disposableInit(file)
+		const ref = {
+			path: "testnet.json",
+			m: { ...MANIFEST, l1: { ...MANIFEST.l1, deployer: l1 }, l2: { ...MANIFEST.l2, admin: someone.toString() as Hex } },
+		}
+		writeFileSync(`${file}.deployment`, `${MANIFEST.l2.bridge.address}\n`)
+		let release = () => {}
+		const gate = new Promise<void>((r) => {
+			release = r
+		})
+		const first = disposableDestroy(ref, { file, roles: () => gate.then(() => NOBODY) })
+		await expect(disposableDestroy(ref, { file, roles: async () => NOBODY })).rejects.toThrow("in use")
+		await expect(disposableInit(file)).rejects.toThrow("in use")
+		release()
+		await first
+		expect(existsSync(file)).toBe(false)
+		await disposableInit(file)
+	})
+
 	it("destroy removes the keys only on finalized proof that the manifest's admin, not a disposable one, holds both roles alone", async () => {
 		const file = join(temp(), "testnet.env")
 		const { l1, admin } = await disposableInit(file)
