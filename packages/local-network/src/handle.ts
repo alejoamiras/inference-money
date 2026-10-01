@@ -4,7 +4,7 @@ import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { z } from "zod"
 
-export const REPO_ROOT = resolve(import.meta.dir, "../../..")
+export const REPO_ROOT = resolve(import.meta.dirname, "../../..")
 /** Real disk, never tmpfs: a store killed before teardown would otherwise pin its RAM until the holder dies. */
 export const NET_ROOT = join(homedir(), ".cache", "inference-money", "net")
 /** Outside each run's data dir, which teardown removes, so a failed run's logs survive it. */

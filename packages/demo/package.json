@@ -5,7 +5,8 @@
 	"description": "The demo cast (public keys derived from a deployment), the recorded tour's schema and the world-view decoder; browser-safe, shared by the deployer and the showcase.",
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./files": "./src/files.ts"
 	},
 	"scripts": {
 		"test": "bun test --preload ../../test-preload.ts src",

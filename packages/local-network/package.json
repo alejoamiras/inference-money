@@ -5,7 +5,8 @@
 	"description": "Per-run anvil + Aztec local network: registry-claimed ports, detached process groups torn down by verified identity, real-disk state.",
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./handle": "./src/handle.ts"
 	},
 	"scripts": {
 		"test": "bun test src",

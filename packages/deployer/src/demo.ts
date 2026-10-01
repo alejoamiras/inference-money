@@ -1,5 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { writeFileSync } from "node:fs"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import {
 	type ClaimTicket,
@@ -14,7 +13,8 @@ import {
 	syncMerchantList,
 	waitClaimFinalized,
 } from "@inference-money/bridge-core"
-import { aztecAddressOf, castMember, DEMO_SEED, type DemoFile, demoFileSchema, MERCHANTS, newUsersTag, USERS } from "@inference-money/demo"
+import { aztecAddressOf, castMember, DEMO_SEED, MERCHANTS, newUsersTag, USERS } from "@inference-money/demo"
+import { type DemoFile, demoFilePath, readDemoFile } from "@inference-money/demo/files"
 import { privateKeyToAccount } from "viem/accounts"
 import { addMerchants } from "./admin"
 import { keepUntilFinal, type ReclaimSteps } from "./claim-finality"
@@ -37,17 +37,7 @@ import { type StateDir, withStateDir } from "./run-state"
 import { l1PrivateKeyFrom } from "./secrets"
 import { adminAccount, type ManifestRef, type Session, withSession } from "./session"
 
-/** Where the published users' tag lives: beside a testnet manifest, or in a local run's directory. */
-export const demoFilePath = (ref: ManifestRef): string =>
-	ref.m.network === "local" ? join(dirname(ref.path), "demo.json") : ref.path.replace(/\.json$/, "-demo.json")
-
-/** This deployment's published demo, or undefined: none yet, or one left by an earlier deployment. */
-export function readDemoFile(ref: ManifestRef): DemoFile | undefined {
-	const path = demoFilePath(ref)
-	if (!existsSync(path)) return undefined
-	const f = demoFileSchema.parse(JSON.parse(readFileSync(path, "utf8")))
-	return f.bridge === ref.m.l2.bridge.address ? f : undefined
-}
+export { demoFilePath, readDemoFile }
 
 export function usersTagOf(ref: ManifestRef): string {
 	const f = readDemoFile(ref)

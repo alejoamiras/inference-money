@@ -1,5 +1,4 @@
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import { NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import { createAztecNodeClient, waitForTx } from "@aztec-labs/aztec.js/node"
 import type { TxHash } from "@aztec-labs/aztec.js/tx"
 import {
@@ -10,16 +9,13 @@ import {
 	type DepositKind,
 	isClaimConsumed,
 	L2_DONE,
-	merchantSide,
 	prepareDeposit,
 	reconcileDeposit,
 	registerSponsor,
-	Side,
-	sideCapsule,
 	sponsoredPayment,
 	submitDeposit,
 	syncMerchantList,
-	TOKEN_REFUSALS,
+	transferPrivate,
 	waitClaimable,
 } from "@inference-money/bridge-core"
 import { type Actor, type CastMember, castMember, type User } from "@inference-money/demo"
@@ -125,11 +121,9 @@ export async function castClaim(s: Session, t: ClaimTicket, log: Log): Promise<"
  * proven, with the token's own refusal text.
  */
 export async function sendPrivate(s: Session, from: AztecAddress, to: AztecAddress, amount: bigint): Promise<TxHash> {
-	const token = tokenOf(s.wallet, s.m)
-	const side = merchantSide(await syncMerchantList(s.node, token.address), to, from, false)
-	if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.transfer)
-	const call = token.methods.transfer_private_to_private!(from, to, amount, 0).with({ capsules: [sideCapsule(token.address, side)] })
-	const { txHash } = await call.send({ from, fee: sponsored(s), wait: NO_WAIT })
+	const token = tokenOf(s.wallet, s.m).address
+	const list = await syncMerchantList(s.node, token)
+	const txHash = await transferPrivate(s.wallet, token, { from, to, amount }, { list, fee: sponsored(s) })
 	await waitForTx(s.node, txHash, L2_DONE)
 	return txHash
 }
