@@ -15,9 +15,14 @@ type State = { status: "idle" | "running" | "done" } | { status: "failed"; messa
 
 async function runCheck(demo: DemoWallet, m: BridgeManifest, push: (rows: Row[]) => void): Promise<void> {
 	const token = AztecAddress.fromStringUnsafe(m.l2.token.address)
-	push([{ ...(await timeTransfer(demo, m, token)), warmup: true }])
-	for (let i = 0; i < RUNS; i++) push([{ ...(await timeTransfer(demo, m, token)), warmup: false }])
-	for (let i = 0; i < RUNS; i++) push((await timeOpenAndPay(demo, m, token)).map((s) => ({ ...s, warmup: false })))
+	// Each action waits its turn among the wallet's sends outside its own timing.
+	const transfer = () => demo.exclusive(() => timeTransfer(demo, m, token))
+	push([{ ...(await transfer()), warmup: true }])
+	for (let i = 0; i < RUNS; i++) push([{ ...(await transfer()), warmup: false }])
+	for (let i = 0; i < RUNS; i++) {
+		const samples = await demo.exclusive(() => timeOpenAndPay(demo, m, token))
+		push(samples.map((s) => ({ ...s, warmup: false })))
+	}
 }
 
 const STATE_TEXT = { idle: "Not run yet.", running: "Proving…", done: "Done." } as const

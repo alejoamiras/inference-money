@@ -12,6 +12,7 @@ import {
 import { demoL1, l1CtxOf, withdrawWorld } from "@inference-money/demo"
 import { type Address, isAddressEqual } from "viem"
 import type { PendingExit } from "@/demo/tickets"
+import { oneAtATime } from "@/lib/one-at-a-time"
 import { type FeedRow, PUBLIC_TEXT } from "@/tour/player"
 import type { LiveCtx } from "./actions"
 
@@ -98,8 +99,8 @@ async function payOne(
 	}
 }
 
-/** One pass at a time, page-wide: two, from a poll and a run or from two mounts of live mode, would each send a payout. */
-let passes: Promise<unknown> = Promise.resolve()
+/** Page-wide: two passes, from a poll and a run or from two mounts of live mode, would each send a payout. */
+const onePass = oneAtATime()
 
 /** Pays out every pending withdrawal that can be; returns the ones still to come. One already paid elsewhere is dropped. */
 export function finishPayouts(
@@ -107,7 +108,7 @@ export function finishPayouts(
 	wallets: Record<"A_demo" | "B_demo", Address>,
 	onRow: (row: FeedRow) => void,
 ): Promise<Payout[]> {
-	const pass = passes.then(async () => {
+	return onePass(async () => {
 		const left: Payout[] = []
 		for (const p of ctx.tickets.exits()) {
 			const still = await payOne(ctx, wallets, p, onRow)
@@ -115,6 +116,4 @@ export function finishPayouts(
 		}
 		return left
 	})
-	passes = pass.catch(() => undefined)
-	return pass
 }

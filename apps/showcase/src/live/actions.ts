@@ -168,26 +168,47 @@ async function fromDraft(ctx: LiveCtx, p: PendingDeposit, draft: DepositDraft): 
 function decodedDeposit(p: PendingDeposit): { draft?: DepositDraft; ticket?: ClaimTicket } | undefined {
 	try {
 		const ticket = p.claim ? decodeClaimTicket(p.claim) : undefined
-		// The codec revives whatever JSON it holds, so a tampered entry decodes too.
-		if (ticket && typeof ticket.draft?.intent?.amount !== "bigint") return undefined
+		if (ticket && !claimReadable(ticket)) return undefined
 		return { draft: p.draft ? decodeDepositDraft(p.draft) : undefined, ticket }
 	} catch {
 		return undefined
 	}
 }
 
+/** The codec revives whatever JSON it holds, so a tampered ticket decodes too: it must hold what a claim reads. */
+const claimReadable = (t: ClaimTicket): boolean =>
+	typeof t.messageHash === "string" &&
+	typeof t.leafIndex === "bigint" &&
+	typeof t.depositor === "string" &&
+	t.draft?.secretOrSalt instanceof Fr &&
+	t.draft.intent?.recipient instanceof AztecAddress &&
+	typeof t.draft.intent.amount === "bigint"
+
+/** `p` as a claim, a reason it cannot claim yet, or nothing to try; an entry that no longer decodes is dropped. */
+async function claimableEntry(ctx: LiveCtx, p: PendingDeposit): Promise<Claimable | undefined> {
+	const d = decodedDeposit(p)
+	if (!d) {
+		ctx.tickets.dropDeposit(p.id)
+		return undefined
+	}
+	if (d.draft) return fromDraft(ctx, p, d.draft)
+	if (!d.ticket) return undefined
+	return p.claimed && (await stillClaimed(ctx, p, d.ticket)) ? undefined : { p, ticket: d.ticket }
+}
+
+/** The oldest of `user`'s deposits that can claim; one that cannot be read right now never holds up those after it. */
 async function claimable(ctx: LiveCtx, user: User): Promise<Claimable> {
+	let failure: unknown
 	for (const p of ctx.tickets.deposits()) {
 		if (p.user !== user) continue
-		const d = decodedDeposit(p)
-		if (!d) {
-			ctx.tickets.dropDeposit(p.id)
-			continue
+		try {
+			const found = await claimableEntry(ctx, p)
+			if (found !== undefined) return found
+		} catch (e) {
+			failure ??= e
 		}
-		if (d.draft) return fromDraft(ctx, p, d.draft)
-		if (!d.ticket) continue
-		if (!(p.claimed && (await stillClaimed(ctx, p, d.ticket)))) return { p, ticket: d.ticket }
 	}
+	if (failure !== undefined) throw failure
 	return NOTHING_TO_CLAIM
 }
 
@@ -324,18 +345,14 @@ const KINDS: Record<LiveAction, readonly TxKind[]> = {
  * Runs a draft live: refusals come back with the contract's rule text before anything is proven or sent; an Ethereum
  * step the demo wallet cannot afford, or a claim with nothing to claim, replays the recording and says so.
  */
-/** Page-wide: a remount resets live mode's own guard, and two runs would share the wallet's journal of the next send. */
-let runs: Promise<unknown> = Promise.resolve()
-
+/** One at a time through the page's wallet: a remount resets live mode's own guard, not the wallet's. */
 export function runDraft(
 	ctx: LiveCtx,
 	d: ValidDraft,
 	wallets: Record<"A_demo" | "B_demo", `0x${string}`>,
 	report: Report,
 ): Promise<Outcome> {
-	const run = runs.then(() => runOne(ctx, d, wallets, report))
-	runs = run.catch(() => undefined)
-	return run
+	return ctx.demo.exclusive(() => runOne(ctx, d, wallets, report))
 }
 
 async function runOne(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | "B_demo", `0x${string}`>, report: Report): Promise<Outcome> {

@@ -6,6 +6,7 @@ import type { Tx } from "@aztec-labs/stdlib/tx"
 import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { type BridgeManifest, PaymentGate, type PaymentStore, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
 import { ACTORS, type Actor, type CastMember, castMember, recordingNode, type SentTx } from "@inference-money/demo"
+import { oneAtATime } from "@/lib/one-at-a-time"
 
 /** A cast member whose account the page's wallet holds, so the page can sign as it. */
 export interface Player extends CastMember {
@@ -33,6 +34,8 @@ export interface DemoWallet {
 	sent: SentTx[]
 	/** Called once, with the next tx as it leaves for the node and before any response, so a record of it survives both. */
 	onNextSend: { fn?: (tx: SentTx) => void }
+	/** Runs `fn` alone among everything that sends through this wallet, whose next-send journal they would share. */
+	exclusive: <T>(fn: () => Promise<T>) => Promise<T>
 	stages: StageFeed
 }
 
@@ -139,5 +142,5 @@ export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: D
 		const account = await wallet.createSchnorrAccount(member.secret, Fr.ZERO, member.signingKey, actor)
 		cast[actor] = { ...member, address: account.address }
 	}
-	return { wallet, node, gate, cast, sentAt, sent, onNextSend, stages }
+	return { wallet, node, gate, cast, sentAt, sent, onNextSend, exclusive: oneAtATime(), stages }
 }

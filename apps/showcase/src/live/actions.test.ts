@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import { MANIFEST, TOUR, WALLETS } from "@/config/network"
 import type { PendingDeposit, Tickets } from "@/demo/tickets"
 import type { DemoWallet } from "@/demo/wallet"
+import { oneAtATime } from "@/lib/one-at-a-time"
 import type { LiveCtx } from "./actions"
 import { replay, runDraft, withConflictRetry } from "./actions"
 import type { Outcome } from "./outcome"
@@ -15,26 +16,36 @@ const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as P
 /** Where a claim this page made stands on L2, and how many claims it sent. */
 const claims = vi.hoisted(() => ({ state: "checkpointed" as "checkpointed" | "finalized" | "pruned", sent: 0 }))
 
-// A deposit this page sent is still unconfirmed on Ethereum; a claim ticket's nullifier is wherever `claims` says.
-vi.mock("@inference-money/bridge-core", async (original) => ({
-	...(await original<typeof import("@inference-money/bridge-core")>()),
-	decodeDepositDraft: () => ({}),
-	reconcileDeposit: async () => "pending",
-	decodeClaimTicket: (s: string) => {
-		if (s === "unreadable") throw new Error("not a claim ticket")
-		if (s === "tampered") return {}
-		return { draft: { intent: { amount: 10_000n } } }
-	},
-	syncMerchantList: async () => ({}),
-	openRequest: async () => {
-		requests.order.push("open")
-		await requests.hold
-		requests.order.push("opened")
-		return { commitment: 1 }
-	},
-	isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") =>
-		claims.state === "finalized" || (claims.state === "checkpointed" && at === "checkpointed"),
-}))
+// A deposit this page sent is still unconfirmed on Ethereum (a "broken" one cannot even be read back); a claim
+// ticket's nullifier is wherever `claims` says.
+vi.mock("@inference-money/bridge-core", async (original) => {
+	const { Fr } = await import("@aztec-labs/aztec.js/fields")
+	const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
+	const intent = { recipient: AztecAddress.ZERO, amount: 10_000n }
+	const ticket = { messageHash: "0x01", leafIndex: 1n, depositor: "0xd", draft: { secretOrSalt: Fr.ZERO, intent } }
+	return {
+		...(await original<typeof import("@inference-money/bridge-core")>()),
+		decodeDepositDraft: (s: string) => ({ marker: s }),
+		reconcileDeposit: async (d: { marker: string }) => {
+			if (d.marker === "broken") throw new Error("Cannot read properties of undefined (reading 'message')")
+			return "pending"
+		},
+		decodeClaimTicket: (s: string) => {
+			if (s === "unreadable") throw new Error("not a claim ticket")
+			if (s === "tampered") return { ...ticket, messageHash: undefined }
+			return ticket
+		},
+		syncMerchantList: async () => ({}),
+		openRequest: async () => {
+			requests.order.push("open")
+			await requests.hold
+			requests.order.push("opened")
+			return { commitment: 1 }
+		},
+		isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") =>
+			claims.state === "finalized" || (claims.state === "checkpointed" && at === "checkpointed"),
+	}
+})
 vi.mock("@inference-money/demo", async (original) => ({
 	...(await original<typeof import("@inference-money/demo")>()),
 	castClaim: async () => {
@@ -56,7 +67,7 @@ function ctxWith(landed: boolean): LiveCtx {
 		hasExecutionSucceeded: () => landed,
 	}
 	const node = { getTxReceipt: async () => receipt, getTxEffect: async () => undefined }
-	const demo = { sent, node } as unknown as DemoWallet
+	const demo = { sent, node, exclusive: oneAtATime() } as unknown as DemoWallet
 	return { demo, m: MANIFEST, l1RpcUrl: "", tickets: undefined as never, tour: TOUR, explorer: undefined, requests: new Map() }
 }
 
@@ -150,6 +161,22 @@ describe("claim", () => {
 		store.set("d3", { id: "d3", user: "bob", since: 2, claim: "ticket" })
 		claims.state = "pruned"
 		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
+	})
+
+	it("never lets a deposit it cannot read back right now hold up the claims after it", async () => {
+		const store = new Map<string, PendingDeposit>([
+			["b1", { id: "b1", user: "bob", since: 0, draft: "broken" }],
+			["b2", { id: "b2", user: "bob", since: 1, claim: "ticket" }],
+		])
+		const tickets = {
+			deposits: () => [...store.values()],
+			putDeposit: (d: PendingDeposit) => store.set(d.id, d),
+			dropDeposit: (id: string) => store.delete(id),
+		} as unknown as Tickets
+		const ctx: LiveCtx = { ...ctxWith(false), tickets }
+		const before = claims.sent
+		expect((await runDraft(ctx, { actor: "bob", action: "claim", to: "bob" }, WALLETS, () => {})).kind).toBe("settled")
+		expect([claims.sent - before, [...store.keys()], store.get("b2")?.claimed]).toEqual([1, ["b1", "b2"], true])
 	})
 })
 
