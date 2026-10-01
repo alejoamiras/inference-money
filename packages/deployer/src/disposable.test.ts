@@ -94,6 +94,29 @@ describe("the disposable fallback", () => {
 		expect(await disposableExec(accept, { ...opts, argv: () => CHILD, out: sink().stream, err: sink().stream, scan: leaked })).toBe(1)
 	})
 
+	it("a signal during exec reaps its child and runs the scan before the bundle is released", async () => {
+		const [keys, checkout] = [temp(), temp()]
+		const file = join(keys, "testnet.env")
+		await disposableInit(file)
+		let scanned = false
+		const scan = () => {
+			scanned = true
+			return { found: false, files: 0, skipped: 0, walletDirs: [] }
+		}
+		const opts = { file, root: checkout, keyedRoot: checkout, scan, out: sink().stream, err: sink().stream }
+		const pidFile = join(keys, "child.pid")
+		const lingers = `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
+		const run = disposableExec(["verify", "x"], { ...opts, argv: () => ["-e", lingers] })
+		while (!existsSync(pidFile)) await Bun.sleep(20)
+		await expect(disposableExec(["verify", "x"], opts)).rejects.toThrow("in use")
+
+		process.emit("SIGTERM", "SIGTERM")
+		expect(await run).not.toBe(0)
+		expect(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0)).toThrow()
+		expect(scanned).toBe(true)
+		expect(await disposableExec(["verify", "x"], { ...opts, argv: () => ["-e", ""] })).toBe(0)
+	})
+
 	it("binds a bundle to the deployment its deploy made: a second deploy is refused, and destroy takes only that one", async () => {
 		const [keys, checkout] = [temp(), temp()]
 		const file = join(keys, "testnet.env")

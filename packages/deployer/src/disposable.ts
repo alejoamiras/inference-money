@@ -12,7 +12,7 @@ import { generatePrivateKey, privateKeyToAddress } from "viem/accounts"
 import { type Command, type Invocation, parseInvocation } from "./cli-args"
 import { TESTNET } from "./networks"
 import { runRedacted } from "./redact"
-import { DISPOSABLE_DIR, keyedWorktree, syncDir, withStateDir, writeDurably } from "./run-state"
+import { DISPOSABLE_DIR, keyedWorktree, StateDir, syncDir, withStateDir, writeDurably } from "./run-state"
 import { scanFailed, scanForSecrets, scanLine } from "./scan"
 import { aztecSecretFrom, KEYED, l1PrivateKeyFrom, scrubbedEnv, secretNeedles } from "./secrets"
 import type { ManifestRef } from "./session"
@@ -59,7 +59,8 @@ async function drawBundle(file: string): Promise<DisposableAddresses> {
 
 /**
  * Holds `file`'s bundle while `fn` runs: `init`, `exec` and `destroy` exclude each other, so a `destroy` that passed its
- * checks can't delete a bundle drawn after another `destroy` removed the one it checked.
+ * checks can't delete a bundle drawn after another `destroy` removed the one it checked. For `init` and `destroy` only,
+ * which spawn nothing: a signal releases the bundle and exits at once.
  */
 const withBundle = <T>(file: string, fn: () => Promise<T>): Promise<T> => withStateDir(".lock", basename(file), fn, dirname(file))
 
@@ -165,7 +166,14 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 	const inv = parseInvocation(command)
 	if (inv.command.startsWith("disposable")) throw new Error("disposable exec runs a bridge command, not another disposable one")
 	const file = opts.file ?? DISPOSABLE_FILE
-	return withBundle(file, () => execUnder(inv, command, file, root, opts))
+	// No signal handler here: `runRedacted` owns cancellation, reaping the secret-bearing child before the scan runs and
+	// the bundle is released. One that exited first would leave that child running, unlocked.
+	const bundle = StateDir.acquire(".lock", basename(file), dirname(file))
+	try {
+		return await execUnder(inv, command, file, root, opts)
+	} finally {
+		bundle.release()
+	}
 }
 
 async function execUnder(inv: Invocation, command: string[], file: string, root: string, opts: ExecOptions): Promise<number> {
