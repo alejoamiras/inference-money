@@ -56,7 +56,8 @@ export const netHandleSchema = z.strictObject({
 export type NetHandle = z.infer<typeof netHandleSchema>
 
 export const handlePath = (runId: string, root = NET_ROOT) => join(root, `${runId}.json`)
-export const runDataDir = (runId: string, root = NET_ROOT) => join(root, runId)
+/** Fixed-length whatever the run id: the node binds Unix sockets under it (see `assertSocketRoom`). */
+export const runDataDir = (runId: string, root = NET_ROOT) => join(root, createHash("sha256").update(runId).digest("hex").slice(0, 16))
 
 export function readHandle(runId: string, root = NET_ROOT): NetHandle | undefined {
 	const path = handlePath(runId, root)
