@@ -6,9 +6,10 @@
  * therefore refuses a request completed on chain, or one this client has paid or is paying, through one
  * {@link PaymentRecord} per request in an injected {@link PaymentStore}:
  * - `reserved`, under the store's lock before anything is simulated; a failure before the send releases it;
- * - `sent`, written by the {@link PaymentGate} between proving and the node receiving the tx, with the tx's hash and
- *   expiry. Only the chain moves it on: to `paid` once the tx is finalized, or released once the tx reverted or the
- *   chain passed its expiry without it, so an uncertain send never allows a second one;
+ * - `sent`, written by the {@link PaymentGate}, whose node the payer's wallet must be built on, between proving and the
+ *   node receiving the tx, with the tx's hash and expiry. Only finalized chain state moves it on: to `paid` with the
+ *   tx, or released once the tx's revert, or the chain passing its expiry without it, is final. So an uncertain send
+ *   never allows a second one;
  * - `paid`.
  * Clients that share no store (two devices) can still both pay; the on-chain check only narrows that window.
  */
@@ -20,6 +21,7 @@ import { type AztecNode, waitForTx } from "@aztec-labs/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { poseidon2HashWithSeparator } from "@aztec-labs/foundation/crypto/sync"
+import { FunctionSelector } from "@aztec-labs/stdlib/abi"
 import { SiloedTag, Tag } from "@aztec-labs/stdlib/logs"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import type { OffchainEffect, Tx } from "@aztec-labs/stdlib/tx"
@@ -173,31 +175,53 @@ export async function openRequest(
 
 interface Expected {
 	owner: string
+	token: AztecAddress
 	commitment: Fr
 	siloedTag: Fr
 }
 
-// A private payment's completion log carries the request's siloed tag; a public one passes the commitment as calldata.
-function pays(tx: Tx, e: Expected): boolean {
+let publicPaySelector: Promise<Fr> | undefined
+
+/** The selector the token's `transfer_public_to_commitment` calldata starts with. */
+function publicPay(): Promise<Fr> {
+	publicPaySelector ??= (async () => {
+		const fn = tokenArtifact.nonDispatchPublicFunctions.find((f) => f.name === "transfer_public_to_commitment")
+		if (!fn) throw new Error("the token artifact has no transfer_public_to_commitment")
+		return (await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)).toField()
+	})()
+	return publicPaySelector
+}
+
+/**
+ * Whether `tx` pays into `e`'s request: privately, its completion log carries the request's siloed tag, which only the
+ * token can emit; publicly, it calls the token's `transfer_public_to_commitment(from, commitment, amount, nonce)`.
+ */
+async function pays(tx: Tx, e: Expected): Promise<boolean> {
 	if (tx.data.getNonEmptyPrivateLogs().some((log) => log.fields[0].equals(e.siloedTag))) return true
-	return tx.publicFunctionCalldata.some((call) => call.values.some((v) => v.equals(e.commitment)))
+	const selector = await publicPay()
+	return tx
+		.getPublicCallRequestsWithCalldata()
+		.some(
+			({ request, calldata }) =>
+				request.contractAddress.equals(e.token) && !!calldata[0]?.equals(selector) && !!calldata[2]?.equals(e.commitment),
+		)
 }
 
-async function latestTimestamp(node: Pick<AztecNode, "getBlockData">): Promise<bigint> {
-	const data = await node.getBlockData("latest")
-	if (!data) throw new Error("The node returned no latest block.")
-	return data.header.globalVariables.timestamp
+async function timestampAt(node: Pick<AztecNode, "getBlockData">, tag: "latest" | "finalized"): Promise<bigint | undefined> {
+	return (await node.getBlockData(tag))?.header.globalVariables.timestamp
 }
 
-/** What a `sent` record becomes on the node's current view; undefined releases it. */
+/**
+ * What a `sent` record becomes on the node's current view; undefined releases it. A prune can undo any block short of
+ * finalized, and with it a revert or the absence of the tx, so only finalized evidence moves a record on.
+ */
 async function settle(r: Extract<PaymentRecord, { state: "sent" }>, node: PaymentNode): Promise<PaymentRecord | undefined> {
 	const receipt = await node.getTxReceipt(TxHash.fromString(r.txHash))
-	if (receipt.isMined()) {
-		if (receipt.hasExecutionReverted()) return undefined
-		return receipt.status === TxStatus.FINALIZED ? { state: "paid", txHash: r.txHash } : r
+	if (receipt.isMined() && receipt.status === TxStatus.FINALIZED) {
+		return receipt.hasExecutionReverted() ? undefined : { state: "paid", txHash: r.txHash }
 	}
-	if (receipt.isPending()) return r
-	return (await latestTimestamp(node)) > BigInt(r.expiresAt) ? undefined : r
+	if (receipt.isMined() || receipt.isPending()) return r
+	return ((await timestampAt(node, "finalized")) ?? 0n) > BigInt(r.expiresAt) ? undefined : r
 }
 
 async function refreshed(r: PaymentRecord | undefined, node: PaymentNode, now: number): Promise<PaymentRecord | undefined> {
@@ -206,19 +230,22 @@ async function refreshed(r: PaymentRecord | undefined, node: PaymentNode, now: n
 	return r
 }
 
-function refusalFor(r: PaymentRecord): PaymentRefusedError {
-	if (r.state === "paid") return new PaymentRefusedError("paid", r.txHash)
-	return new PaymentRefusedError("in-flight", r.state === "sent" ? r.txHash : undefined)
+function refusalFor(r: PaymentRecord | undefined): PaymentRefusedError {
+	if (r?.state === "paid") return new PaymentRefusedError("paid", r.txHash)
+	return new PaymentRefusedError("in-flight", r?.state === "sent" ? r.txHash : undefined)
 }
 
 /**
- * The payment records plus a node wrapper: a wallet built on {@link PaymentGate.node} has every payment tx recorded
- * as `sent` (hash and expiry) after proving and before the node receives it, and a superseded reservation never
- * reaches the node.
+ * The payment records plus the node a payer's wallet sends through ({@link PaymentGate.bindWallet}): every payment tx
+ * is recorded as `sent` (hash and expiry) after proving and before the node receives it, and an attempt whose
+ * reservation was superseded never reaches the node.
  */
 export class PaymentGate {
 	readonly node: AztecNode
 	private readonly expected = new Map<string, Expected>()
+	private readonly bound = new WeakSet<object>()
+	/** The attempts whose payment tx this gate recorded as `sent`; the chain, not their send's response, settles them. */
+	private readonly recorded = new Set<string>()
 
 	constructor(
 		node: AztecNode,
@@ -229,6 +256,17 @@ export class PaymentGate {
 			get: (target, key, receiver) =>
 				key === "sendTx" ? (tx: Tx) => this.recordThenSend(target, tx) : Reflect.get(target, key, receiver),
 		})
+	}
+
+	/** Builds a payer's wallet on this gate's node; `payRequest` refuses a wallet built any other way. */
+	async bindWallet<W extends object>(create: (node: AztecNode) => Promise<W>): Promise<W> {
+		const wallet = await create(this.node)
+		this.bound.add(wallet)
+		return wallet
+	}
+
+	isBound(wallet: object): boolean {
+		return this.bound.has(wallet)
 	}
 
 	/** The request's record as the chain now settles it (`paid`, released, or unchanged). */
@@ -263,22 +301,27 @@ export class PaymentGate {
 		})
 	}
 
-	/** Runs `send` with `key`'s payment expected at the node; any tx it sends that pays `commitment` is recorded first. */
+	/**
+	 * Runs `send` with `owner`'s payment into `commitment` expected at the node. One attempt per request at a time: a
+	 * second one, possible once the first's reservation lapsed, is refused rather than sharing the expectation.
+	 */
 	async sending(key: string, owner: string, token: AztecAddress, commitment: Fr, send: () => Promise<TxHash>): Promise<TxHash> {
 		const siloedTag = await siloedCompletionTag(token, commitment)
-		this.expected.set(key, { owner, commitment, siloedTag })
+		if (this.expected.has(key)) throw new PaymentRefusedError("in-flight")
+		this.expected.set(key, { owner, token, commitment, siloedTag })
 		try {
 			const txHash = await send()
-			await this.confirmSent(key, owner, txHash)
+			if (!this.recorded.has(owner)) await this.recordMissed(key, owner, txHash)
 			return txHash
 		} finally {
-			this.expected.delete(key)
+			this.recorded.delete(owner)
+			if (this.expected.get(key)?.owner === owner) this.expected.delete(key)
 		}
 	}
 
 	private async recordThenSend(target: AztecNode, tx: Tx): Promise<void> {
 		for (const [key, e] of this.expected) {
-			if (pays(tx, e)) await this.recordSent(key, e.owner, tx.getTxHash().toString(), tx.data.expirationTimestamp)
+			if (await pays(tx, e)) await this.recordSent(key, e.owner, tx.getTxHash().toString(), tx.data.expirationTimestamp)
 		}
 		return target.sendTx(tx)
 	}
@@ -286,19 +329,27 @@ export class PaymentGate {
 	private recordSent(key: string, owner: string, txHash: string, expiresAt: bigint): Promise<void> {
 		return this.store.locked(key, async () => {
 			const r = await this.store.get(key)
-			if (r?.state !== "reserved" || r.owner !== owner) throw r ? refusalFor(r) : new PaymentRefusedError("in-flight")
+			if (r?.state !== "reserved" || r.owner !== owner) throw refusalFor(r)
 			await this.store.put(key, { state: "sent", owner, txHash, expiresAt: expiresAt.toString() })
+			this.recorded.add(owner)
 		})
 	}
 
-	// A wallet not built on `node` sends unseen: the tx went out, so it is recorded with the longest expiry it can have.
-	private confirmSent(key: string, owner: string, txHash: TxHash): Promise<void> {
-		return this.store.locked(key, async () => {
+	/**
+	 * A send the gate never saw is out all the same. It is recorded, with the longest expiry it can have, only over the
+	 * attempt's own reservation: by the time a late response arrives the record may belong to a successor, which it must
+	 * never overwrite.
+	 */
+	private async recordMissed(key: string, owner: string, txHash: TxHash): Promise<void> {
+		const recorded = await this.store.locked(key, async () => {
 			const r = await this.store.get(key)
-			if (r?.state === "sent" && r.txHash === txHash.toString()) return
-			const expiresAt = (await latestTimestamp(this.node)) + MAX_TX_LIFETIME
+			if (r?.state !== "reserved" || r.owner !== owner) return false
+			const expiresAt = ((await timestampAt(this.node, "latest")) ?? 0n) + MAX_TX_LIFETIME
 			await this.store.put(key, { state: "sent", owner, txHash: txHash.toString(), expiresAt: expiresAt.toString() })
+			return true
 		})
+		const outcome = recorded ? "it is recorded as sent" : "a newer record holds the request, so it could not be recorded"
+		throw new Error(`Payment ${txHash} was sent without passing the payment gate; ${outcome}.`)
 	}
 }
 
@@ -317,10 +368,10 @@ function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side
 }
 
 /**
- * Pays `amount` into a request through `gate`, whose node the wallet must be built on. Refused before anything is
- * proven when the request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), or
- * neither stamped nor paid by a merchant. Returns once the payment is checkpointed; its record turns `paid` when
- * finalized ({@link PaymentGate.status}).
+ * Pays `amount` into a request with a wallet built by `gate.bindWallet`. Refused before anything is proven when the
+ * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), or neither stamped nor
+ * paid by a merchant. Returns once the payment is checkpointed; its record turns `paid` when finalized
+ * ({@link PaymentGate.status}).
  */
 export async function payRequest(
 	gate: PaymentGate,
@@ -329,6 +380,7 @@ export async function payRequest(
 	p: PaymentIntent,
 	opts: ListOptions,
 ): Promise<TxHash> {
+	if (!gate.isBound(wallet)) throw new Error("payRequest needs a wallet built on its gate's node, by PaymentGate.bindWallet.")
 	const key = paymentKey(token, p.commitment)
 	const owner = await gate.reserve(key)
 	try {
@@ -346,9 +398,12 @@ export async function payRequest(
 				async () => (await call.send({ from: p.from, fee: opts.fee, wait: NO_WAIT })).txHash,
 			)
 		})
-		await waitForTx(gate.node, txHash, { ...L2_DONE, dontThrowOnRevert: true })
-		if (!(await gate.status(key)))
-			throw new Error(`The payment ${txHash} was rejected on Aztec, so nothing was paid; it can be retried.`)
+		const receipt = await waitForTx(gate.node, txHash, { ...L2_DONE, dontThrowOnRevert: true })
+		if (receipt.hasExecutionReverted()) {
+			throw new Error(
+				`The payment ${txHash} was rejected on Aztec, so nothing was paid; the request takes a new payment once that is final.`,
+			)
+		}
 		return txHash
 	} finally {
 		await gate.releaseUnsent(key, owner)

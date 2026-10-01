@@ -12,7 +12,6 @@ import {
 	openedCommitment,
 	PaymentGate,
 	type PaymentIntent,
-	PaymentRefusedError,
 	type PaymentStore,
 	paymentKey,
 	payRequest,
@@ -24,29 +23,32 @@ import { REQUEST_OPENED_EFFECT, siloedRequestMarks } from "./stamp"
 import { MANIFEST } from "./test/fixtures"
 
 const token = await AztecAddress.random()
-const [merchant, alice] = await Promise.all([AztecAddress.random(), AztecAddress.random()])
+const [merchant, alice, elsewhere] = await Promise.all([AztecAddress.random(), AztecAddress.random(), AztecAddress.random()])
 const LIST: MerchantList = {
 	block: 1,
 	at: 0n,
 	entries: new Map([[merchant.toString(), { off: false, scheduledOff: false, changeAt: 0n }]]),
 }
+const MINED = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED]
 
-const receipt = (status: TxStatus) => ({
+const receipt = ({ status, reverted }: { status: TxStatus; reverted: boolean }) => ({
 	status,
-	isMined: () => [TxStatus.PROPOSED, TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED].includes(status),
+	isMined: () => MINED.includes(status),
 	isPending: () => status === TxStatus.PENDING,
 	isDropped: () => status === TxStatus.DROPPED,
-	hasExecutionSucceeded: () => true,
-	hasExecutionReverted: () => false,
+	hasExecutionSucceeded: () => !reverted,
+	hasExecutionReverted: () => reverted,
 })
 
-/** One chain: a tx sent through any node is included at once unless `lose` drops it; its completion is then on chain. */
+/** One chain: a tx sent through any node lands checkpointed unless `lose` drops it; a landed private payment completes. */
 function fakeChain() {
 	const chain = {
 		ts: 1_000n,
+		finalizedTs: 1_000n,
 		lose: false,
+		revert: false,
 		included: [] as Tx[],
-		receipts: new Map<string, TxStatus>(),
+		receipts: new Map<string, { status: TxStatus; reverted: boolean }>(),
 		stamps: new Set<string>(),
 		completions: new Set<string>(),
 	}
@@ -54,99 +56,134 @@ function fakeChain() {
 		sendTx: async (tx: Tx) => {
 			if (chain.lose) return
 			chain.included.push(tx)
-			chain.receipts.set(tx.getTxHash().toString(), TxStatus.CHECKPOINTED)
-			for (const log of tx.data.getNonEmptyPrivateLogs()) chain.completions.add(log.fields[0].toString())
+			chain.receipts.set(tx.getTxHash().toString(), { status: TxStatus.CHECKPOINTED, reverted: chain.revert })
+			if (!chain.revert) for (const log of tx.data.getNonEmptyPrivateLogs()) chain.completions.add(log.fields[0].toString())
 		},
-		getTxReceipt: async (h: TxHash) => receipt(chain.receipts.get(h.toString()) ?? TxStatus.DROPPED),
-		getBlockData: async () => ({ header: { globalVariables: { timestamp: chain.ts } } }),
+		getTxReceipt: async (h: TxHash) => receipt(chain.receipts.get(h.toString()) ?? { status: TxStatus.DROPPED, reverted: false }),
+		getBlockData: async (tag: string) => ({
+			header: { globalVariables: { timestamp: tag === "finalized" ? chain.finalizedTs : chain.ts } },
+		}),
 		findLeavesIndexes: async (_b: unknown, _t: unknown, [n]: Fr[]) => [chain.stamps.has(n!.toString()) ? { data: 0n } : undefined],
 		getPrivateLogsByTags: async ({ tags }: { tags: { value: Fr }[] }) => [chain.completions.has(tags[0]!.value.toString()) ? [{}] : []],
 		getPublicLogsByTags: async () => [[]],
 	} as unknown as AztecNode
-	return { chain, node }
+	const finalize = (tx: Tx) => {
+		const r = chain.receipts.get(tx.getTxHash().toString())!
+		chain.receipts.set(tx.getTxHash().toString(), { ...r, status: TxStatus.FINALIZED })
+	}
+	return { chain, node, finalize }
 }
+type World = ReturnType<typeof fakeChain>
 
-type Hooks = { beforeSend?: () => Promise<void> | void; afterSend?: () => void }
+type Hooks = { beforeSend?: () => Promise<void> | void; afterSend?: () => Promise<void> | void; publicTarget?: AztecAddress }
 
-/** A wallet whose send proves a private payment into the call's commitment and hands it to `node` (its gate's). */
-function fakePayer(node: AztecNode, ts: () => bigint, hooks: Hooks = {}): Wallet {
+/**
+ * A wallet whose send proves the payload's payment and hands it to `node`: a private payment carries the request's
+ * completion log, a public one the call to `publicTarget` (the token unless a hook names another contract).
+ */
+function fakePayer(node: AztecNode, w: World, hooks: Hooks = {}): Wallet {
 	return {
 		getChainInfo: async () => ({ chainId: new Fr(MANIFEST.l1.chainId), version: new Fr(MANIFEST.l2.rollupVersion) }),
 		sendTx: async (p: ExecutionPayload, opts?: { wait?: unknown }) => {
 			await hooks.beforeSend?.()
-			const tag = await siloedCompletionTag(token, p.calls[0]!.args[1]!)
+			const call = p.calls[0]!
+			const isPublic = call.name === "transfer_public_to_commitment"
+			const logs = isPublic ? [] : [{ fields: [await siloedCompletionTag(token, call.args[1]!)] }]
+			const calls = isPublic
+				? [{ request: { contractAddress: hooks.publicTarget ?? token }, calldata: [call.selector.toField(), ...call.args] }]
+				: []
 			const txHash = TxHash.random()
 			const tx = {
 				getTxHash: () => txHash,
-				data: { expirationTimestamp: ts() + 86_399n, getNonEmptyPrivateLogs: () => [{ fields: [tag] }] },
-				publicFunctionCalldata: [],
+				data: { expirationTimestamp: w.chain.ts + 86_399n, getNonEmptyPrivateLogs: () => logs },
+				getPublicCallRequestsWithCalldata: () => calls,
 			} as unknown as Tx
 			await node.sendTx(tx)
-			hooks.afterSend?.()
+			await hooks.afterSend?.()
 			return opts?.wait === NO_WAIT ? { txHash, offchainEffects: [], offchainMessages: [] } : { receipt: { txHash } }
 		},
 	} as unknown as Wallet
 }
 
-async function stampedRequest(chain: ReturnType<typeof fakeChain>["chain"]): Promise<Fr> {
+async function stampedRequest(w: World): Promise<Fr> {
 	const commitment = Fr.random()
-	chain.stamps.add((await siloedRequestMarks(token, commitment)).stamp.toString())
+	w.chain.stamps.add((await siloedRequestMarks(token, commitment)).stamp.toString())
 	return commitment
 }
 
-const pay = (commitment: Fr, from = alice): PaymentIntent => ({ from, commitment, amount: 5n, kind: "private" })
-
-/** A tab: its own gate and wallet over the shared store and chain. */
-function tab(store: PaymentStore, w: ReturnType<typeof fakeChain>, hooks?: Hooks, now?: () => number) {
+/** A tab: its own gate and bound wallet over the shared store and chain. */
+async function tab(store: PaymentStore, w: World, hooks?: Hooks, now?: () => number) {
 	const gate = new PaymentGate(w.node, store, now)
-	const wallet = fakePayer(gate.node, () => w.chain.ts, hooks)
-	return { gate, pay: (c: Fr, from?: AztecAddress) => payRequest(gate, wallet, token, pay(c, from), { list: LIST }) }
+	const wallet = await gate.bindWallet(async (node) => fakePayer(node, w, hooks))
+	const pay = (c: Fr, from = alice, kind: PaymentIntent["kind"] = "private") =>
+		payRequest(gate, wallet, token, { from, commitment: c, amount: 5n, kind }, { list: LIST })
+	return { gate, wallet, pay }
 }
 
 const refusal = (reason: string) => expect.objectContaining({ name: "PaymentRefusedError", reason })
+const gated = () => {
+	let open = () => {}
+	const shut = new Promise<void>((r) => {
+		open = r
+	})
+	return { shut, open }
+}
 
 describe("payRequest", () => {
-	it("pays once, then refuses the same request from this client", async () => {
+	it("pays once, then refuses the same request from this client until and after it is final", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
-		const c = await stampedRequest(w.chain)
-		const t = tab(store, w)
+		const c = await stampedRequest(w)
+		const t = await tab(store, w)
 		await t.pay(c)
-		expect(w.chain.included).toHaveLength(1)
 		expect((await store.get(paymentKey(token, c)))?.state).toBe("sent")
 		await expect(t.pay(c)).rejects.toEqual(refusal("in-flight"))
-		w.chain.receipts.set(w.chain.included[0]!.getTxHash().toString(), TxStatus.FINALIZED)
+		w.finalize(w.chain.included[0]!)
 		await expect(t.pay(c)).rejects.toEqual(refusal("paid"))
 		expect(w.chain.included).toHaveLength(1)
+	})
+
+	it("refuses a wallet not built on its gate, before reserving anything", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const c = await stampedRequest(w)
+		const gate = new PaymentGate(w.node, store)
+		const unbound = fakePayer(w.node, w)
+		await expect(
+			payRequest(gate, unbound, token, { from: alice, commitment: c, amount: 5n, kind: "private" }, { list: LIST }),
+		).rejects.toThrow(/bindWallet/)
+		expect(await store.get(paymentKey(token, c))).toBeUndefined()
 	})
 
 	it("lets exactly one of two tabs pay, refusing the other before it proves", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
-		const c = await stampedRequest(w.chain)
-		const results = await Promise.allSettled([tab(store, w).pay(c), tab(store, w).pay(c)])
+		const c = await stampedRequest(w)
+		const [a, b] = await Promise.all([tab(store, w), tab(store, w)])
+		const results = await Promise.allSettled([a.pay(c), b.pay(c)])
 		expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"])
 		expect(results.find((r) => r.status === "rejected")).toEqual({ status: "rejected", reason: refusal("in-flight") })
 		expect(w.chain.included).toHaveLength(1)
 	})
 
-	it("after a reload mid-payment, keeps the request blocked until the chain passes the lost tx's expiry", async () => {
+	it("after a reload mid-payment, keeps the request blocked until the finalized chain passes the lost tx's expiry", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
-		const c = await stampedRequest(w.chain)
+		const c = await stampedRequest(w)
 		w.chain.lose = true
-		const closed = tab(store, w, {
+		const closed = await tab(store, w, {
 			afterSend: () => {
 				throw new Error("tab closed")
 			},
 		})
 		await expect(closed.pay(c)).rejects.toThrow("tab closed")
 		w.chain.lose = false
-		const reloaded = tab(store, w)
+		const reloaded = await tab(store, w)
+		w.chain.ts += 90_000n
+		await expect(reloaded.pay(c), "the latest block alone can still be pruned").rejects.toEqual(refusal("in-flight"))
+		w.chain.finalizedTs += 86_399n
 		await expect(reloaded.pay(c)).rejects.toEqual(refusal("in-flight"))
-		w.chain.ts += 86_399n
-		await expect(reloaded.pay(c)).rejects.toEqual(refusal("in-flight"))
-		w.chain.ts += 1n
+		w.chain.finalizedTs += 1n
 		await reloaded.pay(c)
 		expect(w.chain.included).toHaveLength(1)
 	})
@@ -154,46 +191,110 @@ describe("payRequest", () => {
 	it("releases the request when the payment fails before it is sent", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
-		const c = await stampedRequest(w.chain)
-		const failing = tab(store, w, {
+		const c = await stampedRequest(w)
+		const failing = await tab(store, w, {
 			beforeSend: () => {
 				throw new Error("Simulation error: Balance too low")
 			},
 		})
 		await expect(failing.pay(c)).rejects.toThrow("Balance too low")
 		expect(await store.get(paymentKey(token, c))).toBeUndefined()
-		await tab(store, w).pay(c)
+		await (await tab(store, w)).pay(c)
 		expect(w.chain.included).toHaveLength(1)
+	})
+
+	it("keeps a reverted payment's request blocked until the revert is final", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const c = await stampedRequest(w)
+		const t = await tab(store, w)
+		w.chain.revert = true
+		await expect(t.pay(c)).rejects.toThrow(/rejected on Aztec/)
+		w.chain.revert = false
+		await expect(t.pay(c), "a prune could still undo the revert").rejects.toEqual(refusal("in-flight"))
+		w.finalize(w.chain.included[0]!)
+		await t.pay(c)
+		expect(w.chain.included).toHaveLength(2)
 	})
 
 	it("never lets an abandoned reservation reach the node once another tab took it over", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
-		const c = await stampedRequest(w.chain)
+		const c = await stampedRequest(w)
 		let ms = 0
-		let resume = () => {}
-		const proving = new Promise<void>((r) => {
-			resume = r
-		})
-		const slow = tab(store, w, { beforeSend: () => proving }, () => ms)
+		const proving = gated()
+		const slow = await tab(store, w, { beforeSend: () => proving.shut }, () => ms)
 		const first = slow.pay(c)
 		await Bun.sleep(10)
 		ms += RESERVATION_TTL_MS + 1
-		await tab(store, w, undefined, () => ms).pay(c)
-		resume()
-		await expect(first).rejects.toBeInstanceOf(PaymentRefusedError)
+		await (await tab(store, w, undefined, () => ms)).pay(c)
+		proving.open()
+		await expect(first).rejects.toEqual(refusal("in-flight"))
 		expect(w.chain.included).toHaveLength(1)
+	})
+
+	it("in one tab, refuses a second attempt while a lapsed first one is still sending, and the first never lands", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const c = await stampedRequest(w)
+		let ms = 0
+		const proving = gated()
+		let held = true
+		const t = await tab(store, w, { beforeSend: () => (held ? proving.shut : undefined) }, () => ms)
+		const first = t.pay(c)
+		await Bun.sleep(10)
+		ms += RESERVATION_TTL_MS + 1
+		held = false
+		await expect(t.pay(c)).rejects.toEqual(refusal("in-flight"))
+		proving.open()
+		await expect(first).rejects.toEqual(refusal("in-flight"))
+		expect(w.chain.included).toHaveLength(0)
+		await t.pay(c)
+		expect(w.chain.included).toHaveLength(1)
+	})
+
+	it("never lets a late send response overwrite the record of a payment that replaced it", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const c = await stampedRequest(w)
+		const response = gated()
+		const stalled = await tab(store, w, { afterSend: () => response.shut })
+		w.chain.revert = true
+		const first = stalled.pay(c)
+		while (w.chain.included.length === 0) await Bun.sleep(5)
+		w.chain.revert = false
+		w.finalize(w.chain.included[0]!)
+		await (await tab(store, w)).pay(c)
+		const replacement = w.chain.included[1]!.getTxHash().toString()
+		response.open()
+		await expect(first).rejects.toThrow(/rejected on Aztec/)
+		expect(await store.get(paymentKey(token, c))).toMatchObject({ state: "sent", txHash: replacement })
+		await expect((await tab(store, w)).pay(c)).rejects.toEqual(refusal("in-flight"))
+		expect(w.chain.included).toHaveLength(2)
+	})
+
+	it("records a public payment only when it is the token's call into this request", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const paid = Fr.random()
+		await (await tab(store, w)).pay(paid, merchant, "public")
+		expect((await store.get(paymentKey(token, paid)))?.state).toBe("sent")
+		const unrelated = Fr.random()
+		const elsewhereTab = await tab(store, w, { publicTarget: elsewhere })
+		await expect(elsewhereTab.pay(unrelated, merchant, "public")).rejects.toThrow(/without passing the payment gate/)
+		expect((await store.get(paymentKey(token, unrelated)))?.state, "a send the gate missed still blocks the request").toBe("sent")
 	})
 
 	it("refuses a request already completed on chain, and a user paying an unstamped one, before proving", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
-		const paid = await stampedRequest(w.chain)
+		const paid = await stampedRequest(w)
 		w.chain.completions.add((await siloedCompletionTag(token, paid)).toString())
-		await expect(tab(store, w).pay(paid)).rejects.toEqual(refusal("completed-on-chain"))
+		const t = await tab(store, w)
+		await expect(t.pay(paid)).rejects.toEqual(refusal("completed-on-chain"))
 		const unstamped = Fr.random()
-		await expect(tab(store, w).pay(unstamped)).rejects.toThrow(TOKEN_REFUSALS.payment)
-		await tab(store, w).pay(unstamped, merchant)
+		await expect(t.pay(unstamped)).rejects.toThrow(TOKEN_REFUSALS.payment)
+		await t.pay(unstamped, merchant)
 		expect(w.chain.included).toHaveLength(1)
 		expect(await store.get(paymentKey(token, paid))).toBeUndefined()
 	})
@@ -203,9 +304,8 @@ describe("openedCommitment", () => {
 	it("takes the one request effect the token emitted", async () => {
 		const c = Fr.random()
 		const effect = (contractAddress: AztecAddress, data: Fr[]) => ({ contractAddress, data })
-		const other = await AztecAddress.random()
 		const effects = [
-			effect(other, [REQUEST_OPENED_EFFECT, Fr.random()]),
+			effect(elsewhere, [REQUEST_OPENED_EFFECT, Fr.random()]),
 			effect(token, [Fr.random()]),
 			effect(token, [REQUEST_OPENED_EFFECT, c]),
 		]
