@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import {
@@ -63,6 +63,17 @@ describe("claim", () => {
 		const sponsoredPublic = fakeWallet()
 		await claim(await ticket("public"), NO_NULLIFIER, sponsoredPublic.wallet, M, { from: recipient, fee: "sponsored" })
 		expect(sponsoredPublic.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_public"], feePayer: M.l2.sponsoredFpc })
+	})
+
+	it("binds the recipient's account on its first private claim, and on no later one", async () => {
+		const bindArg = (w: ReturnType<typeof fakeWallet>) => w.sent[0]?.args.at(-1)?.at(-1)
+		const first = fakeWallet()
+		await claim(await ticket("private"), NO_NULLIFIER, first.wallet, M, { from: recipient })
+		expect(bindArg(first)).toBe(1n)
+
+		const bound = fakeWallet({ utility: () => [new Fr(0xd0d0)] })
+		await claim(await ticket("private"), NO_NULLIFIER, bound.wallet, M, { from: recipient })
+		expect(bindArg(bound)).toBe(0n)
 	})
 
 	it("returns only once the node reports the claim checkpointed, whatever the wallet would wait for", async () => {

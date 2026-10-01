@@ -10,6 +10,7 @@ import { siloNullifier } from "@aztec-labs/stdlib/hash"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { computeFeeJuiceMessageNullifier } from "@aztec-labs/stdlib/messaging"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
+import type { Address } from "viem"
 import { sponsoredFpcArtifact, tokenBridgeArtifact } from "./artifacts"
 import { deriveClaimSecret } from "./claim-secret"
 import type { ClaimTicket } from "./deposit"
@@ -84,14 +85,26 @@ export async function registerSponsor(wallet: Pick<Wallet, "registerContract">, 
 	return instance.address
 }
 
-function claimCall(t: ClaimTicket, wallet: Wallet, m: BridgeManifest) {
+/**
+ * The Ethereum address `owner`'s account is bound to, or undefined until its first private claim binds it. Reads
+ * `owner`'s own notes, so only a wallet holding its keys can answer.
+ */
+export async function fundingAddress(wallet: Wallet, m: BridgeManifest, owner: AztecAddress): Promise<Address | undefined> {
+	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
+	const { result } = await bridge.methods.get_funding_address!(owner).simulate({ from: owner })
+	const address = result as EthAddress
+	return address.isZero() ? undefined : (address.toString() as Address)
+}
+
+async function claimCall(t: ClaimTicket, wallet: Wallet, m: BridgeManifest) {
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
 	const { amount, recipient, kind } = t.draft.intent
 	const leaf = new Fr(t.leafIndex)
 	const depositor = EthAddress.fromString(t.depositor)
-	return kind === "private"
-		? bridge.methods.claim_private!(recipient, amount, t.draft.secretOrSalt, leaf, depositor)
-		: bridge.methods.claim_public!(recipient, amount, t.draft.secretOrSalt, leaf, depositor)
+	if (kind === "public") return bridge.methods.claim_public!(recipient, amount, t.draft.secretOrSalt, leaf, depositor)
+	// An unbound recipient's first private claim binds its account to this deposit's depositor.
+	const bind = (await fundingAddress(wallet, m, recipient)) === undefined
+	return bridge.methods.claim_private!(recipient, amount, t.draft.secretOrSalt, leaf, depositor, bind)
 }
 
 export interface WaitClaimableOptions {
@@ -115,7 +128,7 @@ async function probeClaimable(
 	if ((await node.getL1ToL2MessageMembershipWitness("latest", Fr.fromHexString(t.messageHash))) === undefined)
 		return "waiting-for-inclusion"
 	try {
-		await claimCall(t, wallet, m).simulate({ from })
+		await (await claimCall(t, wallet, m)).simulate({ from })
 		return "ready"
 	} catch (e) {
 		if (ALREADY_CONSUMED.test(message(e))) return "ready"
@@ -200,8 +213,8 @@ async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManif
 }
 
 /**
- * Mints the deposit on L2 from `from` (the recipient or a relayer; a private claim cannot be redirected either way),
- * paid per {@link FeeChoice}. Both outcomes hold only at a checkpoint: keep the secret until {@link waitClaimFinalized}
+ * Mints the deposit on L2 from `from`: a private claim only from its recipient, a public one from anyone (the mint
+ * goes to the merchant the message names), paid per {@link FeeChoice}. Both outcomes hold only at a checkpoint: keep the secret until {@link waitClaimFinalized}
  * says "finalized". "already-consumed" needs this ticket's nullifier on L2: a nullifier error can come from any part of
  * the tx.
  */
@@ -215,7 +228,7 @@ export async function claim(
 	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
 	const sponsored = fee !== undefined
 	try {
-		const { txHash } = await claimCall(t, wallet, m).send({ from: opts.from, fee, wait: NO_WAIT })
+		const { txHash } = await (await claimCall(t, wallet, m)).send({ from: opts.from, fee, wait: NO_WAIT })
 		await waitForTx(node as AztecNode, txHash, L2_DONE)
 		return "claimed"
 	} catch (e) {

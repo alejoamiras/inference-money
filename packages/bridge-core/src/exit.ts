@@ -22,6 +22,8 @@ export interface ExitIntent {
 	from: AztecAddress
 	recipientL1: Address
 	amount: bigint
+	/** A merchant's private exit, which may go anywhere; a user's goes only to its funding address. Default false. */
+	asMerchant?: boolean
 }
 
 /** Everything a withdrawal needs, recoverable from the L2 tx hash plus recipient and amount (`exitTicketFromTx`). */
@@ -73,9 +75,12 @@ function exitCall(e: ExitIntent, wallet: Wallet, m: BridgeManifest, nonce: Fr) {
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
 	const token = Contract.at(AztecAddress.fromStringUnsafe(m.l2.token.address), tokenArtifact, wallet)
 	const recipient = EthAddress.fromString(e.recipientL1)
-	const exit = e.kind === "private" ? bridge.methods.exit_to_l1_private! : bridge.methods.exit_to_l1_public!
+	const exit =
+		e.kind === "private"
+			? bridge.methods.exit_to_l1_private!(recipient, e.amount, EthAddress.ZERO, nonce, e.asMerchant ?? false)
+			: bridge.methods.exit_to_l1_public!(recipient, e.amount, EthAddress.ZERO, nonce)
 	const burn = e.kind === "private" ? token.methods.burn_private! : token.methods.burn_public!
-	return { exit: exit(recipient, e.amount, EthAddress.ZERO, nonce), burn: burn(e.from, e.amount, nonce) }
+	return { exit, burn: burn(e.from, e.amount, nonce) }
 }
 
 /**

@@ -56,7 +56,7 @@ export function buildBridgeManifest(m: BridgeManifest, appUrl: string): AppManif
 			},
 			{
 				type: "simulation",
-				utilities: { scope: at(token, ["balance_of_private"]) },
+				utilities: { scope: [...at(token, ["balance_of_private"]), ...at(bridge, ["get_funding_address"])] },
 				transactions: { scope: [...at(token, ["balance_of_public"]), ...at(bridge, CLAIMS), ...sponsorCall] },
 			},
 			{

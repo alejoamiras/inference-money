@@ -56,6 +56,7 @@ describe("exitToL1", () => {
 			authWitnesses: 1,
 			wait: NO_WAIT,
 		})
+		expect(w.sent[0]?.args[1]?.at(-1)).toBe(0n)
 		expect(t).toMatchObject({
 			l2TxHash: w.txHash,
 			recipient: RECIPIENT,
@@ -63,6 +64,12 @@ describe("exitToL1", () => {
 			messageHash: message.toString(),
 			messageIndexInTx: 1,
 		})
+	})
+
+	it("flags a merchant's private exit, which the bridge then checks against the merchant list", async () => {
+		const w = fakeWallet()
+		await exitToL1(intent({ asMerchant: true }), w.wallet, effectNode([message]), M)
+		expect(w.sent[0]?.args[1]?.at(-1)).toBe(1n)
 	})
 
 	it("authorizes a public burn in the same batch as the exit, paid by the wallet unless sponsorship is chosen", async () => {
