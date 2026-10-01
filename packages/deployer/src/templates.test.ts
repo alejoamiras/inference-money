@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { REPO_ROOT } from "@inference-money/local-network"
 
-const ITEM = "op://Keyed-Runs/InferenceMoney-Testnet"
+/** One item per role: `op-remote create` makes a template's item whole and refuses one that exists. */
+const DEPLOY_ITEM = "op://Keyed-Runs/InferenceMoney-Testnet"
+const ADMIN_ITEM = "op://Keyed-Runs/InferenceMoney-Testnet-Admin"
 
 /** A keyed-run template as env-exec reads it: NAME=VALUE lines, `# op:` directives above secrets. */
 function template(name: string): Map<string, { value: string; directive?: string }> {
@@ -25,9 +27,13 @@ describe("keyed-run templates", () => {
 	const admin = template("testnet-admin.env.example")
 	const fund = template("testnet-fund.env.example")
 
-	it("refer every secret to its own field of the one testnet item", () => {
-		for (const t of [deploy, admin, fund]) {
-			for (const [name, { value }] of t) if (value.startsWith("op://")) expect(value).toBe(`${ITEM}/${name}`)
+	it("refer every secret to its own field of its role's item", () => {
+		for (const [t, item] of [
+			[deploy, DEPLOY_ITEM],
+			[fund, DEPLOY_ITEM],
+			[admin, ADMIN_ITEM],
+		] as const) {
+			for (const [name, { value }] of t) if (value.startsWith("op://")) expect(value).toBe(`${item}/${name}`)
 		}
 		expect(deploy.get("TESTNET_DEPLOYER_SECRET")?.directive).toBe("generate fr")
 		expect(admin.get("TESTNET_ADMIN_SECRET")?.directive).toBe("generate fr")

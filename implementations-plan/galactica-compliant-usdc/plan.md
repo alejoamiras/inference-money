@@ -322,7 +322,7 @@ Two planners computed these independently with viem during planning, and the sam
 
 **Local admin.** `deploy local` hands over to a fixed public `LOCAL_ADMIN_SECRET` and accepts in the same command, so the local handover path runs every time. The integration harness and `demo setup local` sign as that admin.
 
-**Keyed-run templates** (committed; refs are `op://Keyed-Runs/InferenceMoney-Testnet/<VAR>`):
+**Keyed-run templates** (committed; refs are `op://Keyed-Runs/InferenceMoney-Testnet/<VAR>`, the admin secret's `op://Keyed-Runs/InferenceMoney-Testnet-Admin/<VAR>`, since `op-remote create` refuses an item that exists):
 
 | Template | Variables |
 |---|---|
@@ -652,7 +652,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **I5 (P2):** the fork's public bytecode stays at or under about 2,700 fields; upstream is about 705.
 - **I6:** a merchant check's two reads (about 8k gates) are small next to the kernels. Nothing measures the check alone; P10 times whole actions.
 - **I7 (P2):** TXE `OracleMock` can mock the capsule oracle (`aztec_utl_getCapsule`) and the probes, so tests drive both hint paths and make each lie.
-- **I8 (P9):** `op-remote create` on a later template adds its fields to the existing item. Otherwise the owner adds them by hand.
+- **I8 (P9):** `op-remote create` on a later template adds its fields to the existing item. Otherwise the owner adds them by hand. **Wrong (P9):** it refuses an existing item, and the admin run must precede the deploy request; the admin secret moved to its own item, `InferenceMoney-Testnet-Admin`.
 - **I9 (P9):** the testnet SponsoredFPC can be topped up through the FeeAssetHandler faucet (lessons.md).
 - **I10 (P10):** in-browser proving meets P10's thresholds. If not, live mode simulates and shows the recorded proof.
 - **I11 (P13):** Workers Builds deploys only after a successful build. While `main` still has `apps/web`, its builds fail once the root directory points at `apps/showcase`, and the last good deployment stays live.
@@ -671,7 +671,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
    - The demo accounts keep nothing private: anyone can rebuild them from the page and read their notes. The feed is labelled as the public chains' view of equivalent production accounts.
    - `verify` refuses those merchants on any network other than local and testnet.
 7. **You, during P9:**
-   - Create the 1Password item `Keyed-Runs/InferenceMoney-Testnet`.
+   - Create the 1Password items `Keyed-Runs/InferenceMoney-Testnet-Admin` and `Keyed-Runs/InferenceMoney-Testnet` with `op-remote create` on the first admin and deploy requests.
    - Import a funded Sepolia key holding test USDC, or fund a generated one.
    - Import `SEPOLIA_RPC_URL`.
    - Approve each keyed run with `op-remote`.
