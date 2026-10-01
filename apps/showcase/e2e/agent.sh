@@ -63,7 +63,7 @@ build_showcase fake "$WEB_DIST"
 
 log "running playwright ($*)"
 set +e
-E2E_STATE_DIR="$STATE_DIR" BRIDGE_MANIFEST="$MANIFEST" E2E_ANVIL_URL="$ANVIL_URL" E2E_SIDECAR_URL="$SIDECAR_URL" \
+E2E_STATE_DIR="$STATE_DIR" BRIDGE_MANIFEST="$MANIFEST" E2E_ANVIL_URL="$ANVIL_URL" \
 E2E_WEB_PORT="$WEB_PORT" E2E_WEB_DIST="$WEB_DIST" \
   "$APP_DIR/node_modules/.bin/playwright" test --config e2e/playwright.config.ts "$@"
 STATUS=$?

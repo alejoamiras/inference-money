@@ -10,8 +10,6 @@ export interface RunEnv {
 	webPort: number
 	webOrigin: string
 	webDist: string
-	/** The suite's sidecar; a proving run has none. */
-	sidecarUrl: string | undefined
 	/** Set on a proving run: which of its timed runs this is (`unconstrained`, `2-cpu`). */
 	proving: string | undefined
 }
@@ -31,7 +29,6 @@ export function runEnv(): RunEnv {
 		webPort,
 		webOrigin: `http://127.0.0.1:${webPort}`,
 		webDist: required("E2E_WEB_DIST"),
-		sidecarUrl: process.env.E2E_SIDECAR_URL || undefined,
 		proving: process.env.E2E_PROVING || undefined,
 	}
 }
