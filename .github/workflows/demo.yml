@@ -1,11 +1,11 @@
-name: Deployer
+name: Demo
 
 on:
   workflow_dispatch:
   pull_request:
 
 concurrency:
-  group: deployer-${{ github.head_ref || github.ref }}
+  group: demo-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -28,10 +28,8 @@ jobs:
         with:
           filters: |
             relevant:
-              - 'packages/deployer/**'
-              - 'packages/bridge-core/**'
               - 'packages/demo/**'
-              - 'packages/local-network/**'
+              - 'packages/bridge-core/**'
               - 'contracts/aztec/*/target/**'
               - 'toolchain.json'
               - 'package.json'
@@ -40,13 +38,13 @@ jobs:
               - 'test-preload.ts'
               - 'biome.json'
               - 'tsconfig.base.json'
-              - '.github/workflows/deployer.yml'
+              - '.github/workflows/demo.yml'
               - '.github/actions/setup-toolchains/**'
       - if: github.event_name == 'workflow_dispatch'
         id: override
         run: echo "relevant=true" >> "$GITHUB_OUTPUT"
 
-  deployer:
+  demo:
     name: lint, typecheck, unit
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
@@ -55,14 +53,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-toolchains
-      - run: bunx biome ci packages/deployer
-      - run: bun run --cwd packages/deployer typecheck
-      - run: bun run --cwd packages/deployer test
+      - run: bunx biome ci packages/demo
+      - run: bun run --cwd packages/demo typecheck
+      - run: bun run --cwd packages/demo test
 
   status:
-    name: deployer-status
+    name: demo-status
     if: always()
-    needs: [changes, deployer]
+    needs: [changes, demo]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -70,11 +68,11 @@ jobs:
       - env:
           CHANGES: ${{ needs.changes.result }}
           RELEVANT: ${{ needs.changes.outputs.relevant }}
-          DEPLOYER: ${{ needs.deployer.result }}
+          DEMO: ${{ needs.demo.result }}
         run: |
           [ "$CHANGES" = success ] || { echo "::error::change detection: $CHANGES"; exit 1; }
           if [ "$RELEVANT" = true ]; then
-            [ "$DEPLOYER" = success ] || { echo "::error::deployer ended $DEPLOYER"; exit 1; }
+            [ "$DEMO" = success ] || { echo "::error::demo ended $DEMO"; exit 1; }
           else
-            case "$DEPLOYER" in success|skipped) ;; *) echo "::error::deployer ended $DEPLOYER"; exit 1 ;; esac
+            case "$DEMO" in success|skipped) ;; *) echo "::error::demo ended $DEMO"; exit 1 ;; esac
           fi
