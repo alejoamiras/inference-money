@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
-import { delimiter, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import {
 	L1_CHAIN_ID,
 	localDeploymentDir,
@@ -102,7 +102,7 @@ function nodeEnv(t: Toolchain, anvilUrl: string, tmpDir: string): NodeJS.Process
 	}
 }
 
-/** The longest socket name the node binds in its TMPDIR (`cdb-ts-<pid>-<thread>-<n>.sock`), every number at its widest. */
+/** The node's longest socket name in its TMPDIR, `cdb-ts-<pid>-<thread>-<n>.sock`, with room for a 7-digit pid and 4- and 6-digit counters. */
 const NODE_SOCKET = "cdb-ts-4194304-9999-999999.sock"
 /** `sun_path`'s size, NUL included. */
 const SUN_PATH = process.platform === "darwin" ? 104 : 108
@@ -209,7 +209,9 @@ export async function netDown(runId: string, log: (m: string) => void = console.
 	if (h && !(await stopAll(runId, h.processes, log)))
 		throw new Error(`run ${runId}: a process group was not verifiably stopped; handle kept`)
 	await releasePorts(runId)
-	rmSync(runDataDir(runId), { recursive: true, force: true })
+	// The handle's own record, when it names one of ours: a run from before a naming change keeps its dir name.
+	const dataDir = h && dirname(h.dataDir) === NET_ROOT ? h.dataDir : runDataDir(runId)
+	rmSync(dataDir, { recursive: true, force: true })
 	rmSync(localDeploymentDir(runId), { recursive: true, force: true })
 	removeHandle(runId)
 	if (!h) log(`[net] ${runId}: no handle; released any registry rows and state`)
