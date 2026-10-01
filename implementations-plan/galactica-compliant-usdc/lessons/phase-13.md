@@ -46,3 +46,8 @@ Scope: the showcase arc's own commits (P10–P13 and the socket fix); P9's commi
 4. Rejected: "round-2 exits stored without `expiresAt` vanish after upgrading." No build that wrote that shape ever shipped: the hosted preview is `1e4bb74`, from before round 1, and stores exits as `{ id, actor, since, ticket }`, which the schema still reads through the ticket path.
 
 Past the cap with fixes unreviewed, the loop continues for a confirming round, per the owner's standing call on loops at the cap: minimal fixes only.
+
+**Round 4 (confirming):** confirmed the remount serialization, the `finalFate` ordering and the tampered-exit check, and agreed with rejection 4 and with the payout gas trade-off; not converged, two findings, both accepted:
+
+1. **High: the proving page sent outside the queue.** `#proving` drives the same wallet, so its tx could take a withdrawal's one-shot journal. The queue moved onto the wallet (`DemoWallet.exclusive`, one `oneAtATime` helper the payout pass reuses), and the proving check runs each timed action through it, outside its own timing.
+2. **Medium: a deposit entry that cannot be read back still held up later claims**, since only the claimed amount was checked and a draft that decodes can still throw in reconciliation. A claim ticket must now hold every field a claim reads, and each entry is tried alone: one that throws (a malformed draft, or the network) is kept and passed over, and its error shows only when no entry can claim.
