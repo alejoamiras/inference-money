@@ -1,29 +1,42 @@
-import type { Actor, User } from "@inference-money/demo"
+import { ACTORS, USERS } from "@inference-money/demo"
+import { z } from "zod"
 import type { KeyValue } from "./store"
 
-/** A deposit this page sent: its draft until it mines, then its claim ticket until the claim is final. */
-export interface PendingDeposit {
-	id: string
-	user: User
-	since: number
-	/** `encodeTicket("draft", …)`, kept from the moment it may be broadcast, so a reload never deposits twice. */
-	draft?: string
-	/** `encodeTicket("claim", …)`. */
-	claim?: string
-	/** Claimed at a checkpoint, and kept until the claim is final: a pruned epoch undoes it, and only this secret claims again. */
-	claimed?: true
-}
+const digits = z.string().regex(/^\d+$/)
 
-/** An exit this page sent, until its withdrawal pays out on Ethereum. */
-export interface PendingExit {
-	id: string
-	actor: Actor
-	since: number
-	/** The burn the node accepted, kept before its wait: after a reload the withdrawal is located from it. */
-	sent?: { l2TxHash: string; recipient: string; amount: string }
+const pendingDepositSchema = z.strictObject({
+	id: z.string(),
+	user: z.enum(USERS),
+	since: z.number(),
+	/** `encodeTicket("draft", …)`, kept from the moment it may be broadcast, so a reload never deposits twice. */
+	draft: z.string().optional(),
+	/** `encodeTicket("claim", …)`. */
+	claim: z.string().optional(),
+	/** Claimed at a checkpoint, and kept until the claim is final: a pruned epoch undoes it, and only this secret claims again. */
+	claimed: z.literal(true).optional(),
+})
+
+const pendingExitSchema = z.strictObject({
+	id: z.string(),
+	actor: z.enum(ACTORS),
+	since: z.number(),
+	/** The burn as it left for the node, before any response: the withdrawal is located from it after a reload. */
+	sent: z
+		.strictObject({
+			l2TxHash: z.string().regex(/^0x[0-9a-f]{64}$/),
+			recipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+			amount: digits,
+			expiresAt: digits,
+		})
+		.optional(),
 	/** `encodeTicket("exit", …)`, once the withdrawal is located. */
-	ticket?: string
-}
+	ticket: z.string().optional(),
+})
+
+/** A deposit this page sent: its draft until it mines, then its claim ticket until the claim is final. */
+export type PendingDeposit = z.infer<typeof pendingDepositSchema>
+/** An exit this page sent, until its withdrawal pays out on Ethereum. */
+export type PendingExit = z.infer<typeof pendingExitSchema>
 
 /** The page's unfinished cross-chain steps, which a reload resumes. */
 export interface Tickets {
@@ -35,18 +48,15 @@ export interface Tickets {
 	dropExit(id: string): void
 }
 
-const isEntry = (v: unknown): v is { id: string; since: number } =>
-	typeof v === "object" && v !== null && typeof Reflect.get(v, "id") === "string" && typeof Reflect.get(v, "since") === "number"
-
 /** Oldest first; an entry that no longer parses as one is skipped, never thrown. */
-function read<T extends { since: number }>(kv: KeyValue, kind: string): T[] {
+function read<T extends { since: number }>(kv: KeyValue, kind: string, schema: z.ZodType<T>): T[] {
 	return kv
 		.keys()
 		.filter((k) => k.startsWith(`${kind}:`))
 		.flatMap((k) => {
 			try {
-				const v: unknown = JSON.parse(kv.get(k) ?? "null")
-				return isEntry(v) ? [v as unknown as T] : []
+				const parsed = schema.safeParse(JSON.parse(kv.get(k) ?? "null"))
+				return parsed.success ? [parsed.data] : []
 			} catch {
 				return []
 			}
@@ -56,10 +66,10 @@ function read<T extends { since: number }>(kv: KeyValue, kind: string): T[] {
 
 export function tickets(kv: KeyValue): Tickets {
 	return {
-		deposits: () => read<PendingDeposit>(kv, "deposit"),
+		deposits: () => read(kv, "deposit", pendingDepositSchema),
 		putDeposit: (d) => kv.set(`deposit:${d.id}`, JSON.stringify(d)),
 		dropDeposit: (id) => kv.set(`deposit:${id}`, undefined),
-		exits: () => read<PendingExit>(kv, "exit"),
+		exits: () => read(kv, "exit", pendingExitSchema),
 		putExit: (e) => kv.set(`exit:${e.id}`, JSON.stringify(e)),
 		dropExit: (id) => kv.set(`exit:${id}`, undefined),
 	}

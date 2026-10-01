@@ -17,7 +17,10 @@ vi.mock("@inference-money/bridge-core", async (original) => ({
 	...(await original<typeof import("@inference-money/bridge-core")>()),
 	decodeDepositDraft: () => ({}),
 	reconcileDeposit: async () => "pending",
-	decodeClaimTicket: () => ({ draft: { intent: { amount: 10_000n } } }),
+	decodeClaimTicket: (s: string) => {
+		if (s === "unreadable") throw new Error("not a claim ticket")
+		return { draft: { intent: { amount: 10_000n } } }
+	},
 	isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") =>
 		claims.state === "finalized" || (claims.state === "checkpointed" && at === "checkpointed"),
 }))
@@ -66,10 +69,11 @@ describe("withConflictRetry", () => {
 		])
 	})
 
-	it("runs once more on another tx's conflict, never settling on an earlier step that landed", async () => {
+	it("runs once more on another tx's conflict, and never settles a payment on one of its sends", async () => {
 		for (const [landed, refused] of [
 			[false, true],
 			[true, undefined],
+			[true, true],
 		] as const) {
 			const ctx = ctxWith(landed)
 			let attempts = 0
@@ -130,5 +134,9 @@ describe("claim", () => {
 		expect([claims.sent, store.get("d1")?.claimed]).toEqual([1, true])
 		claims.state = "finalized"
 		expect([await claim(), store.size]).toEqual([nothing, 0])
+		store.set("d2", { id: "d2", user: "bob", since: 1, claim: "unreadable" })
+		store.set("d3", { id: "d3", user: "bob", since: 2, claim: "ticket" })
+		claims.state = "pruned"
+		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
 	})
 })

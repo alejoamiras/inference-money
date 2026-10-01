@@ -57,6 +57,8 @@ describe("browser stores", () => {
 		kv.set("exit:broken", "{")
 		kv.set("exit:null", "null")
 		kv.set("exit:undated", JSON.stringify({ id: "u", actor: "alice", ticket: "t" }))
+		const sent = { l2TxHash: `0x${"12".repeat(32)}`, recipient: `0x${"ab".repeat(20)}`, amount: "oops", expiresAt: "9" }
+		kv.set("exit:unpriced", JSON.stringify({ id: "x", actor: "alice", since: 0, sent }))
 		t.putDeposit({ id: "d1", user: "alice", since: 3, draft: "d" })
 		expect(t.exits().map((e) => e.id)).toEqual(["e1", "e2"])
 		t.dropExit("e1")

@@ -28,18 +28,34 @@ export interface Payout {
 const ONE_POLL = { timeoutMs: 0 }
 const NOT_PROVEN = /not proven on Ethereum yet/
 const CHECKPOINTED: readonly TxStatus[] = [TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED]
-/** A load-balanced node may not know a tx another one accepted; a burn still unknown this long after never mined. */
-const DROPPED_AFTER_MS = 10 * 60_000
+const UNKNOWN = "Aztec does not hold this burn right now; it stays listed until it can no longer land."
 
-/** `p`'s ticket, located from its burn once checkpointed when a reload came first; "none" when nothing was burned. */
-async function ticketOf(ctx: LiveCtx, p: PendingExit): Promise<ExitTicket | "none" | "waiting"> {
-	if (p.ticket) return decodeExitTicket(p.ticket)
-	if (!p.sent) return "none"
-	const hash = TxHash.fromString(p.sent.l2TxHash)
+function decoded(ticket: string | undefined): ExitTicket | undefined {
+	try {
+		return ticket === undefined ? undefined : decodeExitTicket(ticket)
+	} catch {
+		return undefined
+	}
+}
+
+/**
+ * Whether a tx the node does not hold may still land. Only until it expires: once the finalized tip is past its expiry,
+ * any block that could have held it is final, and the node would know it.
+ */
+async function canStillLand(ctx: LiveCtx, expiresAt: bigint): Promise<boolean> {
+	const final = await ctx.demo.node.getBlockData("finalized")
+	return final === undefined || final.header.globalVariables.timestamp <= expiresAt
+}
+
+/** Where `p`'s burn stands, read again on every pass: a pruned checkpoint can undo a burn located before. */
+async function locate(ctx: LiveCtx, p: PendingExit, sent: NonNullable<PendingExit["sent"]>) {
+	const hash = TxHash.fromString(sent.l2TxHash)
 	const receipt = await ctx.demo.node.getTxReceipt(hash)
-	if (receipt.isDropped()) return Date.now() - p.since > DROPPED_AFTER_MS ? "none" : "waiting"
+	if (receipt.isDropped()) return (await canStillLand(ctx, BigInt(sent.expiresAt))) ? "unknown" : "none"
 	if (!CHECKPOINTED.includes(receipt.status)) return "waiting"
-	const found = await locateWithdrawal(p.sent.recipient as Address, BigInt(p.sent.amount), hash, ctx.demo.node, ctx.m)
+	const cached = decoded(p.ticket)
+	if (cached) return cached
+	const found = await locateWithdrawal(sent.recipient as Address, BigInt(sent.amount), hash, ctx.demo.node, ctx.m)
 	if (found === "reverted") return "none"
 	ctx.tickets.putExit({ ...p, ticket: encodeTicket("exit", found) })
 	return found
@@ -55,17 +71,6 @@ async function pay(ctx: LiveCtx, wallets: Record<"A_demo" | "B_demo", Address>, 
 	onRow({ key: hash, source: "live", chain: "ethereum", text: PUBLIC_TEXT.withdraw, items: withdrawWorld(t.recipient, t.amount), href })
 }
 
-/** The recipient and amount `p` names, or nothing when neither its burn nor its ticket reads. */
-function shownOf(p: PendingExit): Omit<Payout, "state"> | undefined {
-	if (p.sent) return { id: p.id, recipient: p.sent.recipient as Address, amount: BigInt(p.sent.amount) }
-	try {
-		const t = decodeExitTicket(p.ticket ?? "")
-		return { id: p.id, recipient: t.recipient, amount: t.amount }
-	} catch {
-		return undefined
-	}
-}
-
 /** Pays `p` out when it can; else what the page shows of it. An entry naming nothing readable is dropped. */
 async function payOne(
 	ctx: LiveCtx,
@@ -73,15 +78,18 @@ async function payOne(
 	p: PendingExit,
 	onRow: (row: FeedRow) => void,
 ): Promise<Payout | undefined> {
-	const shown = shownOf(p)
-	if (!shown) {
+	const legacy = p.sent ? undefined : decoded(p.ticket)
+	const named = p.sent ?? legacy
+	if (!named) {
 		ctx.tickets.dropExit(p.id)
 		return undefined
 	}
+	const shown = { id: p.id, recipient: named.recipient as Address, amount: BigInt(named.amount) }
 	try {
-		const t = await ticketOf(ctx, p)
-		if (t === "waiting") return { ...shown, state: "proving" }
-		if (t !== "none") await pay(ctx, wallets, t, onRow)
+		const where = p.sent ? await locate(ctx, p, p.sent) : (legacy as ExitTicket)
+		if (where === "waiting") return { ...shown, state: "proving" }
+		if (where === "unknown") return { ...shown, state: "stuck", note: UNKNOWN }
+		if (where !== "none") await pay(ctx, wallets, where, onRow)
 		ctx.tickets.dropExit(p.id)
 		return undefined
 	} catch (e) {
@@ -91,16 +99,23 @@ async function payOne(
 	}
 }
 
+/** One pass at a time, page-wide: two, from a poll and a run or from two mounts of live mode, would each send a payout. */
+let passes: Promise<unknown> = Promise.resolve()
+
 /** Pays out every pending withdrawal that can be; returns the ones still to come. One already paid elsewhere is dropped. */
-export async function finishPayouts(
+export function finishPayouts(
 	ctx: LiveCtx,
 	wallets: Record<"A_demo" | "B_demo", Address>,
 	onRow: (row: FeedRow) => void,
 ): Promise<Payout[]> {
-	const left: Payout[] = []
-	for (const p of ctx.tickets.exits()) {
-		const still = await payOne(ctx, wallets, p, onRow)
-		if (still) left.push(still)
-	}
-	return left
+	const pass = passes.then(async () => {
+		const left: Payout[] = []
+		for (const p of ctx.tickets.exits()) {
+			const still = await payOne(ctx, wallets, p, onRow)
+			if (still) left.push(still)
+		}
+		return left
+	})
+	passes = pass.catch(() => undefined)
+	return pass
 }

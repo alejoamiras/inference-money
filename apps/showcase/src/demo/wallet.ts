@@ -31,6 +31,8 @@ export interface DemoWallet {
 	sentAt: number[]
 	/** Every tx the page sent, with what the world sees of it but its effect does not carry. */
 	sent: SentTx[]
+	/** Called once, with the next tx as it leaves for the node and before any response, so a record of it survives both. */
+	onNextSend: { fn?: (tx: SentTx) => void }
 	stages: StageFeed
 }
 
@@ -117,9 +119,15 @@ async function openPxeStore(node: AztecNode, m: BridgeManifest) {
 export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: DemoWalletOptions): Promise<DemoWallet> {
 	const sentAt: number[] = []
 	const sent: SentTx[] = []
+	const onNextSend: DemoWallet["onNextSend"] = {}
+	const journal = (tx: SentTx) => {
+		const fn = onNextSend.fn
+		onNextSend.fn = undefined
+		fn?.(tx)
+	}
 	const stages = stageFeed()
 	const store = await openPxeStore(node, m)
-	const gate = new PaymentGate(recordingNode(stamping(node, sentAt, stages), sent), opts.payments)
+	const gate = new PaymentGate(recordingNode(stamping(node, sentAt, stages), sent, journal), opts.payments)
 	const Staged = stagedWallet(stages)
 	const wallet = await gate.bindWallet((gated) => Staged.create(gated, { pxe: { proverEnabled: opts.proves, store } }))
 	await registerSponsor(wallet, m)
@@ -131,5 +139,5 @@ export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: D
 		const account = await wallet.createSchnorrAccount(member.secret, Fr.ZERO, member.signingKey, actor)
 		cast[actor] = { ...member, address: account.address }
 	}
-	return { wallet, node, gate, cast, sentAt, sent, stages }
+	return { wallet, node, gate, cast, sentAt, sent, onNextSend, stages }
 }
