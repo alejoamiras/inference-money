@@ -4,6 +4,7 @@ pragma solidity >=0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 import {Vm} from "forge-std/Vm.sol";
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 
 import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
@@ -78,7 +79,7 @@ contract RouterHandler is StdUtils {
     /// Well-formed deposits must succeed; the ghost moves only on success.
     function deposit(uint256 actorSeed, uint256 amount, bool isPrivate, bytes32 recipient) external {
         amount = bound(amount, 1, type(uint128).max);
-        if (!isPrivate && recipient == bytes32(0)) recipient = bytes32(uint256(1));
+        if (!isPrivate) recipient = bytes32(bound(uint256(recipient), 1, Constants.MAX_FIELD_VALUE));
         address actor = actors[actorSeed % actors.length];
         usdc.mint(actor, amount);
         vm.prank(actor);

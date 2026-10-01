@@ -7,7 +7,8 @@
 //     name the Permit2 signer it pulled from. `withdraw`'s message is the canonical one.
 //   - `initialize` is deployer-only and init-once, and binds the router, which must name this portal and token. The
 //     L2 bridge address is derived from this contract's address, so the binding cannot move into the constructor.
-//   - Deposits cap `amount` at u128 (the L2 amount type) and must raise the portal's balance by exactly `amount`.
+//   - Deposits cap `amount` at u128 (the L2 amount type), public deposits require `_to` to be a field element (an
+//     Aztec address), and every deposit must raise the portal's balance by exactly `amount`.
 //   - `withdraw` must lower the portal's balance by exactly `amount`.
 //   - Deposits and `withdraw` are nonReentrant.
 pragma solidity >=0.8.27;
@@ -23,6 +24,7 @@ import {IRollup} from "@aztec/core/interfaces/IRollup.sol";
 import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 
 import {IDepositRouter} from "./interfaces/IDepositRouter.sol";
 
@@ -36,6 +38,8 @@ contract TokenPortal is ReentrancyGuardTransient {
     error NotRouter();
     /// @notice The L2 side holds amounts as u128; a larger deposit could never be claimed.
     error AmountExceedsL2Max();
+    /// @notice An Aztec address is a field element, so neither a claim nor a return could ever name a larger `_to`.
+    error RecipientExceedsFieldMax();
     /// @notice The token moved a different amount than requested (fee-on-transfer, surcharge, upgrade).
     error InexactTransfer();
 
@@ -187,6 +191,7 @@ contract TokenPortal is ReentrancyGuardTransient {
         returns (bytes32, uint256)
     {
         _requireDeposit(_amount);
+        _requireRecipient(_to);
 
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
         // The signature only tags the action; nothing calls it.
@@ -235,6 +240,11 @@ contract TokenPortal is ReentrancyGuardTransient {
 
     function _requireDeposit(uint256 _amount) internal pure virtual {
         if (_amount > type(uint128).max) revert AmountExceedsL2Max();
+    }
+
+    /// @dev The Inbox range-checks the content hash, never the fields hashed into it.
+    function _requireRecipient(bytes32 _to) internal pure virtual {
+        if (uint256(_to) > Constants.MAX_FIELD_VALUE) revert RecipientExceedsFieldMax();
     }
 
     /// @dev A short pull would mint more on L2 than the reserve holds (silent insolvency), so it reverts.

@@ -115,6 +115,7 @@ export const TOKEN_PORTAL_ABI = [
 	view("inbox", "address"),
 	view("outbox", "address"),
 	{ type: "error", name: "AmountExceedsL2Max", inputs: [] },
+	{ type: "error", name: "RecipientExceedsFieldMax", inputs: [] },
 	{ type: "error", name: "InexactTransfer", inputs: [] },
 	{ type: "error", name: "ReentrancyGuardReentrantCall", inputs: [] },
 	...OUTBOX_CONSUME_ERRORS,

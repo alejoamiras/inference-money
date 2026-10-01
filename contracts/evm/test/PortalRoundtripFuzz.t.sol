@@ -3,6 +3,7 @@ pragma solidity >=0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
@@ -54,6 +55,7 @@ contract PortalRoundtripFuzzTest is Test {
         bytes32 secret
     ) public {
         amount = bound(amount, 1, type(uint128).max);
+        to = bytes32(bound(uint256(to), 0, Constants.MAX_FIELD_VALUE));
         address payer = _payer(viaRouter, depositor, amount);
         vm.prank(payer);
         if (viaRouter) portal.depositToAztecPublicFor(depositor, to, amount, secret);

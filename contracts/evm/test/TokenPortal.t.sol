@@ -6,6 +6,7 @@ import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 
 import {TokenPortal} from "../src/TokenPortal.sol";
@@ -184,6 +185,30 @@ contract TokenPortalTest is Test {
         portal.depositToAztecPrivate(max, SECRET_HASH);
         vm.stopPrank();
         assertEq(inbox.sent(), 1, "only the in-range deposit sent a message");
+    }
+
+    /// An Aztec address is a field element: no claim or return could ever name a larger recipient, so the deposit is
+    /// refused before anything moves, directly or through the router; the largest field element still deposits.
+    function test_depositPublic_refusesARecipientAboveTheField() public {
+        (TokenPortal portal, PlainERC20 token) = _funded(1_000);
+        bytes32 over = bytes32(Constants.MAX_FIELD_VALUE + 1);
+        vm.startPrank(alice);
+        vm.expectRevert(TokenPortal.RecipientExceedsFieldMax.selector);
+        portal.depositToAztecPublic(over, 1_000, SECRET_HASH);
+        vm.expectRevert(TokenPortal.RecipientExceedsFieldMax.selector);
+        portal.depositToAztecPublic(bytes32(type(uint256).max), 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(bytes32(Constants.MAX_FIELD_VALUE), 1_000, SECRET_HASH);
+        vm.stopPrank();
+
+        token.mint(address(router), 1_000);
+        vm.startPrank(address(router));
+        token.approve(address(portal), 1_000);
+        vm.expectRevert(TokenPortal.RecipientExceedsFieldMax.selector);
+        portal.depositToAztecPublicFor(signer, over, 1_000, SECRET_HASH);
+        vm.stopPrank();
+
+        assertEq(inbox.sent(), 1, "only the in-field deposit sent a message");
+        assertEq(token.balanceOf(address(portal)), 1_000, "only the in-field deposit moved funds");
     }
 
     /// A token that delivers less than `amount` would mint more on L2 than the portal holds.
