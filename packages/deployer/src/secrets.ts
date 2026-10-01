@@ -81,12 +81,17 @@ function urlForms(url: string): string[] {
 const forms = (value: string): string[] =>
 	/^0x[0-9a-f]+$/i.test(value) ? [value, value.slice(2)] : /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? urlForms(value) : [value]
 
-/**
- * The committed default Sepolia endpoint, a valid SEPOLIA_RPC_URL, is public: as a needle it would match the source that
- * pins it, and fail every scan.
- */
-const isPublicEndpoint = (value: string): boolean =>
-	value.trim().replace(/\/+$/, "").toLowerCase() === TESTNET.defaultL1RpcUrl.toLowerCase()
+function normalUrl(value: string): string | undefined {
+	try {
+		return new URL(value.trim()).href.replace(/\/+$/, "")
+	} catch {
+		return undefined
+	}
+}
+
+/** The endpoints `networks.ts` commits are public: as needles they would match the source that pins them, failing every scan. */
+const PUBLIC_ENDPOINTS = new Set([TESTNET.defaultL1RpcUrl, TESTNET.nodeUrl].map(normalUrl))
+const isPublicEndpoint = (value: string): boolean => PUBLIC_ENDPOINTS.has(normalUrl(value))
 
 /**
  * Every credential-named variable of `env` in every form text could carry it, longest first, lowercased: hex with and
