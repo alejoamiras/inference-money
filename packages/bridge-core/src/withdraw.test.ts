@@ -106,6 +106,7 @@ function l1(simulations: (Error | undefined)[] = [], chainId = M.l1.chainId) {
 			if (failure) throw failure
 			return { request: {} }
 		},
+		estimateContractGas: async () => 200_000n,
 		waitForTransactionReceipt: receipt,
 		getTransactionReceipt: receipt,
 	} as unknown as PublicClient
@@ -173,7 +174,7 @@ describe("withdrawOnL1", () => {
 		return { ticket, proof: (await buildWithdrawProof(ticket, e.node, e.outbox)) as OutboxProof }
 	}
 
-	it("sends the 7-argument portal withdraw on the manifest's chain once the simulation passes", async () => {
+	it("sends the 7-argument portal withdraw on the manifest's chain, with gas headroom, once the simulation passes", async () => {
 		const { ticket, proof } = await proven()
 		const { s, ctx } = l1()
 		expect(await withdrawOnL1(ticket, proof, ctx, M)).toBe(TX)
@@ -182,6 +183,7 @@ describe("withdrawOnL1", () => {
 				address: M.l1.portal,
 				functionName: "withdraw",
 				args: [RECIPIENT, AMOUNT, false, proof.epoch, proof.numCheckpointsInEpoch, proof.leafIndex, [...proof.path]],
+				gas: 300_000n,
 				chain: expect.objectContaining({ id: M.l1.chainId }),
 			}),
 		])

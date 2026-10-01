@@ -11,7 +11,7 @@ import { type MerchantList, merchantStatus } from "./merchants"
 import { assertReaderChain, assertSigningContext, NetworkMismatchError } from "./network"
 import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
-import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, sendChain, signerOf } from "./types"
+import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, sendChain, signerOf, withGasHeadroom } from "./types"
 
 export type DepositKind = "public" | "private"
 
@@ -103,12 +103,6 @@ export async function prepareDeposit(i: DepositIntent, m: BridgeManifest, now: (
 	return { intent: i, secretOrSalt, secretHash, witness, typedData: depositPermitTypedData(permit, witness, m.l1.permit2, m.l1.chainId) }
 }
 
-/**
- * The Aztec Inbox insert costs more once the rollup opens a new message tree, which it does every few blocks; a Sepolia
- * deposit sent with its bare estimate ran out of gas needing 18% more. Unused gas is not charged.
- */
-export const withInboxHeadroom = (estimate: bigint): bigint => estimate + estimate / 2n
-
 /** Drafts inside `submitDeposit`: a concurrent second call would sign again and could clear the first one's record. */
 const inFlight = new WeakSet<DepositDraft>()
 
@@ -159,7 +153,7 @@ async function signAndSend(d: DepositDraft, l1: L1Ctx, m: BridgeManifest, l2: Pa
 		account: signerOf(l1),
 	} as const
 	// Estimated before the draft counts as sent: a deposit that would revert fails here, with nothing broadcast.
-	const gas = withInboxHeadroom(await l1.publicClient.estimateContractGas(call))
+	const gas = withGasHeadroom(await l1.publicClient.estimateContractGas(call))
 	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number, fromBlockHash: finalized.hash }
 	on?.("depositing")
 	try {
