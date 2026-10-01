@@ -17,7 +17,7 @@ import {
 	tokenBridgeArtifact,
 	tokenMinterProxyArtifact,
 } from "@inference-money/bridge-core"
-import { claimable, claimFor, deposit, depositsBy, l1Actor, l1Now, l2Actor, l2Balances, USDC } from "./actors"
+import { claimable, claimFor, deposit, depositsBy, l1Actor, l1Now, l2Actor, l2Balances, merchantActor, setPaused, USDC } from "./actors"
 import { harness, INTEGRATION } from "./harness"
 
 describe.skipIf(!INTEGRATION)("guards", () => {
@@ -25,7 +25,11 @@ describe.skipIf(!INTEGRATION)("guards", () => {
 		const { manifest: m, wallet, owner, node } = harness()
 		const attacker = await l2Actor()
 		const fee = { paymentMethod: sponsoredPayment(m) }
-		const bridgeArgs = [AztecAddress.fromStringUnsafe(m.l2.proxy.address), EthAddress.fromString(m.l1.portal)]
+		const bridgeArgs = [
+			AztecAddress.fromStringUnsafe(m.l2.proxy.address),
+			AztecAddress.fromStringUnsafe(m.l2.token.address),
+			EthAddress.fromString(m.l1.portal),
+		]
 		const targets: [ContractArtifact, unknown[]][] = [
 			[tokenMinterProxyArtifact, []],
 			[tokenBridgeArtifact, bridgeArgs],
@@ -63,11 +67,8 @@ describe.skipIf(!INTEGRATION)("guards", () => {
 	})
 
 	it("[A6] while paused a new deposit is refused before signing and an in-flight claim fails; after unpausing it lands", async () => {
-		const { manifest: m, wallet, owner, node } = harness()
-		const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
-		const setPaused = (paused: boolean) =>
-			bridge.methods.set_paused!(paused).send({ from: owner, fee: { paymentMethod: sponsoredPayment(m) } })
-		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
+		const { manifest: m, node } = harness()
+		const [l1, bob] = await Promise.all([l1Actor(), merchantActor()])
 		const inFlight = await deposit(l1, "public", bob, USDC)
 		await claimable(inFlight, bob)
 		await setPaused(true)
