@@ -13,7 +13,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `packages/deployer` | The operator CLI (`bun run bridge`): deploy, admin handover, merchants, pause, verify, export, the demo and the acceptance run; keyed-run plumbing |
 | `packages/demo` | The demo cast (public keys derived from a deployment), the recorded tour's schema and the world-view decoder; browser-safe |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
-| `apps/web` | The React app: wagmi L1, the Aztec wallet-sdk session, a build-embedded manifest; `e2e/` holds the browser harness |
+| `apps/showcase` | The demo showcase (React): one embedded Aztec wallet holding the demo cast, a build-embedded manifest and users' tag; `e2e/` holds the browser suite and the proving harness |
 | `implementations-plan/` | Plans: `index.md` lists the active ones, `lessons.md` and `follow-ups.md` are the curated layer, closed plans live under `archive/` |
 
 ## Commands
@@ -33,9 +33,10 @@ RUN_ID=a bun run verify:local  # re-verify the manifest against a fresh forge bu
 bun run test:integration      # own network + deploy (or NET_L1_RPC + NET_NODE_URL to attach), every spec, teardown
 bash packages/local-network/scripts/install-node.sh <dir>  # CI's node: frozen lock + sha-pinned Foundry; AZTEC_NODE_HOME=<dir> selects it
 
-bun run --cwd apps/web test:components           # vitest: session store, grant, build target, test-wallet guard
-BRIDGE_MANIFEST=<file> bun run --cwd apps/web build   # any deployed manifest; build:testnet pins deployments/testnet.json
-bun run test:e2e [-- connect.spec.ts]             # own network + deploy + app/wallet builds + sidecar + Playwright, then reap
+bun run --cwd apps/showcase test:components      # vitest: components, build target, bundle check, proving decision
+BRIDGE_MANIFEST=<file> bun run --cwd apps/showcase build   # a deployed manifest with its published demo; build:testnet pins deployments/testnet.json
+bun run test:e2e [-- tour.spec.ts]                # own network + deploy + sidecar + demo setup + build + Playwright, then reap
+bun run --cwd apps/showcase test:proving         # real proofs in the browser, unconstrained and on 2 CPUs → test-results/proving.json
 
 bun run bridge <command>                         # the operator CLI; every command and the keyed-run recipe: docs/operations.md
 bun run bridge verify deployments/testnet.json   # keyless strict read-back (--node/--l1-rpc: your own endpoints)
@@ -69,10 +70,10 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # static guard: the four c
 - **Rule checks are private reads, never public calls:** a merchant check proves the register and the switch-off entry at the tx's anchor block. A public call would publish both accounts of every private transfer.
 - **Private rule checks never go public:** a private function checks merchant status with `try_prove_merchant` and a binding through its owner's notes, never by enqueueing a public call, which would publish the checked address.
 - **TXE manifests:** every new Noir test gets its name in the crate's `txe-manifest.txt`; `run-txe-tests.sh` fails on a listed test that did not pass or a count under the crate's floor.
-- **One network per bundle:** a web build embeds exactly one manifest at build time and has no runtime override; iframe wallet URLs (`WEB_WALLET_URLS`) are accepted only for a `local` manifest, and `build:testnet` refuses every override.
-- **The e2e test wallet enforces its grant:** every call outside what the app requested is refused, as a real wallet does. A new wallet call in the app needs its scope in `src/wallet/capabilities.ts`, or the suite fails.
+- **One network per bundle:** a showcase build embeds exactly one manifest and its published users' tag at build time and has no runtime override; it builds keyless (a keyed variable in its environment fails the build), and `build:testnet` refuses every override.
+- **The showcase's build config loads under Node:** what `build/target.ts` imports stays a leaf module (no extensionless relative import, nothing that loads the Aztec SDK, which starts bb on import): `bridge-core/manifest`, `demo/files`, `deployer/networks`, `local-network/handle`.
 - **bun test and the Aztec SDK:** a cold `bun test` injects its `expect` into `@aztec-labs/foundation`, which then calls Jest's `expect.addEqualityTesters`; every bun test script that loads `@aztec-labs/*` passes `--preload ../../test-preload.ts`. A warm transpiler cache hides a missing preload locally (`BUN_RUNTIME_TRANSPILER_CACHE_PATH=0` reproduces CI).
-- **bb.js does not run under jsdom** (its msgpack rejects jsdom's cross-realm typed arrays): web tests that hash through real bridge-core use `// @vitest-environment node`; jsdom component tests fake the draft and send (`offlineDepositOps` in `src/bridge/test/fake-env.ts`).
+- **bb.js does not run under jsdom** (its msgpack rejects jsdom's cross-realm typed arrays): showcase tests that hash through real bridge-core use `// @vitest-environment node`; jsdom component tests fake the wallet layer.
 - **One viem:** bridge-core and web read L1 through canonical `viem`; `@aztec-labs/ethereum` is banned there (biome `noRestrictedImports`).
 - **Run isolation:** local networks claim ports from `~/.agents/ports.md`, spawn detached, and tear down only the process groups they prove they own (leader pid and start time, or once the leader exits a member carrying the group's `INFERENCE_MONEY_OWNER` marker; unprovable means untouched); data dirs live on real disk under `~/.cache/inference-money/`. Deploys build forge output into a per-run dir, never the shared `contracts/evm/out`.
 - **Standard contracts:** a local network seeds only AuthRegistry and testnet none of the standard contracts aztec-nr reaches in public; the deploy publishes whichever the node lacks.

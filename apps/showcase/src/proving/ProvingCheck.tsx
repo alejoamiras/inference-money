@@ -2,6 +2,7 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import type { BridgeManifest } from "@inference-money/bridge-core"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { PROVES } from "@/config/network"
 import type { DemoWallet } from "@/demo/wallet"
 import { TESTIDS } from "@/lib/testids"
 import { type ProvingSample, timeOpenAndPay, timeTransfer } from "./check"
@@ -37,7 +38,13 @@ export function ProvingCheck({ demo, manifest }: { demo: DemoWallet; manifest: B
 	return (
 		<section className="flex flex-col gap-3 rounded-lg border border-border p-4">
 			<h2 className="font-semibold">Proving check</h2>
-			<p className="text-sm text-muted-foreground" data-testid={TESTIDS.provingEnv} data-cores={cores} data-isolated={isolated}>
+			<p
+				className="text-sm text-muted-foreground"
+				data-testid={TESTIDS.provingEnv}
+				data-cores={cores}
+				data-isolated={isolated}
+				data-proves={PROVES}
+			>
 				{cores} cores · {isolated ? "cross-origin isolated" : "not cross-origin isolated, so proving runs on one thread"}
 			</p>
 			<div className="flex items-center gap-3">

@@ -1,4 +1,4 @@
-name: Web
+name: Showcase
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 concurrency:
-  group: web-${{ github.head_ref || github.ref }}
+  group: showcase-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -28,10 +28,10 @@ jobs:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
-          # The app bundles bridge-core and embeds the committed testnet manifest.
+          # The showcase bundles bridge-core and the demo cast, and embeds the committed testnet manifest.
           filters: |
             relevant:
-              - 'apps/web/**'
+              - 'apps/showcase/**'
               - 'packages/bridge-core/**'
               - 'contracts/aztec/*/target/**'
               - 'deployments/testnet.json'
@@ -41,7 +41,7 @@ jobs:
               - 'bunfig.toml'
               - 'biome.json'
               - 'tsconfig.base.json'
-              - '.github/workflows/web.yml'
+              - '.github/workflows/showcase.yml'
               - '.github/workflows/_e2e.yml'
               - 'packages/local-network/**'
               - 'packages/deployer/**'
@@ -51,7 +51,7 @@ jobs:
         id: override
         run: echo "relevant=true" >> "$GITHUB_OUTPUT"
 
-  web:
+  showcase:
     name: lint, typecheck, components, build
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
@@ -60,12 +60,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-toolchains
-      - run: bunx biome ci apps/web
-      - run: bun run --cwd apps/web typecheck
-      - run: bun run --cwd apps/web test:components
+      - run: bunx biome ci apps/showcase
+      - run: bun run --cwd apps/showcase typecheck
+      - run: bun run --cwd apps/showcase test:components
       # The shipped artifact: the committed testnet manifest and nothing else, with its generated _headers.
-      - run: bun run --cwd apps/web build:testnet
-      - run: test -s apps/web/dist/_headers
+      - run: bun run --cwd apps/showcase build:testnet
+      - run: test -s apps/showcase/dist/_headers
 
   # The browser suite runs only on request, and then whatever the PR touches: it deploys the contracts too, so no
   # path filter could say it is irrelevant.
@@ -74,9 +74,9 @@ jobs:
     uses: ./.github/workflows/_e2e.yml
 
   status:
-    name: web-status
+    name: showcase-status
     if: always()
-    needs: [changes, web, e2e]
+    needs: [changes, showcase, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -84,15 +84,15 @@ jobs:
       - env:
           CHANGES: ${{ needs.changes.result }}
           RELEVANT: ${{ needs.changes.outputs.relevant }}
-          WEB: ${{ needs.web.result }}
+          SHOWCASE: ${{ needs.showcase.result }}
           E2E: ${{ needs.e2e.result }}
           E2E_REQUESTED: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e') }}
         run: |
           [ "$CHANGES" = success ] || { echo "::error::change detection: $CHANGES"; exit 1; }
           if [ "$RELEVANT" = true ]; then
-            [ "$WEB" = success ] || { echo "::error::web ended $WEB"; exit 1; }
+            [ "$SHOWCASE" = success ] || { echo "::error::showcase ended $SHOWCASE"; exit 1; }
           else
-            case "$WEB" in success|skipped) ;; *) echo "::error::web ended $WEB"; exit 1 ;; esac
+            case "$SHOWCASE" in success|skipped) ;; *) echo "::error::showcase ended $SHOWCASE"; exit 1 ;; esac
           fi
           # Requested, e2e must pass; unrequested, it must not have run.
           if [ "$E2E_REQUESTED" = true ]; then

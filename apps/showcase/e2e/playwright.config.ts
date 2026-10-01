@@ -31,7 +31,8 @@ export default defineConfig({
 		navigationTimeout: 60_000,
 	},
 	projects: env.proving
-		? [{ name: "proving", testMatch: /proving\.spec\.ts$/ }]
+		? // The full browser, not the headless shell, which lacks `performance.measureUserAgentSpecificMemory`.
+			[{ name: "proving", testMatch: /proving\.spec\.ts$/, use: { channel: "chromium" } }]
 		: [{ name: "showcase", testIgnore: /proving\.spec\.ts$/ }],
 	webServer: {
 		// The production build, served with the exact headers production serves.

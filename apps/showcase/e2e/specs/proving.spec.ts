@@ -62,6 +62,8 @@ test("the page proves the transfer and the open-and-pay", async ({ page }) => {
 	await page.goto("/")
 	await expect(page.getByTestId("wallet-status")).toHaveAttribute("data-status", "ready", { timeout: 10 * 60_000 })
 	const provingEnv = page.getByTestId("proving-env")
+	// A bundle built with fake proofs would time simulations; nothing it measures may count.
+	await expect(provingEnv).toHaveAttribute("data-proves", "true")
 	const cores = Number(await provingEnv.getAttribute("data-cores"))
 	const isolated = (await provingEnv.getAttribute("data-isolated")) === "true"
 

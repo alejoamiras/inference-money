@@ -1,5 +1,5 @@
 // An assets-only Worker: no script, so nothing runs server-side and the bundle is the whole app.
-// Workers Builds runs `bun run --cwd apps/web build:testnet`, which embeds deployments/testnet.json and nothing else.
+// Workers Builds runs `bun run --cwd apps/showcase build:testnet`, which embeds deployments/testnet.json and nothing else.
 // Headers (COOP/COEP/CSP/frame-ancestors) ship in dist/_headers, generated from that same manifest.
 {
 	"name": "inference-money",
