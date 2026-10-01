@@ -1,7 +1,8 @@
 // The request rule: opening a request needs a merchant on one side, and records which with a stamp or a pad; a user
 // may pay only into a stamped request (opened for a merchant), a merchant into any.
 use crate::{test::utils::{self, MerchantWorld, mint_amount}, Token};
-use merchant_stamp::{pad, stamp};
+use aztec::test::helpers::txe_oracles::get_last_call_offchain_effects;
+use merchant_stamp::{pad, REQUEST_OPENED_EFFECT, stamp};
 
 global AMOUNT: u128 = 100;
 global DAY: u64 = 86400;
@@ -44,6 +45,33 @@ unconstrained fn a_request_a_merchant_opens_for_a_merchant_is_stamped() {
     let w = utils::setup_merchant_world(false);
     let c = w.env.call_private(w.m1, Token::at(w.token).initialize_transfer_commitment(w.m2, w.m1));
     assert_stamped(w, c);
+}
+
+// A sent tx returns no private return values, so the opener's client learns the commitment from this effect alone.
+unconstrained fn assert_handed_over(commitment: Field) {
+    let effects = get_last_call_offchain_effects();
+    let mut found = 0;
+    for i in 0..effects.len() {
+        let e = effects.get(i);
+        if (e.len() == 2) & (e.get(0) == REQUEST_OPENED_EFFECT) {
+            assert_eq(e.get(1), commitment, "the effect should carry the opened commitment");
+            found += 1;
+        }
+    }
+    assert_eq(found, 1, "one opening should emit exactly one request effect");
+}
+
+#[test]
+unconstrained fn both_openings_hand_the_commitment_to_the_opener() {
+    let w = utils::setup_merchant_world(false);
+    let token = Token::at(w.token);
+    let c = w.env.call_private(w.alice, token.initialize_transfer_commitment(w.m1, w.alice));
+    assert_handed_over(c);
+    let c = w.env.call_private(
+        w.m1,
+        token.transfer_private_to_public_with_commitment(w.m1, w.bob, AMOUNT, 0),
+    );
+    assert_handed_over(c);
 }
 
 #[test(should_fail_with = "Request refused: neither creator nor recipient is a merchant")]

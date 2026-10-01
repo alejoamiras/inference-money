@@ -6,13 +6,15 @@
 // unconsumable and funds strand. Run: scripts/run-txe-tests.sh --crate keystone.
 
 use aztec::hash::compute_secret_hash;
+use aztec::messages::offchain_messages::OFFCHAIN_MESSAGE_IDENTIFIER;
 use aztec::protocol::address::{AztecAddress, EthAddress};
 use aztec::protocol::constants as protocol;
 use aztec::protocol::hash::poseidon2_hash_bytes;
 use aztec::protocol::traits::FromField;
 use claim_secret_lib::{derive_claim_secret, DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET};
 use merchant_stamp::{
-    DOM_SEP__MERCHANT_STAMP, DOM_SEP__MERCHANT_STAMP_PAD, MERCHANT_SIDE_SLOT, pad, stamp,
+    DOM_SEP__MERCHANT_STAMP, DOM_SEP__MERCHANT_STAMP_PAD, MERCHANT_SIDE_SLOT, pad,
+    REQUEST_OPENED_EFFECT, stamp,
 };
 use token_portal_content_hash_lib::{
     get_mint_to_private_content_hash, get_mint_to_public_content_hash, get_withdraw_content_hash,
@@ -223,4 +225,15 @@ fn merchant_side_capsule_slot_is_derived_and_pinned() {
     assert(
         MERCHANT_SIDE_SLOT == 0x0bfc6bf5b3874bc783b148cc9a19595a0ec8267dbf92d1ecd82ca70f441668ef,
     );
+}
+
+// The effect's head must differ from the offchain-message identifier, or the wallet would parse it as a message.
+#[test]
+fn merchant_request_effect_tag_is_derived_and_pinned() {
+    let derived = poseidon2_hash_bytes("merchant_token_request_opened".as_bytes());
+    assert(REQUEST_OPENED_EFFECT == derived);
+    assert(
+        REQUEST_OPENED_EFFECT == 0x2c0264a3f3d089a68139762c50b6f5f68e6cc5d8662de00195b492d228a73f73,
+    );
+    assert(REQUEST_OPENED_EFFECT != OFFCHAIN_MESSAGE_IDENTIFIER);
 }

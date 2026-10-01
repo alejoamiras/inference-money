@@ -39,11 +39,11 @@ pub contract Token {
     };
     use aztec::{
         context::{NullifierExistenceRequest, PrivateContext},
-        oracle::nullifiers::check_nullifier_exists,
+        oracle::{nullifiers::check_nullifier_exists, offchain_effect::emit_offchain_effect},
         protocol::{hash::compute_siloed_nullifier, traits::{Deserialize, Serialize}},
         state_vars::DelayedPublicMutable,
     };
-    use merchant_stamp::{pad, stamp};
+    use merchant_stamp::{pad, REQUEST_OPENED_EFFECT, stamp};
 
     // The switch-off delay's bounds. The floor is DelayedPublicMutable's minimum; above the ceiling a delay changes
     // nothing, because the kernel already caps every tx at anchor + 86399 (MAX_TX_LIFETIME).
@@ -1120,6 +1120,7 @@ pub contract Token {
     }
 
     /// @notice Records who a request was opened for: its stamp if the recipient was proven a merchant, else its pad
+    /// @dev Also hands the commitment to the opener's client as an offchain effect
     /// @param commitment The request just opened
     /// @param side The side `_prove_merchant_side` proved, recipient first
     #[internal("private")]
@@ -1130,6 +1131,8 @@ pub contract Token {
             pad(commitment)
         };
         self.context.push_nullifier_unsafe(nullifier);
+        // Safety: an offchain effect only reaches the prover's own client and is neither constrained nor published.
+        unsafe { emit_offchain_effect([REQUEST_OPENED_EFFECT, commitment]) };
     }
 
     // A library method, not #[internal]: the header is not a valid entry-point type, which internal returns must be.

@@ -16,6 +16,12 @@ pub global DOM_SEP__MERCHANT_STAMP_PAD: u32 = 3491815610;
 pub global MERCHANT_SIDE_SLOT: Field =
     0x0bfc6bf5b3874bc783b148cc9a19595a0ec8267dbf92d1ecd82ca70f441668ef;
 
+// poseidon2_hash_bytes("merchant_token_request_opened"): heads the offchain effect `[REQUEST_OPENED_EFFECT, c]` that
+// tells the opener's client which commitment it opened. A sent tx returns no private return values, and `c` embeds
+// randomness drawn while proving, so a simulation's return value is a different commitment.
+pub global REQUEST_OPENED_EFFECT: Field =
+    0x2c0264a3f3d089a68139762c50b6f5f68e6cc5d8662de00195b492d228a73f73;
+
 pub fn stamp(commitment: Field) -> Field {
     poseidon2_hash_with_separator([commitment], DOM_SEP__MERCHANT_STAMP)
 }
