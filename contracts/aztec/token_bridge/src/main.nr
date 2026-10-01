@@ -4,8 +4,9 @@ mod test;
 
 // Moves one token between L1 and L2 through its TokenPortal's Inbox/Outbox messages, minting and burning via
 // TokenMinterProxy, whose sole minter is this bridge. A user account is bound to the Ethereum address its first private
-// claim came from and withdraws only there; merchants (the token's list) claim publicly and exit anywhere. A deposit
-// nobody may claim goes back to its depositor. The owner can only pause claims, returns and exits.
+// claim came from and withdraws only there; merchants (the token's list) claim publicly and exit anywhere but the portal,
+// whose payout must lower its own balance, which a transfer to itself never does. A deposit nobody may claim goes back
+// to its depositor. The owner can only pause claims, returns and exits.
 
 use aztec::macros::aztec;
 
@@ -196,6 +197,7 @@ assert(amount > 0, "Amount must be greater than zero");
 assert(!recipient.is_zero(), "Recipient cannot be zero");
 let sender = self.msg_sender();
 let config = self.storage.config.read();
+assert(recipient != config.portal, "Recipient cannot be the portal");
 assert(self.view(Token::at(config.token).is_merchant(sender)), "Public exits are for merchants only");
 let content = withdraw_content_hash(recipient, amount, caller_on_l1);
 self.context.message_portal(config.portal, content);
@@ -216,6 +218,7 @@ assert(amount > 0, "Amount must be greater than zero");
 assert(!recipient.is_zero(), "Recipient cannot be zero");
 let sender = self.msg_sender();
 let config = self.storage.config.read();
+assert(recipient != config.portal, "Recipient cannot be the portal");
 if as_merchant {
 assert(
 self.view(Token::at(config.token).try_prove_merchant(sender)),

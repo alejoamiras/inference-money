@@ -143,6 +143,24 @@ unconstrained fn exit_to_l1_private_zero_recipient_rejected() {
     );
 }
 
+/// The portal's payout must lower its own balance, so a withdraw to itself could never land: refused before the burn.
+#[test(should_fail_with = "Recipient cannot be the portal")]
+unconstrained fn exit_to_l1_public_portal_recipient_rejected() {
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    env.call_public(merchant, TokenBridge::at(bridge).exit_to_l1_public(utils::portal(), 1, EthAddress::zero(), NONCE));
+}
+
+#[test(should_fail_with = "Recipient cannot be the portal")]
+unconstrained fn exit_to_l1_private_portal_recipient_rejected() {
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    env.call_private(
+        merchant,
+        TokenBridge::at(bridge).exit_to_l1_private(utils::portal(), 1, EthAddress::zero(), NONCE, true),
+    );
+}
+
 /// Exiting more than the sender holds fails on the burn, never emitting a withdraw for value that was not destroyed.
 #[test(should_fail_with = "attempt to subtract with overflow")]
 unconstrained fn exit_to_l1_public_insufficient_balance_rejected() {
