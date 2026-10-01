@@ -58,6 +58,8 @@ Each L1↔L2 message content is `sha256ToField(abi.encodeWithSignature(signature
 
 The depositor is the address the USDC came from: a direct deposit's caller, or the Permit2 signer when the deposit goes through the router. Vectors for all three formats are pinned in Solidity, Noir and TypeScript (`docs/architecture.md`).
 
+The portal refuses a deposit that no Aztec call could consume: an amount above u128 (`AmountExceedsL2Max`), and a public recipient above the largest field element (`RecipientExceedsFieldMax`), since an Aztec address is a field element. Encoding an `AztecAddress` (`toString()`, as bridge-core does) always fits.
+
 ## What each action makes public
 
 - **Visible.** Ethereum shows who deposited and who withdrew, with amounts. Aztec shows claim and withdrawal amounts (total-supply writes) and payment-request amounts (completion logs). A return shows no amount on Aztec, but its payout on Ethereum shows recipient and amount, which a public deposit links back to. The merchant list is public. The pause checks a bridge call enqueues reveal bridge use, and an account's first claim is distinguishable from later ones.

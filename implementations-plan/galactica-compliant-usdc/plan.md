@@ -588,7 +588,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - No hand-rolled signature, KDF or encryption.
 
 **Input validation**
-- **L1:** the u128 cap, exact pulls and debits, router-only `…For`, and the router/token match at init.
+- **L1:** the u128 cap, a public recipient within the field (P15, from the hardening pass), exact pulls and debits, router-only `…For`, and the router/token match at init.
 - **L2:**
   - `amount > 0`;
   - non-zero recipient and depositor;
