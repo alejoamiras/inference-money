@@ -1,6 +1,6 @@
 # Phase 9 — Testnet, through keyed runs
 
-Status: **in progress**: step 1 printed the admin address (`0x094fe37a…6915`, committed into the deploy template); its clean re-run, then the deploy, are next.
+Status: **in progress**: step 1 done (the admin address `0x094fe37a…6915`, committed into the deploy template); the deploy run is next.
 
 ## Findings
 
@@ -13,3 +13,4 @@ Status: **in progress**: step 1 printed the admin address (`0x094fe37a…6915`, 
 |---|---|---|
 | `admin-address-256bfd87` | `bridge admin address` | never ran: its 1Password item did not exist (superseded) |
 | `admin-address-7958540b` | `bridge admin address` | address printed; exit 1 from the scan (finding 2) |
+| `admin-address-4d355f1f` | `bridge admin address` | the same address; scan clean; exit 0 |
