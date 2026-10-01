@@ -13,12 +13,22 @@ import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { BlockNumber } from "@aztec-labs/foundation/branded-types"
 import { type AbiType, decodeFunctionSignature, type EventMetadataDefinition, EventSelector } from "@aztec-labs/stdlib/abi"
-import { DelayedPublicMutableValues } from "@aztec-labs/stdlib/delayed-public-mutable"
+import { DelayedPublicMutableValues, type ScheduledDelayChange } from "@aztec-labs/stdlib/delayed-public-mutable"
 import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
 import { Capsule } from "@aztec-labs/stdlib/tx"
 import { tokenArtifact } from "./artifacts"
 import { type TokenRule, tokenRefusalOf } from "./rules"
 import { MERCHANT_SIDE_SLOT } from "./stamp"
+
+/** The switch-off delay's bounds: the token's MERCHANT_MIN_DELAY (DelayedPublicMutable's floor) and MERCHANT_MAX_DELAY. */
+export const MERCHANT_MIN_DELAY = 3600n
+export const MERCHANT_MAX_DELAY = 86_400n
+
+/** A token entry's or the guardian slot's delay at `at`; both start at MERCHANT_MIN_DELAY until one is scheduled. */
+export function delayAt(sdc: ScheduledDelayChange, at: bigint): bigint {
+	const delay = at < sdc.timestampOfChange ? sdc.pre : sdc.post
+	return delay ?? MERCHANT_MIN_DELAY
+}
 
 /** Which side a restricted call proves, as the token's hint numbers them: its first account, its second, or none. */
 export const Side = { First: 0, Second: 1, Neither: 2 } as const
