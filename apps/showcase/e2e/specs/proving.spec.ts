@@ -59,7 +59,7 @@ function sampleMemory(page: Page): () => Promise<{ peak: number; count: number }
 test("the page proves the transfer and the open-and-pay", async ({ page }) => {
 	test.setTimeout(RUN_TIMEOUT_MS)
 	const env = runEnv()
-	await page.goto("/")
+	await page.goto("/#proving")
 	await expect(page.getByTestId("wallet-status")).toHaveAttribute("data-status", "ready", { timeout: 10 * 60_000 })
 	const provingEnv = page.getByTestId("proving-env")
 	// A bundle built with fake proofs would time simulations; nothing it measures may count.

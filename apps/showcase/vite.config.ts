@@ -5,7 +5,15 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig, type Plugin } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
-import { type BuildTarget, EMBEDDED_MANIFEST, headersFile, ISOLATION_HEADERS, resolveTarget, servedHeaders } from "./build/target.ts"
+import {
+	type BuildTarget,
+	EMBEDDED_MANIFEST,
+	EMBEDDED_TOUR,
+	headersFile,
+	ISOLATION_HEADERS,
+	resolveTarget,
+	servedHeaders,
+} from "./build/target.ts"
 
 const APP_ROOT = fileURLToPath(new URL(".", import.meta.url))
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url))
@@ -51,6 +59,7 @@ function outputsPlugin(target: BuildTarget, embedded: string): Plugin {
 		closeBundle() {
 			writeFileSync(resolve(outDir, "_headers"), headersFile(target))
 			writeFileSync(resolve(outDir, EMBEDDED_MANIFEST), embedded)
+			writeFileSync(resolve(outDir, EMBEDDED_TOUR), JSON.stringify(target.tour))
 		},
 	}
 }
@@ -65,6 +74,7 @@ export default defineConfig(() => {
 			__SHOWCASE_USERS_TAG__: JSON.stringify(target.usersTag),
 			__SHOWCASE_L1_RPC__: JSON.stringify(target.l1RpcUrl),
 			__SHOWCASE_PROOFS__: JSON.stringify(target.proofs),
+			__SHOWCASE_TOUR__: JSON.stringify(target.tour),
 		},
 		resolve: {
 			alias: [

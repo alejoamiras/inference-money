@@ -1,24 +1,28 @@
 import { describe, expect, it } from "bun:test"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { MANIFEST } from "../../bridge-core/src/test/fixtures"
-import { parseTour, type Tour, tourHeader, tourMismatches } from "./tour"
+import { parseTour, TOUR_STEPS, type TourStep, type TourStepId, tourHeader, tourMismatches } from "./tour"
 import { aztecWorld, ethereumWorld } from "./world-view"
 
-const step = (o: Partial<Tour["steps"][number]> = {}): Tour["steps"][number] => ({
-	id: "alice-pays-bob",
-	actor: "alice",
-	action: "transfer",
-	to: "bob",
-	amount: "1000000",
-	verdict: "refused",
-	rule: "transfer",
-	world: [],
-	...o,
-})
+const REFUSED: Partial<Record<TourStepId, string>> = { "transfer-refused": "transfer", "exit-refused": "exitDestination" }
+
+/** A whole acceptance run, each step overridable. */
+const steps = (o: Partial<Record<TourStepId, Record<string, unknown>>> = {}): TourStep[] =>
+	TOUR_STEPS.map((id) => ({
+		id,
+		actor: "alice",
+		action: "transfer",
+		to: "bob",
+		amount: "1000000",
+		verdict: REFUSED[id] ? "refused" : "settled",
+		...(REFUSED[id] ? { rule: REFUSED[id] } : {}),
+		world: [],
+		...o[id],
+	})) as TourStep[]
 
 describe("tour", () => {
 	it("validates a recording and checks it belongs to the manifest's deployment", () => {
-		const tour = parseTour({ ...tourHeader(MANIFEST), steps: [step()] })
+		const tour = parseTour({ ...tourHeader(MANIFEST), steps: steps() })
 		expect(tourMismatches(tour, MANIFEST)).toEqual([])
 		const elsewhere = { ...MANIFEST, l2: { ...MANIFEST.l2, bridge: { ...MANIFEST.l2.bridge, address: MANIFEST.l2.proxy.address } } }
 		expect(tourMismatches(tour, elsewhere)).toEqual([
@@ -26,11 +30,13 @@ describe("tour", () => {
 		])
 	})
 
-	it("refuses unknown fields, a refused step without its rule, and a settled step with one", () => {
+	it("refuses unknown fields, a refused step without its rule, a settled step with one, and any other run", () => {
 		const header = tourHeader(MANIFEST)
-		expect(() => parseTour({ ...header, steps: [step({ rule: undefined })] })).toThrow("names its rule")
-		expect(() => parseTour({ ...header, steps: [step({ verdict: "settled" })] })).toThrow("names its rule")
-		expect(() => parseTour({ ...header, steps: [{ ...step(), secret: "0x1" }] })).toThrow()
+		expect(() => parseTour({ ...header, steps: steps({ "transfer-refused": { rule: undefined } }) })).toThrow("names its rule")
+		expect(() => parseTour({ ...header, steps: steps({ deposit: { rule: "transfer" } }) })).toThrow("names its rule")
+		expect(() => parseTour({ ...header, steps: steps({ claim: { secret: "0x1" } }) })).toThrow()
+		expect(() => parseTour({ ...header, steps: steps().slice(1) })).toThrow("the acceptance run's, in order")
+		expect(() => parseTour({ ...header, steps: steps().reverse() })).toThrow("the acceptance run's, in order")
 	})
 })
 

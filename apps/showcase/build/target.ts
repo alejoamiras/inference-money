@@ -15,11 +15,17 @@ export interface BuildTarget {
 	/** A public endpoint the page reads and sends L1 through, never a keyed run's SEPOLIA_RPC_URL. */
 	readonly l1RpcUrl: string
 	readonly proofs: Proofs
+	/** The guided tour's recording, as read: `build/manifest-identity.test.ts` and the page validate it. */
+	readonly tour: unknown
 }
 
 export const TESTNET_MANIFEST = "deployments/testnet.json"
 /** Written beside the bundle: the exact string `__BRIDGE_MANIFEST__` was defined as. */
 export const EMBEDDED_MANIFEST = "bridge-manifest.json"
+/** Written beside the bundle: the tour `__SHOWCASE_TOUR__` was defined as. */
+export const EMBEDDED_TOUR = "showcase-tour.json"
+/** A local deployment lives for one run, so a local build plays a fixture recording that names no live contract. */
+const FIXTURE_TOUR = "apps/showcase/e2e/fixtures/tour.json"
 /** A keyed run's variables: a build that sees one refuses to run, so no secret can reach a bundle. */
 const KEYED = ["TESTNET_L1_PRIVATE_KEY", "TESTNET_DEPLOYER_SECRET", "TESTNET_ADMIN_SECRET", "SEPOLIA_RPC_URL"]
 /** bb.js fetches its proving key material from these, a host it hardcodes and its fallback. */
@@ -45,6 +51,16 @@ function proofsFor(env: Env, m: BridgeManifest): Proofs {
 	return p
 }
 
+/** A testnet deployment's recorded acceptance run sits beside its manifest (`smoke --record`). */
+function readTour(path: string, m: BridgeManifest, repoRoot: string): unknown {
+	const file = m.network === "local" ? resolve(repoRoot, FIXTURE_TOUR) : path.replace(/\.json$/, "-tour.json")
+	try {
+		return JSON.parse(readFileSync(file, "utf8"))
+	} catch {
+		throw new Error(`${path} has no recorded tour at ${file}: run \`bun run bridge smoke ${path} --record ${file}\` first.`)
+	}
+}
+
 /** A local run's anvil, from its network handle; testnet's pinned public endpoint. */
 const l1RpcFor = (path: string, m: BridgeManifest, env: Env): string =>
 	m.network === "local" ? resolveEndpoints(basename(dirname(path)), env as NodeJS.ProcessEnv).anvilUrl : TESTNET.defaultL1RpcUrl
@@ -65,7 +81,13 @@ export function resolveTarget(env: Env, repoRoot: string): BuildTarget {
 	if (pinned && manifest.network !== "testnet") throw new Error(`${TESTNET_MANIFEST} is a ${manifest.network} manifest`)
 	const demo = readDemoFile({ path, m: manifest })
 	if (!demo) throw new Error(`${path} has no published demo: run \`bun run bridge demo setup ${path}\` first.`)
-	return { manifest, usersTag: demo.usersTag, l1RpcUrl: l1RpcFor(path, manifest, env), proofs: proofsFor(env, manifest) }
+	return {
+		manifest,
+		usersTag: demo.usersTag,
+		l1RpcUrl: l1RpcFor(path, manifest, env),
+		proofs: proofsFor(env, manifest),
+		tour: readTour(path, manifest, repoRoot),
+	}
 }
 
 /** Frames nothing, and talks to nothing but itself, the Aztec node, the L1 RPC and, when it proves, bb.js's CRS hosts. */

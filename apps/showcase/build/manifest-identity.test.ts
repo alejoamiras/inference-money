@@ -3,8 +3,9 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseManifest } from "@inference-money/bridge-core/manifest"
+import { parseTour, tourMismatches } from "@inference-money/demo"
 import { describe, expect, it } from "vitest"
-import { EMBEDDED_MANIFEST, TESTNET_MANIFEST } from "./target"
+import { EMBEDDED_MANIFEST, EMBEDDED_TOUR, TESTNET_MANIFEST } from "./target"
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url))
 const dist = join(appRoot, "dist")
@@ -25,5 +26,11 @@ describe.skipIf(process.env.BUILT_TARGET !== "testnet")("the testnet bundle", ()
 		for (const v of [embedded.l2.nodeUrl, embedded.l1.router, embedded.l1.portal, embedded.l2.bridge.address]) {
 			expect(code, v).toContain(v)
 		}
+	})
+
+	it("plays this deployment's own recorded tour", () => {
+		const manifest = parseManifest(JSON.parse(readFileSync(join(dist, EMBEDDED_MANIFEST), "utf8")))
+		const tour = parseTour(JSON.parse(readFileSync(join(dist, EMBEDDED_TOUR), "utf8")))
+		expect(tourMismatches(tour, manifest)).toEqual([])
 	})
 })

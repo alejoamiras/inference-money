@@ -18,6 +18,8 @@ export interface NetworkPins {
 	feeJuicePortal: Address
 	feeAssetHandler: Address
 	sponsoredFpc: `0x${string}`
+	/** Where a tx hash is looked up, by appending it. */
+	explorer: { l1Tx: string; l2Tx: string }
 }
 
 export const TESTNET: NetworkPins = {
@@ -39,6 +41,8 @@ export const TESTNET: NetworkPins = {
 	feeAssetHandler: "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
 	// Canonical SponsoredFPC (salt 0); its address commits to the contract class.
 	sponsoredFpc: "0x06a9fa0208c78509921b0487a6b5cd5c2e93baf17de1a18d310f65a3cc1d924b",
+	// Aztecscan is the explorer Aztec's testnet guide names; its tx page is /tx-effects/<hash>.
+	explorer: { l1Tx: "https://sepolia.etherscan.io/tx/", l2Tx: "https://testnet.aztecscan.xyz/tx-effects/" },
 }
 
 export function networkByName(name: string): NetworkPins {

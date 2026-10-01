@@ -13,10 +13,13 @@ const demo = (bridge: string) => JSON.stringify({ version: 1, bridge, usersTag: 
 const testnet = join(root, "testnet.json")
 writeFileSync(testnet, JSON.stringify({ ...fixture, network: "testnet" }))
 writeFileSync(join(root, "testnet-demo.json"), demo(fixture.l2.bridge.address))
+writeFileSync(join(root, "testnet-tour.json"), JSON.stringify({ recorded: "testnet" }))
 const local = join(root, "local", "run-1", "manifest.json")
 mkdirSync(join(root, "local", "run-1"), { recursive: true })
 writeFileSync(local, JSON.stringify({ ...fixture, network: "local" }))
 writeFileSync(join(root, "local", "run-1", "demo.json"), demo(fixture.l2.bridge.address))
+mkdirSync(join(root, "apps", "showcase", "e2e", "fixtures"), { recursive: true })
+writeFileSync(join(root, "apps", "showcase", "e2e", "fixtures", "tour.json"), JSON.stringify({ recorded: "fixture" }))
 /** A local manifest's L1 RPC comes from its run's network; attached endpoints stand in for one. */
 const ANVIL = { NET_L1_RPC: "http://127.0.0.1:8545", NET_NODE_URL: "http://127.0.0.1:8080" }
 
@@ -39,6 +42,16 @@ describe("resolveTarget", () => {
 		expect(resolveTarget({ BRIDGE_MANIFEST: local, ...ANVIL }, root)).toMatchObject({ proofs: "fake", l1RpcUrl: ANVIL.NET_L1_RPC })
 		expect(resolveTarget({ BRIDGE_MANIFEST: local, SHOWCASE_PROOFS: "real", ...ANVIL }, root).proofs).toBe("real")
 		expect(resolveTarget({ BRIDGE_MANIFEST: testnet }, root)).toMatchObject({ proofs: "real", usersTag: "ab".repeat(16) })
+	})
+
+	it("embeds the deployment's recorded tour, and the fixture tour on a local network", () => {
+		expect(resolveTarget({ BRIDGE_MANIFEST: testnet }, root).tour).toEqual({ recorded: "testnet" })
+		expect(resolveTarget({ BRIDGE_MANIFEST: local, ...ANVIL }, root).tour).toEqual({ recorded: "fixture" })
+		rmSync(join(root, "testnet-tour.json"))
+		expect(() => resolveTarget({ BRIDGE_MANIFEST: testnet }, root)).toThrow(
+			/has no recorded tour at .*testnet-tour\.json: run `bun run bridge smoke/,
+		)
+		writeFileSync(join(root, "testnet-tour.json"), JSON.stringify({ recorded: "testnet" }))
 	})
 })
 

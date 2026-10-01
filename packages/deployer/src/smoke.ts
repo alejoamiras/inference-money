@@ -24,7 +24,17 @@ import {
 	syncMerchantList,
 	tokenRefusalOf,
 } from "@inference-money/bridge-core"
-import { aztecWorld, ethereumWorld, parseTour, SMOKE_AMOUNTS, type TourStep, totalSupplySlot, tourHeader } from "@inference-money/demo"
+import {
+	aztecWorld,
+	ethereumWorld,
+	parseTour,
+	SMOKE_AMOUNTS,
+	TOUR_STEPS,
+	type TourStep,
+	type TourStepId,
+	totalSupplySlot,
+	tourHeader,
+} from "@inference-money/demo"
 import type { Hex } from "viem"
 import { tokenOf } from "./admin"
 import { usersTagOf } from "./demo"
@@ -35,8 +45,8 @@ import { type StateDir, withStateDir } from "./run-state"
 import { type ManifestRef, type Session, withSession } from "./session"
 import type { SentTx } from "./wallet"
 
-export const SMOKE_STEPS = ["deposit", "claim", "request", "pay", "refund", "transfer-refused", "exit-refused", "exit", "withdraw"] as const
-export type SmokeStep = (typeof SMOKE_STEPS)[number]
+export const SMOKE_STEPS = TOUR_STEPS
+export type SmokeStep = TourStepId
 
 const A = SMOKE_AMOUNTS
 const usdc = (v: bigint) => v.toString()

@@ -6,7 +6,9 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./files": "./src/files.ts"
+		"./files": "./src/files.ts",
+		"./keys": "./src/keys.ts",
+		"./tour": "./src/tour.ts"
 	},
 	"scripts": {
 		"test": "bun test --preload ../../test-preload.ts src",

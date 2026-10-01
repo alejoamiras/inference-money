@@ -36,10 +36,9 @@ export function ProvingCheck({ demo, manifest }: { demo: DemoWallet; manifest: B
 			.catch((e: unknown) => setState({ status: "failed", message: e instanceof Error ? e.message : String(e) }))
 	}
 	return (
-		<section className="flex flex-col gap-3 rounded-lg border border-border p-4">
-			<h2 className="font-semibold">Proving check</h2>
+		<section className="flex flex-col gap-3 rounded-lg border border-line bg-white p-4">
 			<p
-				className="text-sm text-muted-foreground"
+				className="text-sm text-muted"
 				data-testid={TESTIDS.provingEnv}
 				data-cores={cores}
 				data-isolated={isolated}
