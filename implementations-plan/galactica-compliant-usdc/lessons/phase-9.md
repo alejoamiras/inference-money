@@ -20,3 +20,16 @@ Status: **in progress**: step 1 done (the admin address `0x094fe37a…6915`); st
 | `deploy-dbc95cd0` | `probe:testnet`, `bridge deploy testnet`, `bridge demo fund` | deployed, verified, funded; exit 1 from the scan (finding 4) |
 | `deploy-scan-87b7d4a0` | `secrets:scan` alone, on the deploy template | `found=false`; exit 0 |
 | `admin-accept-016ec12e` | `bridge admin accept`, `bridge merchants add <galactica> <supplier>` | both roles accepted; 2 merchants in 1 tx; scan clean; exit 0 |
+
+## Codex, arc 4 boundary (GPT-6 Astra, high; session `01a0f807…a9e9`, account alejo-gmail)
+
+The arc-4 loop stopped at its cap with `cd59491` unreviewed (phase-8.md); this pass reviews it with P9's changes.
+
+**Round 1:** not converged, six findings, all verified against the code and accepted:
+
+1. **High: the deployment marker came too late.** A deploy that finished on-chain but died before `.deployment` was written, or two concurrent deploys, let a second deploy through, and `destroy` after handing over one would strand the other's roles. The marker is now created exclusively and flushed before the deploy starts and filled with the bridge on success; an empty one blocks a redeploy and `destroy`.
+2. **High: `destroy` trusted the manifest's token.** A manifest pairing the real bridge with another token could show both roles handed over while the real token's merchant admin stayed with the keys. The token is now read from the bridge's own config and must match, and the roles are read at the pinned testnet node, not the manifest's.
+3. **Medium: the verify recipe checked out the commit that predates the manifest**, replacing the file it then verified; it now copies the manifest out first. The docs also said deploy keys lose their roles at deployment; it is at the admin's acceptance.
+4. **Medium: withdrawals and the deployer's USDC refills kept bare estimates.** Crediting a balance emptied since the estimate costs more (zero to nonzero), and the demo accounts' keys are public. One helper, `withGasHeadroom`, now covers deposits, withdrawals and every deployer EVM write.
+5. **Low: the public-endpoint exemption compared strings.** `:443/` and the committed Aztec node URL still made needles; URLs are now normalized and both committed endpoints exempted.
+6. **Low: comments.** The headroom comment cited the incident and stated its cause as fact; the marker comment narrated. Both rewritten.
