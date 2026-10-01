@@ -1089,7 +1089,7 @@ Pass: all seven steps render from the tour, and the refusals match `rules.ts`.
 
 Layers: component.
 
-**P12. Local e2e.**
+**P12. Local e2e.** ✓ 2026-10-01 (7 of 7 locally and in CI run 36829954515, 6 min; found live withdrawals broken for every user; [lessons](lessons/phase-12.md))
 
 Work:
 - `e2e/agent.sh`, in order:

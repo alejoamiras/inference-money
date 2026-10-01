@@ -1,6 +1,6 @@
 # Phase 12 — Local e2e
 
-Status: **in progress**: the four specs run against a fresh local network; CI's dispatch on the branch is next.
+Status: **done**: 7 of 7 on a fresh local network (Playwright 2.5 min) and in CI (`_e2e.yml` run 36829954515 on the branch, 6 min end to end); `lint:actions` clean.
 
 ## Decisions
 
