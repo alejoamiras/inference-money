@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 EXPECTED=(
   "FormalPortalTest check_deposit_rejectsAmountAboveU128"
   "FormalPortalTest check_depositFor_rejectsNonRouter"
+  "FormalPortalTest check_depositPublic_rejectsOutOfFieldRecipient"
   "FormalPortalTest check_initialize_rejectsNonInitializer"
   "FormalPortalTest check_initializedBindingsCannotChange"
   "FormalRouterTest check_deposit_conservesUserFunds"
@@ -46,12 +47,13 @@ self_test() {
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: tmp is local
   trap "rm -rf '$tmp'" EXIT
-  good="Running 4 tests for test/FormalPortal.t.sol:FormalPortalTest
+  good="Running 5 tests for test/FormalPortal.t.sol:FormalPortalTest
 [PASS] check_deposit_rejectsAmountAboveU128(bytes32,uint256,bytes32) (paths: 1)
 [PASS] check_depositFor_rejectsNonRouter(address,address,bytes32,uint256,bytes32) (paths: 3)
+[PASS] check_depositPublic_rejectsOutOfFieldRecipient(address,bytes32,uint256,bytes32) (paths: 2)
 [PASS] check_initialize_rejectsNonInitializer(address,address,bytes32,address) (paths: 3)
 [PASS] check_initializedBindingsCannotChange(address,bytes32,address) (paths: 2)
-Symbolic test result: 4 passed; 0 failed; time: 0.31s
+Symbolic test result: 5 passed; 0 failed; time: 0.31s
 Running 6 tests for test/FormalRouter.t.sol:FormalRouterTest
 [PASS] check_deposit_conservesUserFunds(uint128,uint128,uint128,bool) (paths: 478)
 [PASS] check_deposit_namesItsCallerAsDepositor(address,uint128,bool) (paths: 8)

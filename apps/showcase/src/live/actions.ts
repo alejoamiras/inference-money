@@ -11,6 +11,7 @@ import {
 	ExitRevertedError,
 	encodeTicket,
 	exitToL1,
+	finalFate,
 	isClaimConsumed,
 	L2_DONE,
 	type ListOptions,
@@ -136,6 +137,8 @@ async function deposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Out
 }
 
 const NOTHING_TO_CLAIM = "There is nothing to claim: deposit first."
+/** A consumed message cannot tell a claim from a return, so it is never reported as a mint. */
+const ALREADY_CONSUMED = "That deposit was already taken on Aztec, by an earlier claim or a return, so nothing was minted now."
 
 /**
  * Whether `p`'s claim still holds at a checkpoint; its record goes once the claim is final. One no longer checkpointed
@@ -224,8 +227,11 @@ async function claimDeposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promis
 	if (found === NOTHING_TO_CLAIM && user === "alice") return replay(ctx, "claim", found)
 	if (typeof found === "string") return { kind: "failed", detail: found }
 	const since = ctx.demo.sent.length
-	await castClaim(session(ctx), found.ticket, () => report("simulate", "Waiting for the deposit's message to reach Aztec."))
+	const result = await castClaim(session(ctx), found.ticket, () =>
+		report("simulate", "Waiting for the deposit's message to reach Aztec."),
+	)
 	ctx.tickets.putDeposit({ ...found.p, claimed: true })
+	if (result === "already") return { kind: "settled", detail: ALREADY_CONSUMED, rows: [] }
 	const amount = usdc2(found.ticket.draft.intent.amount)
 	return { kind: "settled", detail: `${HOLDER_NAME[user]} claimed ${amount} USDC.`, rows: await aztecRows(ctx, since, ["claim"]) }
 }
@@ -310,18 +316,28 @@ async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | 
 	return { kind: "settled", detail, rows: await aztecRows(ctx, since, ["exit"]) }
 }
 
-/** Whether the node's copy of `hash` landed, waited for while pending; false when the node never held it. */
-async function landed(ctx: LiveCtx, hash: string): Promise<boolean> {
-	const txHash = TxHash.fromString(hash)
-	if ((await ctx.demo.node.getTxReceipt(txHash)).status === TxStatus.DROPPED) return false
-	return (await waitForTx(ctx.demo.node, txHash, { ...L2_DONE, dontThrowOnRevert: true })).hasExecutionSucceeded()
+const MAY_STILL_LAND =
+	"The network may still take the first try, so this page won't send it again. Check the balances in a few minutes, and try again if nothing moved."
+
+/**
+ * A sent tx's fate, waited for while the node holds it. A copy the node refused outright never entered its pool, and
+ * its nullifier is already in the chain's state, which no pending copy gets past: gone. Any other drop proves nothing
+ * (a lost response, another node behind the same URL), and a prune can undo a revert, so those wait for finality.
+ */
+async function fateOf(ctx: LiveCtx, tx: SentTx): Promise<"landed" | "gone" | "unsettled"> {
+	const hash = TxHash.fromString(tx.hash)
+	if ((await ctx.demo.node.getTxReceipt(hash)).status === TxStatus.DROPPED) {
+		return tx.refused ? "gone" : finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
+	}
+	const receipt = await waitForTx(ctx.demo.node, hash, { ...L2_DONE, dontThrowOnRevert: true })
+	return receipt.hasExecutionSucceeded() ? "landed" : finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
 }
 
 /**
- * On a duplicate nullifier, a send the node refused may be a copy of a tx it already holds: for a one-send action, that
- * tx's fate decides, and no retry runs while it is pending. Anything else runs once more, after the wallet's sync: a
- * conflict with another tx, or a payment, whose refused send may be the request it opened (the payment gate refuses
- * paying a request twice).
+ * On a duplicate nullifier, a one-send action whose tx left for the node is decided by that tx's fate, and sent again
+ * only once it provably cannot land. Anything else runs once more, after the wallet's sync: a conflict found before
+ * anything was sent, or a payment, whose refused send may be the request it opened (the payment gate refuses paying a
+ * request twice).
  */
 export async function withConflictRetry(ctx: LiveCtx, attempt: () => Promise<Outcome>, kinds: readonly TxKind[]): Promise<Outcome> {
 	const since = ctx.demo.sent.length
@@ -330,10 +346,11 @@ export async function withConflictRetry(ctx: LiveCtx, attempt: () => Promise<Out
 	} catch (e) {
 		if (!DUPLICATE_NULLIFIER.test(message(e))) throw e
 		const last = ctx.demo.sent.length > since ? ctx.demo.sent.at(-1) : undefined
-		if (kinds.length === 1 && last?.refused && (await landed(ctx, last.hash))) {
+		const fate = kinds.length === 1 && last ? await fateOf(ctx, last) : "gone"
+		if (fate === "landed") {
 			return { kind: "settled", detail: "It went through: the network had it already.", rows: await aztecRows(ctx, since, kinds) }
 		}
-		return attempt()
+		return fate === "unsettled" ? { kind: "failed", detail: MAY_STILL_LAND } : attempt()
 	}
 }
 

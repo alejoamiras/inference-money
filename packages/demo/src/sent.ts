@@ -10,13 +10,13 @@ export interface SentTx {
 	feePayer: string
 	expiresAt: bigint
 	anchorTs: bigint
-	/** The node rejected this send. It may still hold an earlier copy of the same tx. */
+	/** The node refused this copy outright (`Invalid tx: …`), so it never entered the node's pool. */
 	refused?: true
 }
 
 /**
  * Wraps `node` so every `sendTx` through it records the tx's hash and kernel commitments before forwarding; `onSend`
- * runs then too, so a journal it writes survives a crash during the send.
+ * runs first, so a journal it writes survives a crash during the send, and a journal that throws stops the send.
  */
 export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: SentTx) => void): AztecNode {
 	return new Proxy(node, {
@@ -29,10 +29,10 @@ export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: Sen
 					expiresAt: tx.data.expirationTimestamp,
 					anchorTs: tx.data.constants.anchorBlockHeader.globalVariables.timestamp,
 				}
-				sent.push(record)
 				onSend?.(record)
+				sent.push(record)
 				return target.sendTx(tx).catch((e: unknown) => {
-					record.refused = true
+					if (/Invalid tx: /.test(e instanceof Error ? e.message : String(e))) record.refused = true
 					throw e
 				})
 			}

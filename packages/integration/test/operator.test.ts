@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Contract } from "@aztec-labs/aztec.js/contracts"
@@ -11,7 +11,7 @@ import {
 	MERCHANT_MIN_DELAY,
 	signingKeyFor,
 } from "@inference-money/bridge-core"
-import { parseTour, tourHeader } from "@inference-money/demo"
+import { parseTour, TOUR_STEPS, tourHeader } from "@inference-money/demo"
 import {
 	acceptAdmin,
 	accountFor,
@@ -121,6 +121,17 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			expect(await failing()).toEqual([])
 		})
 
+		it("a deploy key scheduled as the guardian", async () => {
+			const deployer = AztecAddress.fromStringUnsafe(harness().manifest.l2.bridge.deployer)
+			await tokenAt().methods.schedule_merchant_guardian!(deployer).send(asAdmin())
+			try {
+				expect(await failing()).toEqual(["no deploy key is the guardian, now or scheduled"])
+			} finally {
+				await tokenAt().methods.schedule_merchant_guardian!(AztecAddress.ZERO).send(asAdmin())
+			}
+			expect(await failing()).toEqual([])
+		})
+
 		it("a paused bridge", async () => {
 			await bridgeAt().methods.set_paused!(true).send(asAdmin())
 			try {
@@ -144,12 +155,23 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			expect(await failing()).toEqual([])
 		})
 
+		// A whole, well-formed run, so the deployment's identity is the only thing wrong with it.
 		it("a tour recorded on another deployment", async () => {
 			const foreign = join(dir, "foreign-tour.json")
 			const header = tourHeader(harness().manifest)
-			const step = { id: "claim", actor: "alice", action: "claim", to: "alice", amount: "1", verdict: "settled", world: [] }
+			const refused: Record<string, string> = { "transfer-refused": "transfer", "exit-refused": "exitDestination" }
+			const steps = TOUR_STEPS.map((id) => ({
+				id,
+				actor: "alice",
+				action: "transfer",
+				to: "bob",
+				amount: "1",
+				verdict: refused[id] ? "refused" : "settled",
+				...(refused[id] && { rule: refused[id] }),
+				world: [],
+			}))
 			const contracts = { ...header.contracts, bridge: `0x${"cd".repeat(32)}` }
-			writeFileSync(foreign, JSON.stringify({ ...header, contracts, steps: [step] }))
+			writeFileSync(foreign, JSON.stringify({ ...header, contracts, steps }))
 			const r = await bridge("verify", harness().manifestPath, "--tour", foreign)
 			expect(r.code, r.out).toBe(1)
 			expect(r.out).toContain("contracts.bridge")
@@ -162,6 +184,15 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 		await ok("export", manifestPath, "--out", out)
 		const bundle = await readBundle(out)
 		expect(bundle.manifest).toEqual(m)
+		expect((await Bun.$`sha256sum -c SHA256SUMS`.cwd(out).quiet()).exitCode).toBe(0)
+
+		// A manifest these artifacts don't derive, as an older deployment's: nothing is written.
+		const raw = JSON.parse(readFileSync(manifestPath, "utf8"))
+		const older = join(dir, "older.json")
+		writeFileSync(older, JSON.stringify({ ...raw, l2: { ...raw.l2, proxy: { ...raw.l2.proxy, salt: `0x${"01".repeat(32)}` } } }))
+		const refused = await bridge("export", older, "--out", join(dir, "refused"))
+		expect([refused.code === 0, refused.out.includes(`made from commit ${m.sourceCommit}`)], refused.out).toEqual([false, true])
+		expect(existsSync(join(dir, "refused"))).toBe(false)
 
 		const fresh = await openBridgeWallet(node, { prove: false })
 		try {

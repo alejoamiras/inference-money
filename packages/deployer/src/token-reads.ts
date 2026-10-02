@@ -66,6 +66,19 @@ export async function entryDelay(
 	return delayOf(node, token, await deriveStorageSlotInMap(tokenSlot("merchant_off"), account), block, at)
 }
 
+/** The cancel-only guardian in force at the latest block, and the one scheduled to follow; zero is none. */
+export async function readGuardian(
+	node: Pick<AztecNode, "getBlockNumber" | "getBlockData" | "getPublicStorageAt">,
+	token: AztecAddress,
+): Promise<{ current: Fr; scheduled: Fr }> {
+	const block = await node.getBlockNumber()
+	const at = (await node.getBlockData(block))?.header.globalVariables.timestamp
+	if (at === undefined) throw new Error(`The node has no block ${block}.`)
+	const read = (s: Fr) => node.getPublicStorageAt(block, token, s)
+	const { svc } = await DelayedPublicMutableValues.readFromTree(tokenSlot("merchant_guardian"), read)
+	return { current: svc.getCurrentAt(at)[0] ?? Fr.ZERO, scheduled: svc.post[0] ?? Fr.ZERO }
+}
+
 /** The guardian slot's delay, read at `block` (timestamp `at`). */
 export const guardianDelay = (node: Pick<AztecNode, "getPublicStorageAt">, token: AztecAddress, block: number, at: bigint) =>
 	delayOf(node, token, tokenSlot("merchant_guardian"), block, at)

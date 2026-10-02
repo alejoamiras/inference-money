@@ -7,7 +7,7 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); in progress: P1 ✓ P2 ✓ P3 ✓ P4 ✓ P5 ✓ P6 ✓ P7 ✓ P8 ✓"
+status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); implemented 2026-10-02: P1–P15 ✓, every arc loop and the cross-arc pass converged; delivery and close-out next"
 ---
 
 # galactica-compliant-usdc
@@ -588,12 +588,13 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - No hand-rolled signature, KDF or encryption.
 
 **Input validation**
-- **L1:** the u128 cap, exact pulls and debits, router-only `…For`, and the router/token match at init.
+- **L1:** the u128 cap, a public recipient within the field (P15, from the hardening pass), exact pulls and debits, router-only `…For`, and the router/token match at init.
 - **L2:**
   - `amount > 0`;
   - non-zero recipient and depositor;
   - admin checks (zero or duplicate add, delay bounds, pending-only accept);
-  - message content binds `to`, amount and depositor.
+  - message content binds `to`, amount and depositor;
+  - an exit never pays the portal, and every withdraw names 20-byte addresses (P15, from the arc-6 review).
 - **TS:** zod on the manifest and the tour; preflights before signing or proving; CLI argument parsing.
 - **Secrets:** a missing variable is reported by name only.
 
@@ -1141,7 +1142,11 @@ Layers: live-testnet browser.
 
 ### Arc 6: hardening
 
-**P14. `/harden security medium` on `contracts/`, EVM and Noir.**
+**P14. `/harden security medium` on `contracts/`, EVM and Noir.** ✓ 2026-10-01 (run `2026-10-01-contracts` on `6f3b0b3`, six clusters × Claude + Codex; report: https://claude.ai/artifact/61eDLDu7BmAkdSTfKxw6sD; [lessons](lessons/phase-14.md))
+
+Triage of `verified.md`:
+- **C-001, Low, accepted:** a public deposit whose recipient is at or above the field modulus is locked for good, since no `AztecAddress` can rebuild its content. The fix is a range check in `TokenPortal._depositPublic` after the amount check. It changes the portal's bytes, so P15 runs the redeploy chain; the owner chose that on 2026-10-01 over fixing without a redeploy or documenting only.
+- Dropped at reduce: `transfer_public_to_public` has no merchant rule. That is the documented design (Rule proof shapes, above; `public_to_public_is_unrestricted`).
 
 Deliver the stakeholder report as an Artifact. The skill's `audit/` output is a vulnerability inventory, so it stays out of git (`audit/` goes in `.git/info/exclude`); the triage below is the committed record.
 
@@ -1151,9 +1156,15 @@ test -s audit/security/<run-id>/report.md && test -s audit/security/<run-id>/fin
 ```
 Pass: the report's Artifact URL is recorded here, and every finding in `verified.md` is triaged, accepted or rejected with its reason, in `lessons/phase-14.md` and in this plan.
 
-**P15. Fix the accepted findings.**
+**P15. Fix the accepted findings.** ✓ 2026-10-02 (C-001 and the two exit lock-ups the arc review found; gate green on `1b52e37`; testnet redeployed from `dc6b2ce`, bridge `0x23d8cce5…f8ca`; `verify --tour` and the live check green on `60f8381`; [lessons](lessons/phase-15.md))
 
 Each fix lands with a test, and a moved literal moves in all three toolchains in the same commit.
+
+The arc-6 review (Codex, round 1) added two findings, Low and older than this arc. In both, an exit burned into a withdraw no L1 call could pay:
+- a raw call naming a recipient or caller wider than 20 bytes, since an ABI-decoded `EthAddress` holds any field;
+- a merchant exit to the portal, whose payout must lower its own balance.
+
+The owner chose to fix both and redeploy on 2026-10-01. The encoder now refuses the wide address and both exits refuse the portal; the details are in [lessons](lessons/phase-15.md).
 
 Validation gate, the contract checks of P1–P7 with the showcase in place of `apps/web`:
 ```
@@ -1225,6 +1236,8 @@ If deployed bytes changed, run the redeploy chain:
 2. `gh stack submit --auto --open` (without `--open`, `--auto` creates drafts, which `gh stack merge` skips), then `gh pr edit` each body. Bodies end with "🤖 Generated with [Claude Code](https://claude.com/claude-code)".
 3. Label the showcase and hardening PRs `e2e`, then `gh pr checks --watch`.
 4. `gh stack add galactica-compliant-usdc-close-out`, the close-out commits, then `gh stack submit --auto --open`.
+
+**As delivered:** P9 ran after arc 4's loop had closed its branch, so its commits sit on the showcase branch, interleaved with P10–P13: the keyed-run fixes, the deployment, the admin, and the demo tag and tour. Moving them would rewrite pushed history for no reviewer gain. So the operator PR carries P8, and the showcase PR carries P9–P13; each says so.
 
 Merging (`gh stack merge --squash` on the close-out lands the whole stack) is the user's call. Workers Builds already points at `apps/showcase` (Ask 8), so production redeploys from `main` at merge. Then run `SHOWCASE_URL=<production URL> bun run --cwd apps/showcase test:testnet`.
 

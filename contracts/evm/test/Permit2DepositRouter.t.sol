@@ -4,6 +4,7 @@ pragma solidity >=0.8.27;
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
 
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {ISignatureTransfer} from "../src/interfaces/ISignatureTransfer.sol";
@@ -69,6 +70,16 @@ contract Permit2DepositRouterTest is RouterFixture {
         uint256 over = uint256(type(uint128).max) + 1;
         _expectRejected(over, RECIPIENT, false, Permit2DepositRouter.AmountExceedsL2Max.selector);
         _expectRejected(over, bytes32(0), true, Permit2DepositRouter.AmountExceedsL2Max.selector);
+    }
+
+    /// The portal's refusal of a recipient no Aztec address can be unwinds the whole routed deposit, pull included.
+    function test_portalRefusesARecipientAboveTheField() public {
+        vm.prank(user);
+        vm.expectRevert(TokenPortal.RecipientExceedsFieldMax.selector);
+        router.deposit(1e6, bytes32(Constants.MAX_FIELD_VALUE + 1), SECRET_HASH, false, 0, 1, hex"");
+        assertEq(usdc.balanceOf(user), 1_000e6, "the signer keeps the funds");
+        assertEq(inbox.sent(), 0, "no message");
+        _assertRouterClean(0);
     }
 
     function test_rejectsPrivateDepositNamingARecipient() public {

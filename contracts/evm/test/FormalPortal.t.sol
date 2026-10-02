@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.27;
 
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
@@ -8,6 +9,7 @@ import {
     PortalWithoutCap,
     PortalWithoutInitializerCheck,
     PortalWithoutInitOnce,
+    PortalWithoutRecipientCheck,
     PortalWithoutRouterCheck
 } from "./mocks/Mutants.sol";
 import {ProofCanary} from "./mocks/ProofCanary.sol";
@@ -20,10 +22,12 @@ import {PlainERC20} from "./mocks/TestTokens.sol";
 ///   check_initialize_rejectsNonInitializer — no caller but the deployer can make the first initialize
 ///   check_deposit_rejectsAmountAboveU128   — no deposit above the L2 amount type reaches the Inbox
 ///   check_depositFor_rejectsNonRouter      — no caller but the bound router can name a depositor
+///   check_depositPublic_rejectsOutOfFieldRecipient — no public deposit to a recipient above the field reaches the
+///                                                     Inbox, directly or through the router
 ///
 /// Every proof asserts the exact revert selector: a bare `catch` would accept a fixture failing for its own reasons.
-/// Failures are signalled with assertions only, because halmos cannot observe `revert(string)`. The u128 and router
-/// guards run before any sha256, which halmos 0.3.3 cannot model. Each forge canary runs its proof's body against a
+/// Failures are signalled with assertions only, because halmos cannot observe `revert(string)`. The u128, recipient and
+/// router guards run before any sha256, which halmos 0.3.3 cannot model. Each forge canary runs its proof's body against a
 /// mutant with that one rule deleted and requires the body to fail on that rule's assertion.
 contract FormalPortalTest is ProofCanary {
     address internal constant UNDERLYING_A = address(0xA11CE);
@@ -88,6 +92,15 @@ contract FormalPortalTest is ProofCanary {
         proveRouterOnly(funded, caller, depositor, to, amount, secretHash);
     }
 
+    function check_depositPublic_rejectsOutOfFieldRecipient(
+        address depositor,
+        bytes32 to,
+        uint256 amount,
+        bytes32 secretHash
+    ) public {
+        proveRecipientInField(funded, depositor, to, amount, secretHash);
+    }
+
     /// `p` was initialized against registry A by this contract, so the call clears the deployer-only guard and meets
     /// the init-once guard alone.
     function proveInitOnce(TokenPortal p, address candidateUnderlying, bytes32 candidateBridge, address candidateRouter)
@@ -135,6 +148,32 @@ contract FormalPortalTest is ProofCanary {
             assertEq(bytes4(reason), TokenPortal.AmountExceedsL2Max.selector, "private: rejected for the wrong reason");
         }
         assertEq(inboxA.sent(), sent, "a message was sent for an unclaimable amount");
+    }
+
+    /// `p` is bound to registry A (so to `inboxA`) and may pull any amount from this contract. The amount is within the
+    /// cap, so the recipient guard is the only rule that can refuse it.
+    function proveRecipientInField(TokenPortal p, address depositor, bytes32 to, uint256 amount, bytes32 secretHash)
+        public
+    {
+        vm.assume(uint256(to) > Constants.MAX_FIELD_VALUE);
+        vm.assume(amount <= type(uint128).max);
+        uint256 sent = inboxA.sent();
+        uint256 reserve = p.underlying().balanceOf(address(p));
+        try p.depositToAztecPublic(to, amount, secretHash) {
+            assertTrue(false, "a public deposit to an out-of-field recipient succeeded");
+        } catch (bytes memory reason) {
+            assertEq(bytes4(reason), TokenPortal.RecipientExceedsFieldMax.selector, "rejected for the wrong reason");
+        }
+        vm.prank(p.router());
+        try p.depositToAztecPublicFor(depositor, to, amount, secretHash) {
+            assertTrue(false, "a routed deposit to an out-of-field recipient succeeded");
+        } catch (bytes memory reason) {
+            assertEq(
+                bytes4(reason), TokenPortal.RecipientExceedsFieldMax.selector, "routed: rejected for the wrong reason"
+            );
+        }
+        assertEq(inboxA.sent(), sent, "a message was sent to a recipient no claim can name");
+        assertEq(p.underlying().balanceOf(address(p)), reserve, "an unclaimable deposit moved funds");
     }
 
     /// `p` is bound to registry A (so to `inboxA`) and to a router other than `caller`.
@@ -210,6 +249,20 @@ contract FormalPortalTest is ProofCanary {
         );
     }
 
+    function test_canary_recipient_failsWithoutTheGuard() public {
+        PortalWithoutRecipientCheck mutant = new PortalWithoutRecipientCheck();
+        mutant.initialize(
+            address(regA), address(token), BRIDGE_A, address(new StubRouter(address(mutant), address(token)))
+        );
+        token.approve(address(mutant), type(uint256).max);
+        _assertProofFails(
+            abi.encodeCall(
+                this.proveRecipientInField, (mutant, address(this), bytes32(type(uint256).max), 1e6, bytes32(0))
+            ),
+            "a public deposit to an out-of-field recipient succeeded"
+        );
+    }
+
     /// The stranger holds and approves the amount, so with the guard deleted nothing else stops the deposit.
     function test_canary_routerCheck_failsWithoutTheGuard() public {
         PortalWithoutRouterCheck mutant = new PortalWithoutRouterCheck();
@@ -241,6 +294,13 @@ contract FormalPortalTest is ProofCanary {
         assertEq(address(fresh.outbox()), rollupB.getOutbox(), "outbox");
         assertEq(address(fresh.inbox()), rollupB.getInbox(), "inbox");
         assertEq(fresh.rollupVersion(), rollupB.getVersion(), "rollupVersion");
+    }
+
+    /// The largest field element still deposits: the recipient proof's assumption is the only thing excluding success.
+    function test_canary_fieldMaxRecipientDeposits() public {
+        uint256 sent = inboxA.sent();
+        funded.depositToAztecPublic(bytes32(Constants.MAX_FIELD_VALUE), 1e6, bytes32(0));
+        assertEq(inboxA.sent(), sent + 1);
     }
 
     /// Exactly u128 max still deposits: the cap proof's assumption is the only thing excluding success.

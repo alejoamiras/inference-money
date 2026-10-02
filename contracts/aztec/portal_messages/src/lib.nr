@@ -16,9 +16,17 @@ pub fn mint_to_private_content_hash(amount: u128, depositor: EthAddress) -> Fiel
     sha256_to_field(encode::<2, 68>(selector, [amount as Field, depositor.to_field()]))
 }
 
+// Solidity reads `recipient` and `caller_on_l1` as `address`, and an ABI-decoded EthAddress may hold any field, so a wider
+// one would emit a message no withdraw could rebuild. The deposit encoders need none: a wider depositor matches no message.
 pub fn withdraw_content_hash(recipient: EthAddress, amount: u128, caller_on_l1: EthAddress) -> Field {
+    assert(fits_address(recipient) & fits_address(caller_on_l1), "A withdraw names only 20-byte Ethereum addresses");
     let selector = comptime { selector("withdraw(address,uint256,address)") };
     sha256_to_field(encode::<3, 100>(selector, [recipient.to_field(), amount as Field, caller_on_l1.to_field()]))
+}
+
+// EthAddress::validate's bound, with a refusal a caller can read.
+fn fits_address(address: EthAddress) -> bool {
+    address.to_field().lt(0x10000000000000000000000000000000000000000)
 }
 
 // The selector only makes the hash unique to its action; nothing on L1 calls it.

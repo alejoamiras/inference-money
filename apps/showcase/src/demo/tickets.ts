@@ -1,6 +1,6 @@
 import { ACTORS, USERS } from "@inference-money/demo"
 import { z } from "zod"
-import type { KeyValue } from "./store"
+import { type KeyValue, setDurably } from "./store"
 
 const digits = z.string().regex(/^\d+$/)
 
@@ -41,9 +41,11 @@ export type PendingExit = z.infer<typeof pendingExitSchema>
 /** The page's unfinished cross-chain steps, which a reload resumes. */
 export interface Tickets {
 	deposits(): PendingDeposit[]
+	/** Throws `UnsavedRecordError` when the record would not survive a reload. */
 	putDeposit(d: PendingDeposit): void
 	dropDeposit(id: string): void
 	exits(): PendingExit[]
+	/** Throws `UnsavedRecordError` when the record would not survive a reload. */
 	putExit(e: PendingExit): void
 	dropExit(id: string): void
 }
@@ -67,10 +69,14 @@ function read<T extends { since: number }>(kv: KeyValue, kind: string, schema: z
 export function tickets(kv: KeyValue): Tickets {
 	return {
 		deposits: () => read(kv, "deposit", pendingDepositSchema),
-		putDeposit: (d) => kv.set(`deposit:${d.id}`, JSON.stringify(d)),
-		dropDeposit: (id) => kv.set(`deposit:${id}`, undefined),
+		putDeposit: (d) => setDurably(kv, `deposit:${d.id}`, JSON.stringify(d)),
+		dropDeposit: (id) => {
+			kv.set(`deposit:${id}`, undefined)
+		},
 		exits: () => read(kv, "exit", pendingExitSchema),
-		putExit: (e) => kv.set(`exit:${e.id}`, JSON.stringify(e)),
-		dropExit: (id) => kv.set(`exit:${id}`, undefined),
+		putExit: (e) => setDurably(kv, `exit:${e.id}`, JSON.stringify(e)),
+		dropExit: (id) => {
+			kv.set(`exit:${id}`, undefined)
+		},
 	}
 }

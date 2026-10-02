@@ -14,7 +14,11 @@ import type { Outcome } from "./outcome"
 const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as Promise<void> | undefined }))
 
 /** Where a claim this page made stands on L2, and how many claims it sent. */
-const claims = vi.hoisted(() => ({ state: "checkpointed" as "checkpointed" | "finalized" | "pruned", sent: 0 }))
+const claims = vi.hoisted(() => ({
+	state: "checkpointed" as "checkpointed" | "finalized" | "pruned",
+	sent: 0,
+	result: "claimed" as "claimed" | "already",
+}))
 
 // A deposit this page sent is still unconfirmed on Ethereum (a "broken" one cannot even be read back); a claim
 // ticket's nullifier is wherever `claims` says.
@@ -50,38 +54,49 @@ vi.mock("@inference-money/demo", async (original) => ({
 	...(await original<typeof import("@inference-money/demo")>()),
 	castClaim: async () => {
 		claims.sent++
-		return "claimed"
+		return claims.result
 	},
 }))
 
 const HASH = `0x${"12".repeat(32)}`
 
-/** A context whose node knows one tx: landed (checkpointed, succeeded) or never held (dropped). */
-function ctxWith(landed: boolean): LiveCtx {
+/** A context whose node knows one tx, landed (checkpointed, succeeded) or dropped, and finalizes at `finalizedAt`. */
+function ctxWith(landed: boolean, finalizedAt = 0n): LiveCtx {
+	return ctxWithReceipt(landed ? TxStatus.CHECKPOINTED : TxStatus.DROPPED, landed, finalizedAt)
+}
+
+/** The node's one tx has `status`, and executed or reverted; blocks finalize at `finalizedAt`. */
+function ctxWithReceipt(status: TxStatus, succeeded: boolean, finalizedAt = 0n): LiveCtx {
 	const sent: SentTx[] = []
+	const mined = status !== TxStatus.DROPPED
 	const receipt = {
-		status: landed ? TxStatus.CHECKPOINTED : TxStatus.DROPPED,
+		status,
 		isPending: () => false,
-		isDropped: () => !landed,
-		isMined: () => landed,
-		hasExecutionSucceeded: () => landed,
+		isDropped: () => !mined,
+		isMined: () => mined,
+		hasExecutionSucceeded: () => mined && succeeded,
+		hasExecutionReverted: () => mined && !succeeded,
 	}
-	const node = { getTxReceipt: async () => receipt, getTxEffect: async () => undefined }
+	const node = {
+		getTxReceipt: async () => receipt,
+		getTxEffect: async () => undefined,
+		getBlockData: async () => ({ header: { globalVariables: { timestamp: finalizedAt } } }),
+	}
 	const demo = { sent, node, exclusive: oneAtATime() } as unknown as DemoWallet
 	return { demo, m: MANIFEST, l1RpcUrl: "", tickets: undefined as never, tour: TOUR, explorer: undefined, requests: new Map() }
 }
 
-const send = (ctx: LiveCtx, refused?: true) =>
-	ctx.demo.sent.push({ hash: HASH, feePayer: "0x0", expiresAt: 0n, anchorTs: 0n, ...(refused && { refused }) })
+const send = (ctx: LiveCtx, expiresAt = 0n, refused?: true) =>
+	ctx.demo.sent.push({ hash: HASH, feePayer: "0x0", expiresAt, anchorTs: 0n, ...(refused && { refused }) })
 const DONE: Outcome = { kind: "settled", detail: "done", rows: [] }
 
 describe("withConflictRetry", () => {
-	it("settles on a refused send whose earlier copy landed, without sending again", async () => {
+	it("settles on a send whose earlier copy landed, without sending again", async () => {
 		const ctx = ctxWith(true)
 		let attempts = 0
 		const outcome = await withConflictRetry(ctx, async () => {
 			attempts++
-			send(ctx, true)
+			send(ctx)
 			throw new Error("Tx dropped: Existing nullifier")
 		}, ["transfer"])
 		expect([attempts, outcome.kind, outcome.kind === "settled" && outcome.detail]).toEqual([
@@ -91,17 +106,50 @@ describe("withConflictRetry", () => {
 		])
 	})
 
-	it("runs once more on another tx's conflict, and never settles a payment on one of its sends", async () => {
-		for (const [landed, refused] of [
-			[false, true],
-			[true, undefined],
-			[true, true],
+	it("sends a one-send action again only once its first try provably cannot land", async () => {
+		// The node doesn't hold the first try, which expires at 10: proven gone by its outright refusal, or by a finalized
+		// block past its expiry; a drop alone (a lost response) proves nothing.
+		for (const [refused, finalizedAt, retried] of [
+			[undefined, 10n, false],
+			[undefined, 11n, true],
+			[true, 0n, true],
 		] as const) {
+			const ctx = ctxWith(false, finalizedAt)
+			let attempts = 0
+			const outcome = await withConflictRetry(ctx, async () => {
+				if (attempts++ > 0) return DONE
+				send(ctx, 10n, refused)
+				throw new Error("Invalid tx: Existing nullifier")
+			}, ["transfer"])
+			if (retried) expect([attempts, outcome]).toEqual([2, DONE])
+			else expect([attempts, outcome]).toEqual([1, { kind: "failed", detail: expect.stringMatching(/may still take the first try/) }])
+		}
+	})
+
+	it("sends again after a reverted first try only once the revert is final, since a prune can undo it", async () => {
+		for (const [status, retried] of [
+			[TxStatus.CHECKPOINTED, false],
+			[TxStatus.FINALIZED, true],
+		] as const) {
+			const ctx = ctxWithReceipt(status, false)
+			let attempts = 0
+			const outcome = await withConflictRetry(ctx, async () => {
+				if (attempts++ > 0) return DONE
+				send(ctx, 10n)
+				throw new Error("Existing nullifier")
+			}, ["transfer"])
+			if (retried) expect([attempts, outcome]).toEqual([2, DONE])
+			else expect([attempts, outcome]).toEqual([1, { kind: "failed", detail: expect.stringMatching(/may still take the first try/) }])
+		}
+	})
+
+	it("runs once more on a conflict found before sending, and never settles a payment on one of its sends", async () => {
+		for (const landed of [false, true]) {
 			const ctx = ctxWith(landed)
 			let attempts = 0
 			const outcome = await withConflictRetry(ctx, async () => {
 				if (attempts++ > 0) return DONE
-				send(ctx, refused)
+				send(ctx)
 				throw new Error("Duplicate nullifier in tx")
 			}, ["request", "pay"])
 			expect([attempts, outcome]).toEqual([2, DONE])
@@ -161,6 +209,30 @@ describe("claim", () => {
 		store.set("d3", { id: "d3", user: "bob", since: 2, claim: "ticket" })
 		claims.state = "pruned"
 		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
+	})
+
+	it("never reports a mint for a message something consumed before, and keeps its secret until that is final", async () => {
+		const store = new Map<string, PendingDeposit>([["d1", { id: "d1", user: "bob", since: 0, claim: "ticket" }]])
+		const tickets = {
+			deposits: () => [...store.values()],
+			putDeposit: (d: PendingDeposit) => store.set(d.id, d),
+			dropDeposit: (id: string) => store.delete(id),
+		} as unknown as Tickets
+		claims.state = "pruned"
+		claims.result = "already"
+		try {
+			const outcome = await runDraft({ ...ctxWith(false), tickets }, { actor: "bob", action: "claim", to: "bob" }, WALLETS, () => {})
+			expect([outcome, store.get("d1")?.claimed]).toEqual([
+				{
+					kind: "settled",
+					detail: "That deposit was already taken on Aztec, by an earlier claim or a return, so nothing was minted now.",
+					rows: [],
+				},
+				true,
+			])
+		} finally {
+			claims.result = "claimed"
+		}
 	})
 
 	it("never lets a deposit still confirming, or one it cannot read back right now, hold up the claims after it", async () => {

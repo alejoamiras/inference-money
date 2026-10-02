@@ -3,8 +3,27 @@ import type { PaymentRecord, PaymentStore } from "@inference-money/bridge-core"
 /** String values under one prefix. Storage can be absent or throw (private windows, quota, blocked site data). */
 export interface KeyValue {
 	get(key: string): string | undefined
-	set(key: string, value: string | undefined): void
+	/** False when the write is kept only in this page's memory, which a reload loses. */
+	set(key: string, value: string | undefined): boolean
 	keys(): string[]
+}
+
+/** A send's recovery record would not survive a reload, so the page could neither resume the send nor stop a repeat. */
+export class UnsavedRecordError extends Error {
+	constructor() {
+		super(
+			"This browser isn't saving this page's data, so the page stopped rather than lose track of what it sends. Allow site data for this page, or leave private browsing, then try again.",
+		)
+		this.name = "UnsavedRecordError"
+	}
+}
+
+/** Writes a record a send depends on, or leaves the key as it was and throws, so the send never leaves. */
+export function setDurably(kv: KeyValue, key: string, value: string): void {
+	const before = kv.get(key)
+	if (kv.set(key, value)) return
+	kv.set(key, before)
+	throw new UnsavedRecordError()
 }
 
 /**
@@ -42,6 +61,7 @@ export function localKeyValue(prefix: string, storage?: Storage): KeyValue {
 			}, false)
 			if (saved) unsaved.delete(key)
 			else unsaved.set(key, value)
+			return saved
 		},
 		keys: () => {
 			const all = new Set([...stored(), ...unsaved.keys()])
@@ -76,6 +96,9 @@ export function browserPaymentStore(kv: KeyValue, locks: LockManager | undefined
 			const raw = kv.get(`payment:${key}`)
 			return raw === undefined ? undefined : (JSON.parse(raw) as PaymentRecord)
 		},
-		put: async (key, record) => kv.set(`payment:${key}`, record === undefined ? undefined : JSON.stringify(record)),
+		put: async (key, record) => {
+			if (record === undefined) kv.set(`payment:${key}`, undefined)
+			else setDurably(kv, `payment:${key}`, JSON.stringify(record))
+		},
 	}
 }

@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {StdUtils} from "forge-std/StdUtils.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
@@ -137,6 +138,7 @@ contract PortalHandler is StdUtils {
 
     /// `payer` funds the deposit; it names `depositor`, through the router whenever the two differ.
     function _deposit(address payer, address depositor, uint256 amount, bool isPrivate, bytes32 to) private {
+        to = bytes32(bound(uint256(to), 0, Constants.MAX_FIELD_VALUE));
         usdc.mint(payer, amount);
         vm.startPrank(payer);
         usdc.approve(address(portal), amount);
