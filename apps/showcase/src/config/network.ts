@@ -8,7 +8,7 @@ import { privateKeyToAddress } from "viem/accounts"
 /** Re-validated at startup: a bundle whose embedded manifest does not parse must not render a bridge. */
 export const MANIFEST: BridgeManifest = parseManifest(__BRIDGE_MANIFEST__)
 
-/** The recorded acceptance run the guided tour replays; the build checked it against the manifest on testnet. */
+/** The recorded acceptance run the page replays at `#recorded`; the build checked it against the manifest on testnet. */
 export const TOUR: Tour = parseTour(__SHOWCASE_TOUR__)
 
 /** Public explorers exist for testnet only; a local network's txs link nowhere. */

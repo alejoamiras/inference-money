@@ -12,12 +12,48 @@ import { stagesOf, tourFlight, tourVerdict } from "./frame"
 import { SCENES } from "./scenes"
 import { type Beat, PACE, useTour } from "./useTour"
 
-/** The guided tour: the recorded acceptance run, replayed scene by scene. It needs no wallet and sends nothing. */
+const RECORDING =
+	MANIFEST.network === "testnet"
+		? "the acceptance run on Aztec testnet, replayed step by step. No wallet, nothing sent."
+		: "a run recorded on a local network, replayed step by step. No wallet, nothing sent."
+
+function RecordedNotice() {
+	return (
+		<div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 rounded-[10px] border border-[#bcd3ee] bg-usdc-soft py-1.5 pr-2 pl-4">
+			<svg
+				width="18"
+				height="18"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="#1f5fa6"
+				strokeWidth={2}
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				aria-hidden="true"
+			>
+				<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+				<path d="M3 3v5h5" />
+				<path d="M12 7v5l4 2" />
+			</svg>
+			<p className="m-0 min-w-0 flex-[1_1_300px] text-[13.5px] text-[#3d4e5c]">
+				<strong className="text-sm text-ink">A recorded run</strong> · {RECORDING}
+			</p>
+			<a
+				href="#live"
+				className="inline-flex min-h-11 items-center rounded-full bg-usdc px-4.5 text-sm font-semibold text-white no-underline hover:bg-usdc-ink"
+			>
+				Try it yourself
+			</a>
+		</div>
+	)
+}
+
+/** The recorded run (`#recorded`): the acceptance run's recording, replayed scene by scene. It needs no wallet and sends nothing. */
 export function TourMode({ header, pace = PACE }: { header: ReactNode; pace?: Readonly<Record<Beat, number>> }) {
 	const t = useTour(TOUR, pace, EXPLORER)
 	const p = t.played[t.index]
 	if (!p) throw new Error("the tour has no scenes")
-	const { ethereum, aztec } = stageCards(WALLETS, (h) => signedUsdc(t.moves[h] ?? 0n), "Moved in this tour")
+	const { ethereum, aztec } = stageCards(WALLETS, (h) => signedUsdc(t.moves[h] ?? 0n), "Moved in this recording")
 	const lit = t.beat === "ready"
 	const replay = () => {
 		t.setPlaying(true)
@@ -62,6 +98,7 @@ export function TourMode({ header, pace = PACE }: { header: ReactNode; pace?: Re
 	return (
 		<Layout
 			header={header}
+			notice={<RecordedNotice />}
 			composer={composer}
 			stage={<Stage ethereum={ethereum} aztec={aztec} flight={tourFlight(p, t.beat)} />}
 			verdict={<Verdict state={tourVerdict(p, t.beat)} stages={stagesOf(p)} />}

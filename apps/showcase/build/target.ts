@@ -23,7 +23,7 @@ export interface BuildTarget {
 	readonly l1RpcUrl: string
 	readonly proofs: Proofs
 	readonly presto: PrestoPorts
-	/** The guided tour's recording, as read: `build/manifest-identity.test.ts` and the page validate it. */
+	/** The recording the page replays, as read: `build/manifest-identity.test.ts` and the page validate it. */
 	readonly tour: unknown
 }
 

@@ -6,7 +6,7 @@ import "./index.css"
 const root = document.getElementById("root")
 if (!root) throw new Error("index.html lost its #root")
 
-// The wallet and the Aztec SDK load behind the tour, which needs neither: the page plays at once and opens them meanwhile.
+// The wallet and the Aztec SDK start loading with the page: "Try it yourself" waits for them, the recording needs neither.
 const demo = import("./demo/start").then((m) => m.startDemo())
 
 createRoot(root).render(
