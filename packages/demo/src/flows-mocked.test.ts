@@ -1,11 +1,15 @@
 import { describe, expect, it, mock } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import * as core from "@inference-money/bridge-core"
 
 /** Every Permit2 approval castDeposit asked for; nothing past it runs, since the signer cannot read a block. */
 const approvals: bigint[] = []
 /** The private recipient's funding address; none until its first claim. */
 let bound: `0x${string}` | undefined
+/** The tip each claim read asked for, and the wait each claim was given. */
+const reads: string[] = []
+const claimWaits: unknown[] = []
 mock.module("@inference-money/bridge-core", () => ({
 	...core,
 	syncMerchantList: async () => ({ block: 1, at: 0n, entries: new Map() }),
@@ -13,8 +17,19 @@ mock.module("@inference-money/bridge-core", () => ({
 	ensurePermit2Allowance: async (a: { needed: bigint }) => {
 		approvals.push(a.needed)
 	},
+	isClaimConsumed: async (_t: unknown, _n: unknown, _m: unknown, at: string) => {
+		reads.push(at)
+		return false
+	},
+	waitClaimable: async () => {},
+	claim: async (_t: unknown, _n: unknown, _w: unknown, _m: unknown, opts: { wait: unknown }) => {
+		claimWaits.push(opts.wait)
+		return "claimed"
+	},
+	sponsoredPayment: () => undefined,
+	transferPrivate: async () => TxHash.random(),
 }))
-const { castDeposit } = await import("./flows")
+const { castClaim, castDeposit, sendPrivate } = await import("./flows")
 
 describe("castDeposit", () => {
 	it("refuses a deposit that could only be returned before any approval, and lets one the recipient can claim on", async () => {
@@ -36,5 +51,29 @@ describe("castDeposit", () => {
 		bound = "0x0000000000000000000000000000000000000001"
 		await expect(castDeposit(s, signer, plan("private"), undefined, () => {})).rejects.toThrow("past the approval")
 		expect(approvals).toEqual([5n, 5n])
+	})
+})
+
+describe("castClaim and sendPrivate", () => {
+	it("read and wait at the session's tip: the proposed block when it asks for one, a checkpoint otherwise", async () => {
+		const to = await AztecAddress.random()
+		const t = { draft: { intent: { recipient: to } } } as never
+		const proposed = {
+			getTxReceipt: async () => ({
+				status: TxStatus.PROPOSED,
+				isPending: () => false,
+				isDropped: () => false,
+				isMined: () => true,
+				hasExecutionSucceeded: () => true,
+			}),
+		}
+		const session = (wait?: core.L2Wait) =>
+			({ m: { l2: { token: { address: to.toString() } } }, node: proposed, wallet: {}, wait }) as never
+		expect(await castClaim(session(core.L2_PROPOSED), t)).toBe("claimed")
+		await castClaim(session(), t)
+		expect(reads).toEqual(["proposed", "checkpointed"])
+		expect(claimWaits).toEqual([core.L2_PROPOSED, core.L2_DONE])
+		// A checkpoint wait never returns here: the receipt stays proposed.
+		expect(await sendPrivate(session(core.L2_PROPOSED), to, to, 1n)).toBeInstanceOf(TxHash)
 	})
 })

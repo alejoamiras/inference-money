@@ -7,6 +7,7 @@ import { NotFundingAddressError } from "./binding"
 import {
 	type ClaimNode,
 	claim,
+	L2_PROPOSED,
 	type NullifierNode,
 	registerSponsor,
 	SponsorUnavailableError,
@@ -93,6 +94,25 @@ describe("claim", () => {
 		expect(statuses).toEqual([])
 	})
 
+	it("with L2_PROPOSED, returns at the proposed block and reads a nullifier error at that same tip", async () => {
+		const statuses = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED]
+		const node: ClaimNode = { ...NO_NULLIFIER, getTxReceipt: async () => receiptAt(statuses.shift() ?? TxStatus.CHECKPOINTED) as never }
+		const opts = { from: recipient, wait: L2_PROPOSED }
+		expect(await claim(await ticket("public"), node, fakeWallet().wallet, M, opts)).toBe("claimed")
+		expect(statuses).toEqual([TxStatus.CHECKPOINTED])
+		const tips: unknown[] = []
+		const claimedEarlier: ClaimNode = {
+			getTxReceipt: CHECKPOINTED,
+			findLeavesIndexes: async (block, _tree, leaves) => {
+				tips.push(block)
+				return leaves.map(() => ({ data: 7n }) as never)
+			},
+		}
+		const { wallet } = fakeWallet({ send: fail("Invalid tx: Existing nullifier") })
+		expect(await claim(await ticket("public"), claimedEarlier, wallet, M, opts)).toBe("consumed-unknown")
+		expect(tips).toEqual(["proposed"])
+	})
+
 	it("reports consumed-unknown only when this ticket's nullifier is on L2; any other nullifier error stays retryable", async () => {
 		for (const kind of ["public", "private"] as const) {
 			const t = await ticket(kind)
@@ -134,8 +154,8 @@ describe("claim", () => {
 })
 
 describe("waitClaimFinalized", () => {
-	/** Answers each read from the next state; a state names which block tags hold the nullifier. */
-	const scripted = (states: ("checkpointed" | "finalized" | "none" | "error")[]) => {
+	/** Answers each read from the next state, the latest tip holding the nullifier; each tip holds those after it. */
+	const scripted = (states: ("proposed" | "checkpointed" | "finalized" | "none" | "error")[]) => {
 		const tags: string[] = []
 		let round = -1
 		const node: NullifierNode = {
@@ -144,21 +164,22 @@ describe("waitClaimFinalized", () => {
 				if (block === "finalized") round++
 				const state = states[Math.min(round, states.length - 1)]
 				if (state === "error") throw new Error("503")
-				const hit = state === "finalized" || (state === "checkpointed" && block === "checkpointed")
+				const tips = ["proposed", "checkpointed", "finalized"]
+				const hit = tips.indexOf(state ?? "none") >= tips.indexOf(String(block)) && state !== "none"
 				return leaves.map(() => (hit ? ({ data: 1n } as never) : undefined))
 			},
 		}
 		return { node, tags }
 	}
 
-	it("keeps the secret until the claim is finalized, through failed reads, and reports a pruned claim as dropped", async () => {
+	it("keeps the secret until the claim is finalized, through proposed and failed reads, and reports a pruned claim as dropped", async () => {
 		const t = await ticket("private")
 		let sleeps = 0
 		const opts = { sleep: async () => void sleeps++ }
-		const settling = scripted(["checkpointed", "error", "checkpointed", "finalized"])
+		const settling = scripted(["proposed", "checkpointed", "error", "checkpointed", "finalized"])
 		expect(await waitClaimFinalized(t, settling.node, M, opts)).toBe("finalized")
-		expect(settling.tags.filter((b) => b === "finalized").length, "one finalized read per round").toBe(4)
-		expect(sleeps).toBe(3)
+		expect(settling.tags.filter((b) => b === "finalized").length, "one finalized read per round").toBe(5)
+		expect(sleeps).toBe(4)
 
 		expect(await waitClaimFinalized(t, scripted(["checkpointed", "none"]).node, M, opts)).toBe("dropped")
 	})

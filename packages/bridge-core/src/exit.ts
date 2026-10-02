@@ -11,7 +11,7 @@ import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec-l
 import { type Address, type Hex, isAddressEqual, zeroAddress } from "viem"
 import { tokenArtifact, tokenBridgeArtifact } from "./artifacts"
 import { assertExitDestination } from "./binding"
-import { type FeeChoice, feeFor, L2_DONE, type SponsorUnavailableError, sponsorFailure } from "./claim"
+import { type FeeChoice, feeFor, L2_DONE, type L2Wait, type SponsorUnavailableError, sponsorFailure, tipOf } from "./claim"
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
 import type { OutboxReader } from "./outbox"
@@ -131,7 +131,7 @@ async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: R
  * Burns on L2 and emits the withdraw message, paid per {@link FeeChoice}. The burn is authorized for the proxy (the
  * bridge's only path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry
  * entry batched into the same tx for a public one. A sponsor that cannot pay is a {@link SponsorUnavailableError} with
- * nothing burned. The send returns its hash before any wait, so every failure after it, the wait for the checkpoint
+ * nothing burned. The send returns its hash before any wait, so every failure after it, the wait for `opts.wait`
  * included, is an {@link ExitUnconfirmedError} carrying that hash; only a checkpointed revert with no withdraw message
  * in its effect, which burned nothing, is an {@link ExitRevertedError}.
  */
@@ -140,7 +140,7 @@ export async function exitToL1(
 	wallet: Wallet,
 	node: ExitNode,
 	m: BridgeManifest,
-	opts: { fee?: FeeChoice } = {},
+	opts: { fee?: FeeChoice; wait?: L2Wait } = {},
 ): Promise<ExitTicket> {
 	assertExitIntent(e, m)
 	if (e.kind === "private" && !e.asMerchant) await assertExitDestination(wallet, m, e.from, e.recipientL1)
@@ -151,7 +151,7 @@ export async function exitToL1(
 	} catch (err) {
 		throw (fee && sponsorFailure(err, "withdrawal")) || err
 	}
-	const located = await locateWithdrawal(e.recipientL1, e.amount, txHash, node, m).catch((cause: unknown) => {
+	const located = await locateWithdrawal(e.recipientL1, e.amount, txHash, node, m, opts.wait).catch((cause: unknown) => {
 		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
 	})
 	if (located === "reverted") throw new ExitRevertedError(txHash)
@@ -159,8 +159,8 @@ export async function exitToL1(
 }
 
 /**
- * The withdrawal `txHash` emitted to `recipient` for `amount`, once checkpointed, or "reverted" when the tx reverted
- * without it. Exits and returns emit the same message, so both locate it here.
+ * The withdrawal `txHash` emitted to `recipient` for `amount`, once it reaches `wait` (a checkpoint by default), or
+ * "reverted" when the tx reverted without it. Exits and returns emit the same message, so both locate it here.
  */
 export async function locateWithdrawal(
 	recipient: Address,
@@ -168,13 +168,18 @@ export async function locateWithdrawal(
 	txHash: TxHash,
 	node: ExitNode,
 	m: BridgeManifest,
+	wait: L2Wait = L2_DONE,
 ): Promise<ExitTicket | "reverted"> {
 	// Only `getTxReceipt` is read.
-	const receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
+	let receipt = await waitForTx(node as AztecNode, txHash, { ...wait, dontThrowOnRevert: true })
+	// "reverted" lets the caller forget the burn, so a revert seen at a proposed block must hold at a checkpoint too.
+	if (receipt.hasExecutionReverted() && tipOf(wait) === "proposed") {
+		receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
+	}
 	const expected = await expectedExitMessage(recipient, amount, m)
 	const found = await occurrencesInTx(node, txHash, expected)
 	// A revert proves nothing burned only alongside an effect that lacks the message: setup effects survive a revert.
-	if (!found) throw new Error(`Exit ${txHash} is checkpointed, but the node returned no effect for it.`)
+	if (!found) throw new Error(`Exit ${txHash} is mined, but the node returned no effect for it.`)
 	const [index, ...rest] = found
 	if (index === undefined && receipt.hasExecutionReverted()) return "reverted"
 	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
