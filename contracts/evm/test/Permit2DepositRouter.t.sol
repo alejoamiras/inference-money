@@ -9,7 +9,7 @@ import {TokenPortal} from "../src/TokenPortal.sol";
 import {ISignatureTransfer} from "../src/interfaces/ISignatureTransfer.sol";
 import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
 import {MockPermit2} from "./mocks/MockPermit2.sol";
-import {MockTokenPortal, UninitializedPortal} from "./mocks/MockPortal.sol";
+import {MockTokenPortal} from "./mocks/MockPortal.sol";
 import {MockUsdc} from "./mocks/MockUsdc.sol";
 import {RouterFixture} from "./mocks/RouterFixture.sol";
 import {FeeOnTransferERC20, HookERC20} from "./mocks/TestTokens.sol";
@@ -30,8 +30,11 @@ contract Permit2DepositRouterTest is RouterFixture {
     }
 
     function test_depositPublic() public {
-        bytes32 content = _model(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", RECIPIENT, 250e6));
+        bytes32 content =
+            _model(abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", RECIPIENT, 250e6, user));
         bytes32 expectedKey = keccak256(abi.encode(content, SECRET_HASH));
+        vm.expectEmit(address(portal));
+        emit TokenPortal.DepositToAztecPublic(user, RECIPIENT, 250e6, SECRET_HASH, expectedKey, 0);
         vm.expectEmit(address(router));
         emit Permit2DepositRouter.Deposit(user, RECIPIENT, expectedKey, 0, 250e6, SECRET_HASH, false);
         (bytes32 key, uint256 index) = _deposit(250e6, false);
@@ -47,9 +50,11 @@ contract Permit2DepositRouterTest is RouterFixture {
     }
 
     function test_depositPrivate() public {
+        vm.expectEmit(true, false, false, false, address(portal));
+        emit TokenPortal.DepositToAztecPrivate(user, 0, 0, 0, 0);
         (, uint256 index) = _deposit(7e6, true);
         assertEq(index, 0, "index");
-        assertTrue(lastMintWasPrivate(7e6), "private mint message names no recipient");
+        assertTrue(lastMintWasPrivate(7e6), "private mint message names the signer and no recipient");
         assertEq(usdc.balanceOf(address(portal)), 7e6);
         _assertRouterClean(0);
         _assertPermit2Call(7e6, bytes32(0), true);
@@ -107,7 +112,7 @@ contract Permit2DepositRouterTest is RouterFixture {
     function test_residueRefused() public {
         MockTokenPortal shorting = new MockTokenPortal(usdc);
         shorting.setShortBy(1);
-        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(shorting)));
+        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(shorting)), usdc);
         usdc.mint(address(router), 5e6);
         vm.prank(user);
         vm.expectRevert(Permit2DepositRouter.ResidualBalance.selector);
@@ -133,22 +138,15 @@ contract Permit2DepositRouterTest is RouterFixture {
         _assertRouterClean(0);
     }
 
-    function test_constructor_refusesAnUninitializedPortal() public {
-        address uninit = address(new UninitializedPortal());
-        vm.expectRevert(Permit2DepositRouter.PortalNotInitialized.selector);
-        new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(uninit));
-
-        // A real portal between deploy and initialize is the same hazard.
-        TokenPortal pending = new TokenPortal();
-        vm.expectRevert(Permit2DepositRouter.PortalNotInitialized.selector);
-        new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(pending)));
-    }
-
     function test_constructor_refusesCodelessAddresses() public {
+        ISignatureTransfer p = ISignatureTransfer(address(permit2));
+        ITokenPortal t = ITokenPortal(address(portal));
         vm.expectRevert(Permit2DepositRouter.NotAContract.selector);
-        new Permit2DepositRouter(ISignatureTransfer(makeAddr("eoa")), ITokenPortal(address(portal)));
+        new Permit2DepositRouter(ISignatureTransfer(makeAddr("eoa")), t, usdc);
         vm.expectRevert(Permit2DepositRouter.NotAContract.selector);
-        new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(makeAddr("eoa")));
+        new Permit2DepositRouter(p, ITokenPortal(makeAddr("eoa")), usdc);
+        vm.expectRevert(Permit2DepositRouter.NotAContract.selector);
+        new Permit2DepositRouter(p, t, IERC20(makeAddr("eoa")));
     }
 
     function test_gas_depositPublic() public {

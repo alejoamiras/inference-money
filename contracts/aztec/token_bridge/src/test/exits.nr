@@ -10,7 +10,7 @@ use aztec::{
 };
 use token::Token;
 use claim_secret_lib::derive_claim_secret;
-use token_portal_content_hash_lib::get_mint_to_private_content_hash;
+use portal_messages::mint_to_private_content_hash;
 
 global NONCE: Field = 7;
 
@@ -25,7 +25,7 @@ unconstrained fn exit_to_l1_public_burns_caller_balance() {
 
     // Fund via a public claim (the bridge mints through the proxy).
     let leaf = utils::send_mint_to_public_message(env, user, minted, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf));
+    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf, utils::depositor()));
 
     // The token sees msg_sender == PROXY, so the user must publicly authorize the proxy for
     // burn_public(user, amount, nonce) — same shape the wallet's authwit flow produces.
@@ -53,10 +53,10 @@ unconstrained fn exit_to_l1_private_burns_private_balance() {
     let salt = 555;
     let recipient = aztec::protocol::address::EthAddress::from_field(0xCAFE);
 
-    let content = get_mint_to_private_content_hash(minted);
+    let content = mint_to_private_content_hash(minted, utils::depositor());
     let secret_hash = aztec::hash::compute_secret_hash([derive_claim_secret(salt, user)]);
     let leaf = env.send_l1_to_l2_message_from_secret_hash(content, secret_hash, utils::portal(), bridge);
-    env.call_private(user, TokenBridge::at(bridge).claim_private(user, minted, salt, leaf));
+    env.call_private(user, TokenBridge::at(bridge).claim_private(user, minted, salt, leaf, utils::depositor()));
 
     add_private_authwit_from_call(
         env,
@@ -157,7 +157,7 @@ unconstrained fn exit_to_l1_public_insufficient_balance_rejected() {
     let recipient = aztec::protocol::address::EthAddress::from_field(0xBEEF);
 
     let leaf = utils::send_mint_to_public_message(env, user, minted, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf));
+    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf, utils::depositor()));
 
     add_public_authwit_from_call(
         env,
@@ -202,7 +202,7 @@ unconstrained fn exit_public_without_authwit_rejected() {
     let user = env.create_light_account();
 
     let leaf = utils::send_mint_to_public_message(env, user, 100_000, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, 100_000, 42, leaf));
+    env.call_public(user, TokenBridge::at(bridge).claim_public(user, 100_000, 42, leaf, utils::depositor()));
     env.call_public(
         user,
         TokenBridge::at(bridge).exit_to_l1_public(EthAddress::from_field(0xBEEF), 50_000, EthAddress::zero(), NONCE),

@@ -7,7 +7,6 @@ const PERMIT2_DEPOSIT_ROUTER_ERRORS = [
 	{ type: "error", name: "AmountExceedsL2Max", inputs: [] },
 	{ type: "error", name: "InexactPull", inputs: [] },
 	{ type: "error", name: "NotAContract", inputs: [] },
-	{ type: "error", name: "PortalNotInitialized", inputs: [] },
 	{ type: "error", name: "PrivateDepositNamesRecipient", inputs: [] },
 	{ type: "error", name: "PublicDepositNeedsRecipient", inputs: [] },
 	{ type: "error", name: "ReentrancyGuardReentrantCall", inputs: [] },

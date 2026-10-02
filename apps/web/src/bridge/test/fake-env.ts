@@ -91,7 +91,12 @@ export function fakeLocks(): TabLocks & { held: Set<string> } {
 	}
 }
 
-export const ticketFor = (d: DepositDraft): ClaimTicket => ({ draft: d, messageHash: pad("0x3e55", { size: 32 }), leafIndex: 7n })
+export const ticketFor = (d: DepositDraft): ClaimTicket => ({
+	draft: d,
+	messageHash: pad("0x3e55", { size: 32 }),
+	leafIndex: 7n,
+	depositor: "0x000000000000000000000000000000000000D0D0",
+})
 
 export const exitTicket = (o: Partial<ExitTicket> = {}): ExitTicket =>
 	({

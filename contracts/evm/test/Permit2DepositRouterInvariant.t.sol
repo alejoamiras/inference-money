@@ -62,12 +62,13 @@ contract RouterHandler is StdUtils {
         permit2 = new MockPermit2();
         inbox = new CapturingInbox();
         portal = new TokenPortal();
+        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)), usdc);
         portal.initialize(
             address(new FakeRegistry(address(new FakeRollup(address(inbox), address(new CapturingOutbox()))))),
             address(usdc),
-            bytes32(uint256(0x4B))
+            bytes32(uint256(0x4B)),
+            address(router)
         );
-        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)));
         for (uint256 i = 0; i < actors.length; i++) {
             vm.prank(actors[i]);
             usdc.approve(address(permit2), type(uint256).max);

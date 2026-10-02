@@ -19,7 +19,7 @@ unconstrained fn exits_resume_after_unpause() {
     let (mut env, admin, proxy, token, bridge) = utils::setup();
     let user = env.create_light_account();
     let leaf = utils::send_mint_to_public_message(env, user, 100_000, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, 100_000, 42, leaf));
+    env.call_public(user, TokenBridge::at(bridge).claim_public(user, 100_000, 42, leaf, utils::depositor()));
 
     env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
     env.call_public(admin, TokenBridge::at(bridge).set_paused(false));
@@ -41,10 +41,10 @@ unconstrained fn pause_state_tracks_toggles() {
     env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
     env.call_public(admin, TokenBridge::at(bridge).set_paused(false));
     let first = utils::send_mint_to_public_message(env, to, 1_000, 1, bridge);
-    env.call_public(to, TokenBridge::at(bridge).claim_public(to, 1_000, 1, first));
+    env.call_public(to, TokenBridge::at(bridge).claim_public(to, 1_000, 1, first, utils::depositor()));
     assert_eq(env.view_public(Token::at(token).balance_of_public(to)), 1_000);
 
     env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
     let second = utils::send_mint_to_public_message(env, to, 1_000, 2, bridge);
-    env.call_public(to, TokenBridge::at(bridge).claim_public(to, 1_000, 2, second));
+    env.call_public(to, TokenBridge::at(bridge).claim_public(to, 1_000, 2, second, utils::depositor()));
 }

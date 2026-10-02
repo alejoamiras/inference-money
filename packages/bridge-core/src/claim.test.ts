@@ -24,6 +24,7 @@ const ticket = async (kind: "public" | "private"): Promise<ClaimTicket> => ({
 	draft: await prepareDeposit({ amount: 5n, recipient, kind }, M, () => 1_000n),
 	messageHash: f(0x77),
 	leafIndex: 3n,
+	depositor: "0x000000000000000000000000000000000000D0D0",
 })
 const fail = (message: string) => () => {
 	throw new Error(message)

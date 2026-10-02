@@ -4,12 +4,15 @@ pragma solidity >=0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
+import {StubRouter} from "./mocks/MockPortal.sol";
 
 /// Always-on regressions for both initialize guards against the real portal: the fast, readable failure that still runs
 /// when halmos does not. `FormalPortal.t.sol` proves the same guards over all arguments and callers.
 contract PortalReinitTest is Test {
     address internal constant USDC = address(0xA11CE);
     bytes32 internal constant BRIDGE = bytes32(uint256(0x1111));
+    address internal constant EVIL_TOKEN = address(0xDEAD);
+    bytes32 internal constant EVIL_BRIDGE = bytes32(uint256(0x6666));
 
     function _registry() internal returns (FakeRegistry) {
         return new FakeRegistry(address(new FakeRollup(address(new CapturingInbox()), address(new CapturingOutbox()))));
@@ -18,19 +21,23 @@ contract PortalReinitTest is Test {
     function test_initializeIsOnceOnly() public {
         TokenPortal portal = new TokenPortal();
         FakeRegistry reg = _registry();
-        portal.initialize(address(reg), USDC, BRIDGE);
+        StubRouter router = new StubRouter(address(portal), USDC);
+        portal.initialize(address(reg), USDC, BRIDGE, address(router));
         assertEq(address(portal.underlying()), USDC, "first init sets underlying");
         assertEq(portal.l2Bridge(), BRIDGE, "first init sets l2Bridge");
+        assertEq(portal.router(), address(router), "first init sets router");
         assertEq(address(portal.rollup()), reg.getCanonicalRollup(), "first init derives the rollup");
 
         // Even the initializer cannot rebind: the canonical portal allows exactly this.
         FakeRegistry evil = _registry();
+        address evilRouter = address(new StubRouter(address(portal), EVIL_TOKEN));
         vm.expectRevert(TokenPortal.AlreadyInitialized.selector);
-        portal.initialize(address(evil), address(0xDEAD), bytes32(uint256(0x6666)));
+        portal.initialize(address(evil), EVIL_TOKEN, EVIL_BRIDGE, evilRouter);
 
         assertEq(address(portal.registry()), address(reg), "registry unchanged after rejected re-init");
         assertEq(address(portal.underlying()), USDC, "underlying unchanged after rejected re-init");
         assertEq(portal.l2Bridge(), BRIDGE, "l2Bridge unchanged after rejected re-init");
+        assertEq(portal.router(), address(router), "router unchanged after rejected re-init");
     }
 
     /// Deploy and initialize are separate transactions: a front-run of the FIRST initialize must revert instead of
@@ -38,12 +45,13 @@ contract PortalReinitTest is Test {
     function test_frontRunOfFirstInitializeReverts() public {
         TokenPortal portal = new TokenPortal();
         FakeRegistry evil = _registry();
+        address evilRouter = address(new StubRouter(address(portal), EVIL_TOKEN));
         vm.prank(makeAddr("attacker"));
         vm.expectRevert(TokenPortal.NotInitializer.selector);
-        portal.initialize(address(evil), address(0xDEAD), bytes32(uint256(0x6666)));
+        portal.initialize(address(evil), EVIL_TOKEN, EVIL_BRIDGE, evilRouter);
 
         assertEq(address(portal.registry()), address(0), "attacker bound a registry");
-        portal.initialize(address(_registry()), USDC, BRIDGE);
+        portal.initialize(address(_registry()), USDC, BRIDGE, address(new StubRouter(address(portal), USDC)));
         assertEq(address(portal.underlying()), USDC, "the deployer still initializes after the failed front-run");
     }
 }

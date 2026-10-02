@@ -255,7 +255,11 @@ describe("confirmDeposit and the receipt's Deposit event", () => {
 		const d = await draft()
 		await submitDeposit(d, l1, M, LIVE)
 		const forged = depositLog(d, { address: M.l1.usdc, index: 666n })
-		expect(ticketFromReceiptLogs(d, [forged, depositLog(d)], M)).toMatchObject({ leafIndex: 42n, messageHash: pad("0x4e7") })
+		expect(ticketFromReceiptLogs(d, [forged, depositLog(d)], M)).toMatchObject({
+			leafIndex: 42n,
+			messageHash: pad("0x4e7"),
+			depositor: ACCOUNT,
+		})
 		expect(() => ticketFromReceiptLogs(d, [depositLog(d), depositLog(d, { index: 43n })], M)).toThrow("exactly one")
 		expect(() => ticketFromReceiptLogs(d, [depositLog(d, { depositor: getAddress(a(0xbb)) })], M)).toThrow("does not match")
 	})
@@ -268,7 +272,7 @@ describe("reconcileDeposit", () => {
 		await submitDeposit(d, l1, M, LIVE)
 		await expect(confirmDeposit(d, l1, M, undefined, { attempts: 1, waitMs: async () => {} })).rejects.toThrow("not confirmed")
 		s.receipts.set(TX, { status: "success", logs: [depositLog(d)] })
-		expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n })
+		expect(await reconcileDeposit(d, l1, M)).toMatchObject({ leafIndex: 42n, depositor: ACCOUNT })
 		expect(s.sends).toBe(1)
 	})
 

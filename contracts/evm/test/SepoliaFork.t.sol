@@ -6,6 +6,8 @@ import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {IRegistry} from "@aztec/governance/interfaces/IRegistry.sol";
 import {IRollup} from "@aztec/core/interfaces/IRollup.sol";
 import {IInbox} from "@aztec/core/interfaces/messagebridge/IInbox.sol";
+import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
+import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
 
 import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
@@ -22,13 +24,13 @@ interface IPermit2Errors {
 
 /// Forks Sepolia and drives the REAL Permit2, Circle USDC, Aztec testnet registry and Inbox through a freshly
 /// deployed portal + router. Skips only when SEPOLIA_RPC_URL is unset; `bun run test:evm:fork` refuses to run
-/// without it, so the gate can never pass on skipped tests. The pins below equal the deployer's network pins and
-/// the node info the testnet probe checks.
+/// without it, so the gate can never pass on skipped tests. The pins below equal the deployer's network pins
+/// (`networks.test.ts` asserts it) and the node info the testnet probe checks.
 contract SepoliaForkTest is Test {
     address internal constant REGISTRY = 0xA0BFb1B494FB49041e5c6e8c2C1BE09cD171c6Ba;
-    address internal constant INBOX = 0x3047dBF2b7dd9f58AC41113525480F94745a4f7C;
-    address internal constant OUTBOX = 0x905f80009bBef9d9426675B45009922971eD42fF;
-    uint256 internal constant ROLLUP_VERSION = 1_821_665_230;
+    address internal constant INBOX = 0x816ce1861ec258F99279E75a3EE6B5Dfc9571E30;
+    address internal constant OUTBOX = 0xb9daE0F8c5dD6524c1015fFE6494d9fD0623DF0d;
+    uint256 internal constant ROLLUP_VERSION = 2_914_217_885;
     address internal constant USDC = 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238;
     address internal constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     bytes32 internal constant L2_BRIDGE = bytes32(uint256(0xB41D6E));
@@ -53,9 +55,10 @@ contract SepoliaForkTest is Test {
         user = vm.addr(userPk);
         require(user.code.length == 0, "signer must be a plain EOA on this fork");
 
+        // The deploy order: the router names the portal before the portal's initialize checks that binding.
         portal = new TokenPortal();
-        portal.initialize(REGISTRY, USDC, L2_BRIDGE);
-        router = new Permit2DepositRouter(ISignatureTransfer(PERMIT2), ITokenPortal(address(portal)));
+        router = new Permit2DepositRouter(ISignatureTransfer(PERMIT2), ITokenPortal(address(portal)), IERC20(USDC));
+        portal.initialize(REGISTRY, USDC, L2_BRIDGE, address(router));
         deal(USDC, user, 100e6);
         vm.prank(user);
         IERC20(USDC).approve(PERMIT2, type(uint256).max);
@@ -68,6 +71,7 @@ contract SepoliaForkTest is Test {
         assertEq(address(portal.outbox()), OUTBOX, "outbox");
         assertEq(portal.rollupVersion(), ROLLUP_VERSION, "rollup version");
         assertEq(address(router.TOKEN()), USDC, "router token");
+        assertEq(portal.router(), address(router), "portal router");
     }
 
     /// The digest this suite signs is Permit2's own: the domain derivation matches the live contract.
@@ -79,6 +83,8 @@ contract SepoliaForkTest is Test {
         uint256 inserted = IInbox(INBOX).getTotalMessagesInserted();
         bytes memory sig = _sign(RECIPIENT, false, 0, block.timestamp + 30 minutes);
         vm.recordLogs();
+        vm.expectEmit(true, false, false, false, address(portal));
+        emit TokenPortal.DepositToAztecPublic(user, 0, 0, 0, 0, 0);
         vm.prank(user);
         (bytes32 key, uint256 index) =
             router.deposit(AMOUNT, RECIPIENT, SECRET_HASH, false, 0, block.timestamp + 30 minutes, sig);
@@ -162,15 +168,22 @@ contract SepoliaForkTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
-    /// The router returns the Inbox's own message hash and leaf index, as recorded in its `MessageSent` event.
+    /// The router returns the Inbox's own message hash and leaf index, and the message the real Inbox records runs
+    /// from the portal to the bridge with a content that names the signer as depositor.
     function _assertInboxEmitted(bytes32 key, uint256 index) internal {
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 sent = IInbox.MessageSent.selector;
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].emitter != INBOX || logs[i].topics[0] != sent) continue;
-            assertEq(logs[i].topics[2], key, "key is the Inbox message hash");
-            (uint256 emittedIndex,) = abi.decode(logs[i].data, (uint256, bytes16));
-            assertEq(emittedIndex, index, "index is the Inbox leaf index");
+            if (logs[i].emitter != INBOX || logs[i].topics[0] != IInbox.MessageSent.selector) continue;
+            assertEq(logs[i].topics[1], key, "key is the Inbox message hash");
+            (,, DataStructures.L1ToL2Msg memory m) =
+                abi.decode(logs[i].data, (bytes32, uint256, DataStructures.L1ToL2Msg));
+            assertEq(m.index, index, "index is the Inbox leaf index");
+            assertEq(m.sender.actor, address(portal), "sender is the portal");
+            assertEq(m.recipient.actor, L2_BRIDGE, "recipient is the bridge");
+            bytes memory preimage =
+                abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", RECIPIENT, AMOUNT, user);
+            assertEq(m.content, Hash.sha256ToField(preimage), "the content names the signer");
+            assertEq(m.secretHash, SECRET_HASH, "secret hash");
             return;
         }
         assertTrue(false, "no MessageSent from the Inbox");
