@@ -1,11 +1,12 @@
 /**
  * Recipient-committed private claims: the TS mirror of the Noir `claim_secret::derive_claim_secret`.
  *
- * A private deposit commits `secretHash = computeSecretHash(deriveClaimSecret(salt, recipient))` on L1, and
- * `claim_private(recipient, amount, salt, leaf)` re-derives the secret from its `recipient` argument. Naming any other
- * recipient derives a different secret that cannot consume the message, so whoever submits the claim (the user or a
- * relayer holding the salt) can finish it but never redirect it. That holds only while no raw-secret consumption path
- * exists on L2 (check-sole-consumer.sh), not because the salt stays private.
+ * A private deposit commits `secretHash = computeSecretHash(deriveClaimSecret(salt, recipient))` on L1, and both of
+ * its L2 consumers re-derive the secret from their `recipient` argument: `claim_private`, which only the recipient may
+ * submit, and `return_deposit_private`, which pays the depositor back. Naming any other recipient derives a different
+ * secret that cannot consume the message, so whoever holds the salt can return the deposit but never redirect it. That
+ * holds only while no raw-secret consumption path exists on L2 (check-sole-consumer.sh), not because the salt stays
+ * private.
  */
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import type { Fr } from "@aztec-labs/aztec.js/fields"

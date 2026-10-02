@@ -8,6 +8,8 @@ import { MANIFEST } from "./fixtures"
 /** What an aztec.js interaction hands the wallet; `feePayer` is set only by a payment method that names one. */
 export interface SentTx {
 	calls: string[]
+	/** Each call's encoded arguments, in call order. */
+	args: bigint[][]
 	feePayer?: string
 	authWitnesses: number
 	/** The interaction's `wait` option: what the wallet was told to wait for before answering. */
@@ -16,6 +18,7 @@ export interface SentTx {
 
 const record = (p: ExecutionPayload, wait?: unknown): SentTx => ({
 	calls: p.calls.map((c) => c.name),
+	args: p.calls.map((c) => c.args.map((f) => f.toBigInt())),
 	feePayer: p.feePayer?.toString(),
 	authWitnesses: p.authWitnesses.length,
 	...(wait === undefined ? {} : { wait }),
@@ -29,8 +32,11 @@ const SIMULATED = {
 	publicInputs: { constants: { anchorBlockHeader: { globalVariables: { timestamp: 0n } } } },
 }
 
-/** The four wallet methods the bridge's interactions reach; each call is recorded, and a hook can throw to script failures. */
-export function fakeWallet(hooks: { send?: (tx: SentTx) => void; simulate?: (tx: SentTx) => void } = {}) {
+/**
+ * The wallet methods the bridge's interactions reach; each call is recorded, and a hook can throw to script failures.
+ * A utility read answers `utility(name)`'s fields, default one zero field (an unbound funding address).
+ */
+export function fakeWallet(hooks: { send?: (tx: SentTx) => void; simulate?: (tx: SentTx) => void; utility?: (name: string) => Fr[] } = {}) {
 	const sent: SentTx[] = []
 	const simulated: SentTx[] = []
 	const authWits: { from: string; caller: string }[] = []
@@ -47,6 +53,11 @@ export function fakeWallet(hooks: { send?: (tx: SentTx) => void; simulate?: (tx:
 			hooks.send?.(tx)
 			return opts?.wait === NO_WAIT ? { txHash } : { receipt: { txHash } }
 		},
+		executeUtility: async (call: { name: string }) => ({
+			result: hooks.utility?.(call.name) ?? [Fr.ZERO],
+			offchainEffects: [],
+			anchorBlockTimestamp: 0n,
+		}),
 		simulateTx: async (p: ExecutionPayload) => {
 			const tx = record(p)
 			simulated.push(tx)

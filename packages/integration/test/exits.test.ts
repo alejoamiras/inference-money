@@ -18,7 +18,7 @@ import {
 	withdrawOnL1,
 } from "@inference-money/bridge-core"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
-import { funded, l1Actor, l2Actor, l2Balances, payFor, sentDuring, USDC, usdcOf, withdraw } from "./actors"
+import { funded, l1Actor, l2Actor, l2Balances, merchantActor, payFor, sentDuring, USDC, usdcOf, withdraw } from "./actors"
 import { harness, INTEGRATION } from "./harness"
 
 const exit = (e: ExitIntent) => exitToL1(e, harness().wallet, harness().node, harness().manifest, { fee: payFor(e.kind) })
@@ -37,12 +37,12 @@ const resume = (hash: TxHash, recipient: `0x${string}`, amount: bigint) =>
 	exitTicketFromTx(hash, recipient, amount, harness().node, harness().outbox, harness().manifest)
 
 describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
-	it("[A4] public exit → proven → L1 withdraw: the Outbox reads unconsumed before and consumed after", async () => {
+	it("[A4] a merchant's public exit → proven → L1 withdraw: the Outbox reads unconsumed before and consumed after", async () => {
 		const { manifest: m, node, outbox } = harness()
-		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
-		await funded(l1, "public", bob, 10n * USDC)
-		const t = await exit({ kind: "public", from: bob, recipientL1: l1.account, amount: 6n * USDC })
-		expect((await l2Balances(bob)).public).toBe(4n * USDC)
+		const [l1, shop] = await Promise.all([l1Actor(), merchantActor()])
+		await funded(l1, "public", shop, 10n * USDC)
+		const t = await exit({ kind: "public", from: shop, recipientL1: l1.account, amount: 6n * USDC })
+		expect((await l2Balances(shop)).public).toBe(4n * USDC)
 		const proof = await waitWithdrawable(t, node, outbox, undefined, provenQuickly)
 		expect(await consumedOnL1(t)).toBe(false)
 		const before = await usdcOf(l1.account)
@@ -67,11 +67,11 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 		expect(await usdcOf(l1.account)).toBe(before + 5n * USDC)
 	})
 
-	it("[A14] with app memory gone, a private exit to another recipient resumes from (tx hash, recipient, amount)", async () => {
-		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
-		await funded(l1, "private", bob, 3n * USDC)
+	it("[A14] with app memory gone, a merchant's private exit to another recipient resumes from (tx hash, recipient, amount)", async () => {
+		const [l1, shop] = await Promise.all([l1Actor(), merchantActor()])
+		await funded(l1, "private", shop, 3n * USDC)
 		const recipient = privateKeyToAccount(generatePrivateKey()).address
-		const t = await exit({ kind: "private", from: bob, recipientL1: recipient, amount: 3n * USDC })
+		const t = await exit({ kind: "private", from: shop, recipientL1: recipient, amount: 3n * USDC, asMerchant: true })
 		const remembered = JSON.stringify({ tx: t.l2TxHash.toString(), recipient, amount: String(3n * USDC) })
 
 		const r = JSON.parse(remembered) as { tx: string; recipient: `0x${string}`; amount: string }
@@ -84,9 +84,9 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 
 	it("[A13] replaying a completed L1 withdraw is refused as already withdrawn and pays nothing", async () => {
 		const { manifest: m, node, outbox } = harness()
-		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
-		await funded(l1, "public", bob, 2n * USDC)
-		const t = await exit({ kind: "public", from: bob, recipientL1: l1.account, amount: 2n * USDC })
+		const [l1, shop] = await Promise.all([l1Actor(), merchantActor()])
+		await funded(l1, "public", shop, 2n * USDC)
+		const t = await exit({ kind: "public", from: shop, recipientL1: l1.account, amount: 2n * USDC })
 		const proof = await waitWithdrawable(t, node, outbox, undefined, provenQuickly)
 		await withdrawOnL1(t, proof, l1, m)
 		const after = await usdcOf(l1.account)
@@ -97,7 +97,7 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 
 	it("[A13] two identical exits in one tx are withdrawn one at a time from the tx alone, then all-consumed", async () => {
 		const { manifest: m, wallet } = harness()
-		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
+		const [l1, bob] = await Promise.all([l1Actor(), merchantActor()])
 		await funded(l1, "public", bob, 4n * USDC)
 		const proxy = AztecAddress.fromStringUnsafe(m.l2.proxy.address)
 		const token = Contract.at(AztecAddress.fromStringUnsafe(m.l2.token.address), tokenArtifact, wallet)

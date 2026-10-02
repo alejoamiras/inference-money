@@ -56,7 +56,7 @@ export interface L2Deployment {
 }
 
 /**
- * Proxy, Token (minter = proxy), bridge(proxy, portal), then the proxy's one-shot `set_token` + `set_bridge` in one
+ * Proxy, Token (minter = proxy), bridge(proxy, token, portal), then the proxy's one-shot `set_token` + `set_bridge` in one
  * batch. Every instance is bound to `deployer`: aztec-nr refuses any other initializer, so nobody can front-run an
  * initialization and capture ownership.
  */
@@ -84,7 +84,11 @@ export async function deployBridgeL2(
 		proxyAddress,
 		AztecAddress.ZERO,
 	])
-	const bridge = await deployOne("bridge", tokenBridgeArtifact, "constructor", [proxyAddress, EthAddress.fromString(portal)])
+	const bridge = await deployOne("bridge", tokenBridgeArtifact, "constructor", [
+		proxyAddress,
+		AztecAddress.fromStringUnsafe(token.address),
+		EthAddress.fromString(portal),
+	])
 	log("proxy: set_token + set_bridge")
 	const p = Contract.at(proxyAddress, tokenMinterProxyArtifact, wallet)
 	const wiring = [

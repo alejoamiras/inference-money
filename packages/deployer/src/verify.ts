@@ -105,11 +105,12 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 	const { proxy, token, bridge } = m.l2
 	const deployer = bridge.deployer
 	const [b, p, t] = [reader(node, bridge.address), reader(node, proxy.address), reader(node, token.address)]
-	// A PublicImmutable's packed value starts at its slot: the bridge config is (token_minter_proxy, portal).
-	const [bOwner, bProxy, bPortal, bPaused, pOwner, pToken, pBridge, tDecimals, tMinter, tAuth] = await Promise.all([
+	// A PublicImmutable's packed value starts at its slot: the bridge config is (token_minter_proxy, token, portal).
+	const [bOwner, bProxy, bToken, bPortal, bPaused, pOwner, pToken, pBridge, tDecimals, tMinter, tAuth] = await Promise.all([
 		b(layoutSlot(tokenBridgeArtifact, "owner")),
 		b(layoutSlot(tokenBridgeArtifact, "config")),
 		b(layoutSlot(tokenBridgeArtifact, "config", 1)),
+		b(layoutSlot(tokenBridgeArtifact, "config", 2)),
 		isBridgePaused(node, m),
 		p(layoutSlot(tokenMinterProxyArtifact, "owner")),
 		p(layoutSlot(tokenMinterProxyArtifact, "token")),
@@ -121,6 +122,7 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 	return [
 		pin("bridge owner == deployer", bOwner, deployer),
 		pin("bridge config.token_minter_proxy", bProxy, proxy.address),
+		pin("bridge config.token", bToken, token.address),
 		check("bridge config.portal", bPortal.toBigInt() === BigInt(m.l1.portal), bPortal.toString()),
 		check("bridge not paused", !bPaused, String(bPaused)),
 		pin("proxy owner == deployer", pOwner, deployer),

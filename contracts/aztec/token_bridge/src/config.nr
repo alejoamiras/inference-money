@@ -9,5 +9,6 @@ use std::meta::derive;
 #[derive(Deserialize, Eq, Packable, Serialize)]
 pub struct Config {
     pub token_minter_proxy: AztecAddress,
+    pub token: AztecAddress,
     pub portal: EthAddress,
 }

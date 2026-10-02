@@ -28,7 +28,7 @@ describe("buildBridgeManifest", () => {
 	})
 
 	it("scopes utility reads apart from tx-shaped simulations and registers every contract it calls", () => {
-		expect(flat(simulation.utilities.scope)).toEqual([`${token.address}:balance_of_private`])
+		expect(flat(simulation.utilities.scope)).toEqual([`${token.address}:balance_of_private`, `${bridge.address}:get_funding_address`])
 		expect(flat(simulation.transactions.scope)).toContain(`${bridge.address}:claim_private`)
 		expect(flat(simulation.transactions.scope)).toContain(`${token.address}:balance_of_public`)
 		expect(contracts.contracts.map(String)).toEqual([bridge.address, proxy.address, token.address, sponsor])

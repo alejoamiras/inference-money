@@ -10,6 +10,7 @@ import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { computeL2ToL1MembershipWitness, getL2ToL1MessageLeafId } from "@aztec-labs/stdlib/messaging"
 import { type Address, type Hex, isAddressEqual, zeroAddress } from "viem"
 import { tokenArtifact, tokenBridgeArtifact } from "./artifacts"
+import { assertExitDestination } from "./binding"
 import { type FeeChoice, feeFor, L2_DONE, type SponsorUnavailableError, sponsorFailure } from "./claim"
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
@@ -22,6 +23,8 @@ export interface ExitIntent {
 	from: AztecAddress
 	recipientL1: Address
 	amount: bigint
+	/** A merchant's private exit, which may go anywhere; a user's goes only to its funding address. Default false. */
+	asMerchant?: boolean
 }
 
 /** Everything a withdrawal needs, recoverable from the L2 tx hash plus recipient and amount (`exitTicketFromTx`). */
@@ -73,9 +76,12 @@ function exitCall(e: ExitIntent, wallet: Wallet, m: BridgeManifest, nonce: Fr) {
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
 	const token = Contract.at(AztecAddress.fromStringUnsafe(m.l2.token.address), tokenArtifact, wallet)
 	const recipient = EthAddress.fromString(e.recipientL1)
-	const exit = e.kind === "private" ? bridge.methods.exit_to_l1_private! : bridge.methods.exit_to_l1_public!
+	const exit =
+		e.kind === "private"
+			? bridge.methods.exit_to_l1_private!(recipient, e.amount, EthAddress.ZERO, nonce, e.asMerchant ?? false)
+			: bridge.methods.exit_to_l1_public!(recipient, e.amount, EthAddress.ZERO, nonce)
 	const burn = e.kind === "private" ? token.methods.burn_private! : token.methods.burn_public!
-	return { exit: exit(recipient, e.amount, EthAddress.ZERO, nonce), burn: burn(e.from, e.amount, nonce) }
+	return { exit, burn: burn(e.from, e.amount, nonce) }
 }
 
 /**
@@ -137,6 +143,7 @@ export async function exitToL1(
 	opts: { fee?: FeeChoice } = {},
 ): Promise<ExitTicket> {
 	assertExitIntent(e, m)
+	if (e.kind === "private" && !e.asMerchant) await assertExitDestination(wallet, m, e.from, e.recipientL1)
 	const fee = feeFor(e.kind, m, opts.fee)
 	let txHash: TxHash
 	try {
@@ -144,30 +151,34 @@ export async function exitToL1(
 	} catch (err) {
 		throw (fee && sponsorFailure(err, "withdrawal")) || err
 	}
-	const located = await locateExit(e, txHash, node, m).catch((cause: unknown) => {
+	const located = await locateWithdrawal(e.recipientL1, e.amount, txHash, node, m).catch((cause: unknown) => {
 		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
 	})
 	if (located === "reverted") throw new ExitRevertedError(txHash)
 	return located
 }
 
-async function locateExit(e: ExitIntent, txHash: TxHash, node: ExitNode, m: BridgeManifest): Promise<ExitTicket | "reverted"> {
+/**
+ * The withdrawal `txHash` emitted to `recipient` for `amount`, once checkpointed, or "reverted" when the tx reverted
+ * without it. Exits and returns emit the same message, so both locate it here.
+ */
+export async function locateWithdrawal(
+	recipient: Address,
+	amount: bigint,
+	txHash: TxHash,
+	node: ExitNode,
+	m: BridgeManifest,
+): Promise<ExitTicket | "reverted"> {
 	// Only `getTxReceipt` is read.
 	const receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
-	const expected = await expectedExitMessage(e.recipientL1, e.amount, m)
+	const expected = await expectedExitMessage(recipient, amount, m)
 	const found = await occurrencesInTx(node, txHash, expected)
 	// A revert proves nothing burned only alongside an effect that lacks the message: setup effects survive a revert.
 	if (!found) throw new Error(`Exit ${txHash} is checkpointed, but the node returned no effect for it.`)
 	const [index, ...rest] = found
 	if (index === undefined && receipt.hasExecutionReverted()) return "reverted"
 	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
-	return {
-		l2TxHash: txHash,
-		recipient: e.recipientL1,
-		amount: e.amount,
-		messageHash: expected.toString() as Hex,
-		messageIndexInTx: index,
-	}
+	return { l2TxHash: txHash, recipient, amount, messageHash: expected.toString() as Hex, messageIndexInTx: index }
 }
 
 /** Consumed on the L1 Outbox; a message whose epoch is not proven yet cannot have been. */
