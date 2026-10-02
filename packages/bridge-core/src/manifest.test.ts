@@ -14,6 +14,12 @@ describe("manifest schema", () => {
 		expect(() => parseManifest({ ...MANIFEST, l1 })).toThrow(/l1\.router/)
 	})
 
+	it("refuses another protocol version, and an interim admin without an admin", () => {
+		expect(() => parseManifest({ ...MANIFEST, protocolVersion: 1 })).toThrow(/protocolVersion/)
+		const { admin: _, ...l2 } = MANIFEST.l2
+		expect(() => parseManifest({ ...MANIFEST, l2: { ...l2, interimAdmin: true } })).toThrow(/an interim admin needs an admin/)
+	})
+
 	it("rejects instances not bound to one non-zero deployer", () => {
 		const mixed = structuredClone(MANIFEST)
 		mixed.l2.token.deployer = f(0xe)

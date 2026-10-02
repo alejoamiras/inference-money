@@ -24,7 +24,9 @@ const instance = (n: number) => ({
 })
 
 export const MANIFEST: BridgeManifest = {
+	protocolVersion: 2,
 	network: "testnet",
+	sourceCommit: "c0ffee0000000000000000000000000000000001",
 	l1: {
 		chainId: 11155111,
 		usdc: a(1),
@@ -35,12 +37,14 @@ export const MANIFEST: BridgeManifest = {
 		inbox: a(6),
 		outbox: a(7),
 		deployBlock: 100,
+		deployer: a(8),
 	},
 	l2: {
 		nodeVersion: "5.0.0",
 		rollupVersion: 1821665230,
 		nodeUrl: "https://node.example",
 		sponsoredFpc: f(0xf),
+		admin: f(0xad),
 		proxy: instance(0x10),
 		token: instance(0x20),
 		bridge: instance(0x30),

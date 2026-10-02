@@ -1,57 +1,57 @@
-import { readFileSync, statSync } from "node:fs"
-import { resolve } from "node:path"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { Hex } from "viem"
 
-export interface TestnetSecrets {
-	l1PrivateKey: Hex
-	aztecSecretKey: Hex
-	sepoliaRpcUrl: string | undefined
-}
+/**
+ * The keyed-run variables. A command gets them through its environment alone (env-exec's approved process, or a
+ * `disposable exec` child), never argv, and moves them out of process.env at startup ({@link holdSecrets}).
+ */
+export const KEYED = {
+	l1PrivateKey: "TESTNET_L1_PRIVATE_KEY",
+	deployerSecret: "TESTNET_DEPLOYER_SECRET",
+	adminSecret: "TESTNET_ADMIN_SECRET",
+	rpcUrl: "SEPOLIA_RPC_URL",
+} as const
 
 const HEX32 = /^0x[0-9a-fA-F]{64}$/
 const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
 
 /** Range-checked here because the libraries that reject an out-of-range key echo it in their error. */
-function assertScalar(name: string, value: string, bound: bigint): void {
+function scalar(name: string, env: NodeJS.ProcessEnv, bound: bigint): Hex {
+	const value = env[name] ?? ""
 	if (!HEX32.test(value)) throw new Error(`${name} is missing or not 32-byte 0x-hex`)
 	const n = BigInt(value)
 	if (n === 0n || n >= bound) throw new Error(`${name} is out of range for its curve`)
+	return value as Hex
 }
 
-/** Parses dotenv-style `KEY=value` lines; quotes are stripped, comments and blanks skipped. */
-export function parseEnvFile(text: string): Map<string, string> {
-	const out = new Map<string, string>()
-	for (const raw of text.split("\n")) {
-		const line = raw.trim()
-		if (line === "" || line.startsWith("#")) continue
-		const eq = line.indexOf("=")
-		if (eq <= 0) continue
-		const key = line
-			.slice(0, eq)
-			.replace(/^export\s+/, "")
-			.trim()
-		out.set(key, line.slice(eq + 1).replace(/^["']|["']$/g, ""))
-	}
-	return out
-}
+export const l1PrivateKeyFrom = (env: NodeJS.ProcessEnv = keyedEnv()): Hex => scalar(KEYED.l1PrivateKey, env, SECP256K1_N)
 
-/** Validates without echoing values: an error names the variable, never its content. */
-export function parseTestnetSecrets(env: Map<string, string>): TestnetSecrets {
-	const l1 = env.get("TESTNET_L1_PRIVATE_KEY") ?? ""
-	const az = env.get("TESTNET_AZTEC_SECRET_KEY") ?? ""
-	assertScalar("TESTNET_L1_PRIVATE_KEY", l1, SECP256K1_N)
-	assertScalar("TESTNET_AZTEC_SECRET_KEY", az, Fr.MODULUS)
-	return { l1PrivateKey: l1 as Hex, aztecSecretKey: az as Hex, sepoliaRpcUrl: env.get("SEPOLIA_RPC_URL") || undefined }
-}
-
-/** Refuses a key file any other local user could read. */
-export function assertOwnerOnly(path: string): void {
-	const mode = statSync(path).mode & 0o777
-	if ((mode & 0o077) !== 0) throw new Error(`${path} is mode ${mode.toString(8)}; chmod 600 it before use`)
-}
+/** An Aztec account or deployer secret: a field element, as `op-remote`'s `generate fr` draws it. */
+export const aztecSecretFrom = (name: typeof KEYED.deployerSecret | typeof KEYED.adminSecret, env: NodeJS.ProcessEnv = keyedEnv()): Fr =>
+	Fr.fromHexString(scalar(name, env, Fr.MODULUS))
 
 const SECRET_NAME = /PRIVATE_KEY|SECRET|MNEMONIC|PASSWORD|TOKEN|RPC_URL|API_KEY/i
+/** env-exec refuses shorter secret values, and a shorter needle would redact ordinary text. */
+const MIN_SECRET = 8
+
+let held: NodeJS.ProcessEnv | undefined
+
+/**
+ * Moves every credential-named variable out of `env` into this module, so no process this one spawns inherits one: a
+ * child that needs a value is handed it explicitly. node:child_process and `Bun.$` honor the deletion; `Bun.spawn`
+ * without `env` passes the environment the process started with, so every spawn here goes through node:child_process.
+ */
+export function holdSecrets(env: NodeJS.ProcessEnv = process.env): void {
+	held ??= {}
+	for (const [k, v] of Object.entries(env)) {
+		if (!SECRET_NAME.test(k)) continue
+		held[k] = v
+		delete env[k]
+	}
+}
+
+/** The credential-named variables: the held ones once {@link holdSecrets} ran, process.env's before. */
+export const keyedEnv = (): NodeJS.ProcessEnv => held ?? process.env
 
 /** The environment minus every variable that can carry a credential (an RPC URL often embeds an API key). */
 export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -77,21 +77,20 @@ function urlForms(url: string): string[] {
 	return [url, u.href, bare, bare.replace(/\/$/, ""), ...(tail.length > 1 ? [tail] : []), ...userinfo, ...parts]
 }
 
-/** Every form a secret takes in text, longest first, lowercased: keys with and without 0x, and every URL form. */
-export function secretNeedles(s: Partial<TestnetSecrets>, env: NodeJS.ProcessEnv = process.env): string[] {
-	const keys = [s.l1PrivateKey, s.aztecSecretKey].flatMap((k) => (k ? [k, k.slice(2)] : []))
-	const urls = [s.sepoliaRpcUrl, env.SEPOLIA_RPC_URL].flatMap((u) => (u ? urlForms(u) : []))
-	return [...new Set([...keys, ...urls].map((n) => n.toLowerCase()))].sort((a, b) => b.length - a.length)
+const forms = (value: string): string[] =>
+	/^0x[0-9a-f]+$/i.test(value) ? [value, value.slice(2)] : /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? urlForms(value) : [value]
+
+/**
+ * Every credential-named variable of `env` in every form text could carry it, longest first, lowercased: hex with and
+ * without 0x, and every URL form. A keyless environment yields none.
+ */
+export function secretNeedles(env: NodeJS.ProcessEnv = process.env): string[] {
+	const values = Object.entries(env).flatMap(([k, v]) => (SECRET_NAME.test(k) && v && v.length >= MIN_SECRET ? [v] : []))
+	return [...new Set(values.flatMap(forms).map((n) => n.toLowerCase()))].sort((a, b) => b.length - a.length)
 }
 
-/** Whether `text` holds any secret, in any case. Answers only yes or no. */
-export function containsSecret(text: string, s: TestnetSecrets): boolean {
+/** Whether `text` holds any needle, in any case. Answers only yes or no. */
+export function containsSecret(text: string, needles: readonly string[]): boolean {
 	const haystack = text.toLowerCase()
-	return secretNeedles(s, {}).some((n) => haystack.includes(n))
-}
-
-export function loadTestnetSecrets(repoRoot: string): TestnetSecrets {
-	const path = resolve(repoRoot, ".env.testnet")
-	assertOwnerOnly(path)
-	return parseTestnetSecrets(parseEnvFile(readFileSync(path, "utf8")))
+	return needles.some((n) => haystack.includes(n))
 }

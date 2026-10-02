@@ -30,6 +30,7 @@ jobs:
             relevant:
               - 'packages/deployer/**'
               - 'packages/bridge-core/**'
+              - 'packages/demo/**'
               - 'packages/local-network/**'
               - 'contracts/aztec/*/target/**'
               - 'toolchain.json'

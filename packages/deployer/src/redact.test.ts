@@ -19,14 +19,14 @@ const sink = () => {
 
 describe("output redaction", () => {
 	it("masks each secret form in any case, and a URL's API key on its own", () => {
-		const needles = secretNeedles({ l1PrivateKey: KEY, sepoliaRpcUrl: RPC }, {})
+		const needles = secretNeedles({ TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: RPC })
 		const out = redact(`k=${KEY.toUpperCase()} bare=${KEY.slice(2)} url=${RPC} key=abc123defghi456jkl`, needles)
 		expect(out).toBe("k=[redacted] bare=[redacted] url=[redacted] key=[redacted]")
 	})
 
 	it("masks a basic-auth URL as a library prints it with the userinfo stripped, and a short path key", () => {
 		const url = "https://alice:hunter22@rpc.example.com/v2/short-key"
-		const needles = secretNeedles({ sepoliaRpcUrl: url }, {})
+		const needles = secretNeedles({ SEPOLIA_RPC_URL: url })
 		expect(redact("URL: https://rpc.example.com/v2/short-key", needles)).toBe("URL: [redacted]")
 		expect(redact("path /v2/short-key; auth alice:hunter22", needles)).toBe("path [redacted]; auth [redacted]")
 	})
@@ -34,7 +34,8 @@ describe("output redaction", () => {
 	it("redacts a child's output even when a secret straddles two writes, and keeps its exit code", async () => {
 		const [out, err] = [sink(), sink()]
 		const script = `process.stdout.write("a=${KEY.slice(0, 30)}"); setTimeout(() => { process.stdout.write("${KEY.slice(30)}\\n"); console.error("${RPC}"); process.exit(3) }, 50)`
-		const code = await runRedacted(["-e", script], secretNeedles({ l1PrivateKey: KEY, sepoliaRpcUrl: RPC }, {}), out.stream, err.stream)
+		const needles = secretNeedles({ TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: RPC })
+		const code = await runRedacted(["-e", script], needles, out.stream, err.stream)
 		expect([code, out.text(), err.text()]).toEqual([3, "a=[redacted]\n", "[redacted]\n"])
 	})
 

@@ -1,15 +1,15 @@
-import { createHash } from "node:crypto"
 import { NO_FROM } from "@aztec-labs/aztec.js/account"
 import { AztecAddress, EthAddress } from "@aztec-labs/aztec.js/addresses"
 import { BatchCall, Contract } from "@aztec-labs/aztec.js/contracts"
 import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
-import { Fq, Fr } from "@aztec-labs/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { ContractInitializationStatus } from "@aztec-labs/aztec.js/wallet"
 import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	instanceRecord,
 	type L2InstanceRecord,
+	signingKeyFor,
 	tokenArtifact,
 	tokenBridgeArtifact,
 	tokenMinterProxyArtifact,
@@ -22,28 +22,24 @@ export interface L2Fees {
 	tx: FeePaymentMethod | undefined
 }
 
-/** Bound to the secret, so whoever holds it can always rebuild the owner account. */
-export function signingKeyFor(secret: Fr): Fq {
-	return Fq.fromBufferReduce(createHash("sha256").update("inference-money/schnorr-signing-key").update(secret.toBuffer()).digest())
-}
-
 /**
- * Registers the deployer's Schnorr account in `wallet`, deploying it first unless its initialization nullifier exists.
- * An account deploy does not publish its instance, so the node's contract lookup cannot answer this.
+ * Registers the Schnorr account `secret` rebuilds in `wallet`, deploying it first unless its initialization nullifier
+ * exists. An account deploy does not publish its instance, so the node's contract lookup cannot answer this.
  */
-export async function ensureDeployerAccount(
+export async function ensureAccount(
 	wallet: EmbeddedWallet,
 	secret: Fr,
-	fees: L2Fees,
+	fees: Pick<L2Fees, "accountDeploy">,
 	log: (m: string) => void,
+	label: string,
 ): Promise<AztecAddress> {
 	const manager = await wallet.createSchnorrAccount(secret, Fr.ZERO, signingKeyFor(secret))
 	const { initializationStatus } = await wallet.getContractMetadata(manager.address)
 	if (initializationStatus === ContractInitializationStatus.INITIALIZED) {
-		log(`deployer ${manager.address}: already deployed`)
+		log(`${label} ${manager.address}: already deployed`)
 		return manager.address
 	}
-	log(`deployer ${manager.address}: deploying`)
+	log(`${label} ${manager.address}: deploying`)
 	const deploy = await manager.getDeployMethod()
 	await deploy.send({ from: NO_FROM, fee: { paymentMethod: await fees.accountDeploy(manager.address) } })
 	return manager.address

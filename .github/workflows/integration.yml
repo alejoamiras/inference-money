@@ -31,6 +31,7 @@ jobs:
               - 'packages/integration/**'
               - 'packages/bridge-core/**'
               - 'packages/deployer/**'
+              - 'packages/demo/**'
               - 'packages/local-network/**'
               - 'toolchain.json'
               - 'package.json'

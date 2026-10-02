@@ -11,11 +11,20 @@ export function openBridgeWallet(node: AztecNode, opts: { prove: boolean }): Pro
 	return EmbeddedWallet.create(node, { ephemeral: true, pxe: { proverEnabled: opts.prove } })
 }
 
+type Open = (node: AztecNode) => Promise<EmbeddedWallet>
+
+export interface BridgeWalletOptions {
+	prove: boolean
+	/** Opens the wallet on a node built from the plain one, such as a payment gate's (default: the plain one). */
+	bind?: (node: AztecNode, open: Open) => Promise<EmbeddedWallet>
+}
+
 /** {@link openBridgeWallet} inside an owned tmp scope, stopped before the scope's dir is removed. */
-export function withBridgeWallet<T>(nodeUrl: string, opts: { prove: boolean }, fn: (w: EmbeddedWallet, node: AztecNode) => Promise<T>) {
+export function withBridgeWallet<T>(nodeUrl: string, opts: BridgeWalletOptions, fn: (w: EmbeddedWallet, node: AztecNode) => Promise<T>) {
 	return withOwnedTmpDir(async () => {
 		const node = createAztecNodeClient(nodeUrl)
-		const wallet = await openBridgeWallet(node, opts)
+		const open: Open = (n) => openBridgeWallet(n, opts)
+		const wallet = await (opts.bind ? opts.bind(node, open) : open(node))
 		try {
 			return await fn(wallet, node)
 		} finally {
@@ -35,18 +44,23 @@ export interface SentTx {
 	anchorTs: bigint
 }
 
-/** Wraps `node` so every `sendTx` through it records the tx's hash and kernel commitments before forwarding. */
-export function recordingNode(node: AztecNode, sent: SentTx[]): AztecNode {
+/**
+ * Wraps `node` so every `sendTx` through it records the tx's hash and kernel commitments before forwarding; `onSend`
+ * runs then too, so a journal it writes survives a crash during the send.
+ */
+export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: SentTx) => void): AztecNode {
 	return new Proxy(node, {
 		get(target, key, receiver) {
 			if (key !== "sendTx") return Reflect.get(target, key, receiver)
 			return (tx: Tx) => {
-				sent.push({
+				const record = {
 					hash: tx.getTxHash().toString(),
 					feePayer: tx.data.feePayer.toString(),
 					expiresAt: tx.data.expirationTimestamp,
 					anchorTs: tx.data.constants.anchorBlockHeader.globalVariables.timestamp,
-				})
+				}
+				sent.push(record)
+				onSend?.(record)
 				return target.sendTx(tx)
 			}
 		},

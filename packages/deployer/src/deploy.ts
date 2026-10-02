@@ -1,10 +1,12 @@
+import { execFileSync } from "node:child_process"
 import type { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
-import { type BridgeManifest, parseManifest } from "@inference-money/bridge-core"
+import { type BridgeManifest, PROTOCOL_VERSION, parseManifest } from "@inference-money/bridge-core"
+import { REPO_ROOT } from "@inference-money/local-network"
 import { type Address, getAddress, type Hex } from "viem"
 import { deployPortal, deployRouter, initializePortal } from "./deploy-l1"
-import { deployBridgeL2, ensureDeployerAccount, type L2Fees } from "./deploy-l2"
+import { deployBridgeL2, ensureAccount, type L2Fees } from "./deploy-l2"
 import type { BridgeEvmArtifacts } from "./evm"
 import type { L1Signer } from "./l1"
 import { ensureStandardContracts } from "./standard"
@@ -25,17 +27,20 @@ export interface DeployContext {
 	log: (m: string) => void
 }
 
+/** The commit this checkout runs: a keyed run's is the pushed commit it was approved at. */
+export const sourceCommit = (): string => execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim()
+
 /**
  * The one deploy order both networks run: the deployer account and the standard contracts the bridge calls in public
  * (no-ops where present), then the portal and the router that names it, the three deployer-bound L2 instances and
  * their wiring, then `portal.initialize`, which needs the bridge address and checks the router's binding. Returns the
- * manifest; verifying it before it is written is the caller's step.
+ * manifest, with no admin until the caller's handover is accepted; verifying it before it is written is the caller's step.
  */
 export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 	const info = await c.node.getNodeInfo()
 	const l1c = info.l1ContractAddresses
 	const registry = getAddress(l1c.registryAddress.toString())
-	const deployer = await ensureDeployerAccount(c.wallet, c.deployerSecret, c.fees, c.log)
+	const deployer = await ensureAccount(c.wallet, c.deployerSecret, c.fees, c.log, "deployer")
 	await ensureStandardContracts(c.wallet, c.node, { from: deployer, ...(c.fees.tx ? { fee: { paymentMethod: c.fees.tx } } : {}) }, c.log)
 	const portal = await deployPortal(c.l1, c.evm)
 	c.log(`portal ${portal.address}`)
@@ -46,7 +51,9 @@ export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 	await initializePortal(c.l1, c.evm, portal.address, binding)
 	c.log("portal initialized")
 	return parseManifest({
+		protocolVersion: PROTOCOL_VERSION,
 		network: c.network,
+		sourceCommit: sourceCommit(),
 		l1: {
 			chainId: info.l1ChainId,
 			usdc: c.usdc,
@@ -57,6 +64,7 @@ export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 			inbox: getAddress(l1c.inboxAddress.toString()),
 			outbox: getAddress(l1c.outboxAddress.toString()),
 			deployBlock: Number(router.block),
+			deployer: c.l1.account.address,
 		},
 		l2: {
 			nodeVersion: info.nodeVersion,

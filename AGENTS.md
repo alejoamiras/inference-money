@@ -10,7 +10,8 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `contracts/aztec` | Aztec.nr: `token` (the merchant fork of aztec-standards' Token), `token_bridge`, `token_minter_proxy`, `claim_secret`, `merchant_stamp`, `portal_messages` (the L1↔L2 message contents), `keystone` (cross-toolchain vectors) |
 | `packages/bridge-core` | Framework-agnostic protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw, the manifest schema, the merchant list and payment requests |
 | `packages/local-network` | Per-run anvil + Aztec local network (`toolchain.json`'s node): registry-claimed ports, owned process groups |
-| `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
+| `packages/deployer` | The operator CLI (`bun run bridge`): deploy, admin handover, merchants, pause, verify, export, the demo and the acceptance run; keyed-run plumbing |
+| `packages/demo` | The demo cast (public keys derived from a deployment), the recorded tour's schema and the world-view decoder; browser-safe |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
 | `apps/web` | The React app: wagmi L1, the Aztec wallet-sdk session, a build-embedded manifest; `e2e/` holds the browser harness |
 | `implementations-plan/` | Plans: `index.md` lists the active ones, `lessons.md` and `follow-ups.md` are the curated layer, closed plans live under `archive/` |
@@ -36,10 +37,11 @@ bun run --cwd apps/web test:components           # vitest: session store, grant,
 BRIDGE_MANIFEST=<file> bun run --cwd apps/web build   # any deployed manifest; build:testnet pins deployments/testnet.json
 bun run test:e2e [-- connect.spec.ts]             # own network + deploy + app/wallet builds + sidecar + Playwright, then reap
 
-bun run deploy:testnet   # probe the pins, deploy with real proofs + self-funded Fee Juice, verify, write deployments/testnet.json
-bun run verify:testnet   # re-verify deployments/testnet.json against the live chains and a fresh forge build
-bun run smoke:testnet    # four 1-USDC legs with real proofs; exit tickets kept in ~/.cache/inference-money/smoke to resume
-bun run secrets:scan     # yes/no only: any .env.testnet value outside it, any wallet store left on disk
+bun run bridge <command>                         # the operator CLI; every command and the keyed-run recipe: docs/operations.md
+bun run bridge verify deployments/testnet.json   # keyless strict read-back (--node/--l1-rpc: your own endpoints)
+RUN_ID=a bun run bridge demo setup local && RUN_ID=a bun run bridge smoke local   # the demo cast, then the acceptance run
+bash scripts/keyed-worktree.sh sync              # the checkout keyed runs execute from (installs with --ignore-scripts)
+bun run secrets:scan     # yes/no only: any of this environment's secrets in the checkout or the caches, any wallet store left on disk
 
 bun run test:evm        # forge fmt --check, forge lint src, unit + fuzz + invariant (hermetic)
 bun run test:evm:formal # halmos, strict: exact proof names and counts (scripts/halmos-gate.sh)
@@ -55,7 +57,9 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # static guard: the four c
 ## Rules
 
 - **One source of truth for versions:** `toolchain.json` (Aztec node/JS/Noir, nargo, Foundry, halmos, solc, Bun). `@aztec-labs/*` and `@aztec-foundation/*` npm packages are pinned exactly to `aztecJs`, except `contracts/aztec/toolchain` (the Noir scripts' aztec CLI, bb and TXE), pinned to `noir`. Never bump one without the others it couples to.
-- **Secrets:** testnet keys live only in `.env.testnet` (git-ignored, mode 0600), are read in-process, and are never printed, logged, passed on argv, or written anywhere else (every non-local deployer command runs as a child whose output is redacted line by line), except that Aztec wallet/PXE stores (LMDB temp files even when "ephemeral") must run inside `withOwnedTmpDir` (deployer). No agent generates operational keys.
+- **Secrets:** testnet keys reach only the environment of one owner-approved keyed run (`env-exec`, from the keyed worktree, whose install skips scripts), are read in-process, and are never printed, logged, passed on argv or written anywhere (the CLI re-runs itself as a redacted child whenever its environment holds one). The CLI's entry point never imports the Aztec SDK, whose import spawns a native bb with the process environment: it moves the secrets out of `process.env` first, then loads the handlers. While a keyed run is live, nothing is installed, built, tested or committed on the host. Aztec wallet/PXE stores (LMDB temp files even when "ephemeral") run inside `withOwnedTmpDir` (deployer).
+- **No agent generates operational keys**, with one owner-authorized exception: the disposable testnet fallback (`bridge disposable`), drawn in-process into a 0600 file outside every checkout, never printed, logged or passed on argv, and destroyed after the admin switch.
+- **Demo keys are not secrets:** derived in `packages/demo` from the deployment and a published users' tag, demo funds only, never an admin or minting role, merchant-listed only on local and testnet. Agents may use them without a keyed run.
 - **Complexity budgets:** cognitive complexity ≤ 15 everywhere; ≤ 80 non-blank lines per production function. Never suppress complexity rules in new code.
 - **Comments** say what the code can't (invariants, external gotchas, non-obvious whys); never narrate, never reference plans or reviews.
 - **Solidity deps come from npm** (`@openzeppelin/contracts`, `@aztec-foundation/l1-artifacts`, remapped to the `@aztec/` import prefix) and forge-std from a pinned GitHub commit (the npm `forge-std` is an unofficial repackage). `foundry.toml` remaps through `contracts/evm/node_modules` with relative targets so build metadata reproduces across machines, and sets `bytecode_hash = "none"` so a comment edit never changes deployed bytecode (`verify` compares against a fresh build). Foundry and halmos move together: a newer Foundry breaks halmos 0.3.3.

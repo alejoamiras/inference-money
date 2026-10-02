@@ -96,6 +96,22 @@
         "typescript": "6.0.3",
       },
     },
+    "packages/demo": {
+      "name": "@inference-money/demo",
+      "version": "0.0.0",
+      "dependencies": {
+        "@aztec-labs/accounts": "6.0.0-rc.1",
+        "@aztec-labs/aztec.js": "6.0.0-rc.1",
+        "@aztec-labs/stdlib": "6.0.0-rc.1",
+        "@inference-money/bridge-core": "workspace:*",
+        "viem": "2.56.7",
+        "zod": "4.6.5",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.2",
+        "typescript": "6.0.3",
+      },
+    },
     "packages/deployer": {
       "name": "@inference-money/deployer",
       "version": "0.0.0",
@@ -109,6 +125,7 @@
         "@aztec-labs/stdlib": "6.0.0-rc.1",
         "@aztec-labs/wallets": "6.0.0-rc.1",
         "@inference-money/bridge-core": "workspace:*",
+        "@inference-money/demo": "workspace:*",
         "@inference-money/local-network": "workspace:*",
         "viem": "2.56.7",
       },
@@ -125,6 +142,7 @@
         "@aztec-labs/stdlib": "6.0.0-rc.1",
         "@aztec-labs/wallets": "6.0.0-rc.1",
         "@inference-money/bridge-core": "workspace:*",
+        "@inference-money/demo": "workspace:*",
         "@inference-money/deployer": "workspace:*",
         "@inference-money/local-network": "workspace:*",
         "viem": "2.56.7",
@@ -394,6 +412,8 @@
     "@inference-money/contracts-aztec": ["@inference-money/contracts-aztec@workspace:contracts/aztec"],
 
     "@inference-money/contracts-evm": ["@inference-money/contracts-evm@workspace:contracts/evm"],
+
+    "@inference-money/demo": ["@inference-money/demo@workspace:packages/demo"],
 
     "@inference-money/deployer": ["@inference-money/deployer@workspace:packages/deployer"],
 

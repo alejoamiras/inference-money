@@ -34,9 +34,9 @@ describe("probe checks", () => {
 		expect(failed(checkL1Wiring({ ...wiring, version: 1n }, TESTNET))).toEqual(["registry → rollup → version"])
 	})
 
-	it("gate on the faucet, not on the sponsor's balance", () => {
-		const fee = { faucetMint: 1000n, budget: 100n, sponsorPublished: true, sponsorBalance: 0n }
+	it("gate on the faucet covering the deploy, not on the sponsor's balance, which `demo fund` tops up", () => {
+		const fee = { faucetMint: 1000n, deployBudget: 100n, sponsoredBudget: 500n, sponsorPublished: true, sponsorBalance: 0n }
 		expect(failed(checkFeePath(fee))).toEqual([])
-		expect(failed(checkFeePath({ ...fee, faucetMint: 10n }))).toEqual(["fee faucet mint ≥ budget"])
+		expect(failed(checkFeePath({ ...fee, faucetMint: 10n }))).toEqual(["fee faucet mint ≥ deploy budget"])
 	})
 })
