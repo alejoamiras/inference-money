@@ -71,7 +71,7 @@ Questions the plan must answer: how the payer learns the stamp's time bucket (ca
 
 **Passed 2026-10-02.** The Opus 5.5 audit: "VERDICT: approve with conditions". Codex's fresh-context pass: "VERDICT: approve with conditions — adopt findings 1 and 2 in writing before implementation." The first Codex audit rejected the draft and, resumed on the revision, found its three blockers resolved and approved with conditions. Every condition is in the plan; the decision ledger maps each finding to what it became.
 
-#### Phase 4: the token's rule and its mirrors
+#### Phase 4: the token's rule and its mirrors ✓
 
 The design is under Architecture & Implementation, Arc 2. In order, validating the fast layers after each step:
 
