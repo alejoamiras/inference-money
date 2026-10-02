@@ -72,7 +72,8 @@ const DUPLICATE_NULLIFIER = /Existing nullifier|Duplicate nullifier/i
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 // The page answers at a proposed block, seconds after the send: its PXE anchors there and the node refuses a double
-// spend against it. What a prune would undo is never forgotten before finality (claims, exits, payments).
+// spend against it. A claim or payment a prune would undo is never forgotten before finality; an exit's revert is
+// believed at a checkpoint.
 const session = (ctx: LiveCtx): DemoSession => ({ wallet: ctx.demo.wallet, node: ctx.demo.node, m: ctx.m, wait: L2_PROPOSED })
 const token = (ctx: LiveCtx) => AztecAddress.fromStringUnsafe(ctx.m.l2.token.address)
 const address = (ctx: LiveCtx, who: ValidDraft["to"]) => ctx.demo.cast[who as User | Merchant].address
