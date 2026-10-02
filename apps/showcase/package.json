@@ -7,6 +7,8 @@
 	"scripts": {
 		"build": "vite build",
 		"build:testnet": "BRIDGE_TARGET=testnet vite build && BUILT_TARGET=testnet BUILT_DIST=dist vitest run build/manifest-identity.test.ts build/bundle.test.ts",
+		"deploy": "wrangler deploy",
+		"deploy:preview": "wrangler versions upload",
 		"dev": "vite",
 		"preview": "vite preview",
 		"test": "vitest run",
@@ -58,6 +60,7 @@
 		"typescript": "6.0.3",
 		"vite": "8.3.0",
 		"vite-plugin-node-polyfills": "0.28.0",
-		"vitest": "5.0.1"
+		"vitest": "5.0.1",
+		"wrangler": "4.138.0"
 	}
 }
