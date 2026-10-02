@@ -38,6 +38,13 @@
 
 "No new material findings — both round-2 fixes are verified; confidence: high." No findings; no comment changes warranted.
 
+### After the PR opened (resumed): converged
+
+CI's first full run passed 26 checks and failed two jobs, each with its status job.
+
+1. **Shellcheck.** CI's Shellcheck (ubuntu-24.04's 0.9.0) failed on `stop_group`'s last line, `owns_group … && kill -KILL … || true` (SC2015); the local 0.11.0 passes it. Fix: `owns_group … || return 0`, then the kill, mirroring the TERM step. A scratch test: a TERM-ignoring owned group was gone after 21 s with rc 0, and an unowned group was untouched. Codex: "No new material findings — behavior and return values are preserved; confidence: high." (192 old/new path comparisons under `set -euo pipefail`).
+2. **The Presto job.** Its spec failed at "a send proves on Presto": presto-server checks the bb it downloads through the GitHub API, and CI's shared addresses had exhausted the anonymous quota (`403 Forbidden authenticated=false`), so `/prove` answered 500 and the proof fell back. Homelab's own address never hit it. Fix: the step passes `github.token` (`contents: read`, a public repo, expired when the job ends) as `PRESTO_GITHUB_TOKEN`; `presto.sh` un-exports it at once and exports `GITHUB_TOKEN` only in the subshell that execs presto-server. Codex, first pass: "Material findings remain — the launch exposes the token through process arguments" (`setsid env GITHUB_TOKEN=…` puts it in world-readable argv until each exec): accepted, hence the subshell. A local run with a dummy token: presto-server logged `status=401 Unauthorized authenticated=true`, and no file in the kept state dir (what CI uploads on failure) held the value; teardown clean. Codex, second pass: "No new material findings — the argv exposure is fixed; confidence: high."
+
 ## Gate
 
 `bun run test:e2e` exit 0 (7 passed, 2.7 min, fake-proof bundle: Presto unreachable); `bun run test:e2e:presto` exit 0 (4 passed: the three infra specs and the Presto spec in 50 s); `bun run lint:actions` exit 0.

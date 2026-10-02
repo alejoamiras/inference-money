@@ -40,11 +40,10 @@ Gotchas that cost a past run and would bite other work, one line each with its a
 - Playwright runs under Node: Bun-only packages (`import.meta.dir`) live in a Bun sidecar the specs call over HTTP. [phase-8](archive/usdc-bridge/lessons/phase-8.md)
 - A local network can finish a flow between Playwright polls: assert durable state, not a transient step. [phase-10](archive/usdc-bridge/lessons/phase-10.md)
 - Playwright's Chromium refuses an ungranted loopback request outright: to test Local Network Access, mark the page and its own services public (`--ip-address-space-overrides`). [phase-2](archive/presto-showcase/lessons/phase-2.md)
-- presto-server 1.1.3 ignores unknown flags (`--help` too) and serves on its default port; `PRESTO_PORT` needs `PRESTO_HOME`. [phase-2](archive/presto-showcase/lessons/phase-2.md)
 
 ## CI
 
-- Reproduce CI with `CI=true GITHUB_ACTIONS=true` (logs gain ANSI codes that broke a `$`-anchored grep; spawn with `FORCE_COLOR=0`) and ubuntu-24.04's shellcheck 0.9.0, which predates SC2329 (disable `SC2317,SC2329`). [phase-10](archive/usdc-bridge/lessons/phase-10.md)
+- Reproduce CI with `CI=true GITHUB_ACTIONS=true` (ANSI codes in logs broke a `$`-anchored grep: spawn with `FORCE_COLOR=0`) and ubuntu-24.04's shellcheck 0.9.0: it predates SC2329 (disable `SC2317,SC2329`) and flags `A && B || true` (SC2015), unlike the local 0.11.0. [phase-10](archive/usdc-bridge/lessons/phase-10.md), [phase-4](archive/presto-showcase/lessons/phase-4.md)
 - Never run the Aztec installer in CI: it runs noirup from `main`, foundryup via `curl | bash` and an unlocked npm install. [phase-3](archive/usdc-bridge/lessons/phase-3.md)
 - Path filters must list every shared root file a suite loads (`test-preload.ts` was missing from three). [phase-10](archive/usdc-bridge/lessons/phase-10.md)
 
