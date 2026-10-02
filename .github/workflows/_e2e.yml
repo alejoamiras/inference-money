@@ -1,8 +1,8 @@
 name: E2E (reusable)
 
 # The browser suite against its own local network: net:up, deploy:local, the sidecar, the demo cast, the showcase build
-# and Playwright, all torn down by apps/showcase/e2e/agent.sh. Called from showcase.yml on PRs labelled `e2e`, or run by
-# hand.
+# and Playwright, all torn down by apps/showcase/e2e/agent.sh; and the Presto suite, through a pinned presto-server, torn
+# down by apps/showcase/e2e/presto.sh. Called from showcase.yml on PRs labelled `e2e`, or run by hand.
 on:
   workflow_call:
   workflow_dispatch:
@@ -31,6 +31,32 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-state
+          path: ~/.cache/inference-money/e2e/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  presto:
+    name: browser e2e with Presto (local network)
+    runs-on: ubuntu-latest
+    # Two of its sends prove in the browser, for real.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchains
+        with:
+          foundry: "true"
+          aztec-node: "true"
+      - name: Chromium (the pinned Playwright's build)
+        run: apps/showcase/node_modules/.bin/playwright install --with-deps chromium
+      - run: bun run test:e2e:presto
+        env:
+          # presto.sh hands it to presto-server alone, for the GitHub API calls that check the bb it downloads.
+          PRESTO_GITHUB_TOKEN: ${{ github.token }}
+      # The run's certificate key and presto-server's home live outside the state dir, so neither is uploaded.
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-presto-state
           path: ~/.cache/inference-money/e2e/
           retention-days: 7
           if-no-files-found: ignore

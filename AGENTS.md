@@ -13,7 +13,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `packages/deployer` | The operator CLI (`bun run bridge`): deploy, admin handover, merchants, pause, verify, export, the demo and the acceptance run; keyed-run plumbing |
 | `packages/demo` | The demo cast (public keys derived from a deployment), its flows (deposit, claim, send), the recorded tour's schema and the world-view decoder; browser-safe, shared by the deployer and the showcase |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
-| `apps/showcase` | The demo showcase (React): the guided tour replays the recorded run, "Try it yourself" (`#live`) drives one embedded Aztec wallet holding the demo cast; a build-embedded manifest, users' tag and tour; `e2e/` holds the browser suite and the proving harness (`#proving`) |
+| `apps/showcase` | The demo showcase (React): the guided tour replays the recorded run, "Try it yourself" (`#live`) drives one embedded Aztec wallet holding the demo cast, proving through Presto once the visitor connects it; a build-embedded manifest, users' tag and tour; `e2e/` holds the browser suite and the proving harness (`#proving`) |
 | `implementations-plan/` | Plans: `index.md` lists the active ones, `lessons.md` and `follow-ups.md` are the curated layer, closed plans live under `archive/` |
 
 ## Commands
@@ -36,6 +36,7 @@ bash packages/local-network/scripts/install-node.sh <dir>  # CI's node: frozen l
 bun run --cwd apps/showcase test:components      # vitest: components, build target, bundle check, proving decision
 BRIDGE_MANIFEST=<file> bun run --cwd apps/showcase build   # a deployed manifest with its published demo; build:testnet pins deployments/testnet.json
 bun run test:e2e [-- tour.spec.ts]                # own network + deploy + sidecar + demo setup + build + Playwright, then reap
+bun run test:e2e:presto [-- presto.spec.ts]      # own network + deploy + demo setup + real-proof build + pinned presto-server behind an HTTPS proxy
 bun run --cwd apps/showcase test:proving         # real proofs in the browser, unconstrained and on 2 CPUs → test-results/proving.json
 SHOWCASE_URL=<url> bun run --cwd apps/showcase test:testnet   # the served showcase, live on testnet (a Workers preview, or production)
 
@@ -58,7 +59,7 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # static guard: the four c
 
 ## Rules
 
-- **One source of truth for versions:** `toolchain.json` (Aztec node/JS/Noir, nargo, Foundry, halmos, solc, Bun). `@aztec-labs/*` and `@aztec-foundation/*` npm packages are pinned exactly to `aztecJs`, except `contracts/aztec/toolchain` (the Noir scripts' aztec CLI, bb and TXE), pinned to `noir`. Never bump one without the others it couples to.
+- **One source of truth for versions:** `toolchain.json` (Aztec node/JS/Noir, nargo, Foundry, halmos, solc, Bun, the e2e's presto-server, whose digest `apps/showcase/e2e/run/` pins). `@aztec-labs/*` and `@aztec-foundation/*` npm packages are pinned exactly to `aztecJs`, except `contracts/aztec/toolchain` (the Noir scripts' aztec CLI, bb and TXE), pinned to `noir`. Never bump one without the others it couples to.
 - **Secrets:** testnet keys reach only the environment of one owner-approved keyed run (`env-exec`, from the keyed worktree, whose install skips scripts), are read in-process, and are never printed, logged, passed on argv or written anywhere (the CLI re-runs itself as a redacted child whenever its environment holds one). The CLI's entry point never imports the Aztec SDK, whose import spawns a native bb with the process environment: it moves the secrets out of `process.env` first, then loads the handlers. While a keyed run is live, nothing is installed, built, tested or committed on the host. Aztec wallet/PXE stores (LMDB temp files even when "ephemeral") run inside `withOwnedTmpDir` (deployer).
 - **No agent generates operational keys**, with one owner-authorized exception: the disposable testnet fallback (`bridge disposable`), drawn in-process into a 0600 file outside every checkout, never printed, logged or passed on argv, and destroyed after the admin switch.
 - **Demo keys are not secrets:** derived in `packages/demo` from the deployment and a published users' tag, demo funds only, never an admin or minting role, merchant-listed only on local and testnet. Agents may use them without a keyed run.

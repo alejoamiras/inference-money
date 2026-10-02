@@ -24,6 +24,7 @@
 		"secrets:scan": "bun packages/deployer/src/cli.ts scan secrets",
 		"test": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present test",
 		"test:e2e": "bun run --cwd apps/showcase test:e2e",
+		"test:e2e:presto": "bun run --cwd apps/showcase test:e2e:presto",
 		"test:evm": "bun run --cwd contracts/evm test:evm",
 		"test:evm:fork": "bun run --cwd contracts/evm test:evm:fork",
 		"test:evm:formal": "bun run --cwd contracts/evm test:evm:formal",

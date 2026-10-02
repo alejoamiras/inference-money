@@ -1,0 +1,8 @@
+@import "@fontsource-variable/bricolage-grotesque/opsz.css";
+@import "@fontsource-variable/figtree/wght.css";
+
+/* Presto's own faces, served from this origin: the CSP refuses the Google Fonts stylesheet the element would link. */
+presto-banner {
+	--pb-font-display: "Bricolage Grotesque Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--pb-font-body: "Figtree Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+}

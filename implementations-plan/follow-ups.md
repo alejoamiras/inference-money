@@ -8,6 +8,12 @@ Open work lifted out of closed plans, one line each with a pointer; delete a lin
 - A poisoned demo binding is fixed only by rotation (`demo setup --rotate`): a new users' tag, a new cast and fresh demo funds. [plan](archive/galactica-compliant-usdc/plan.md#key-interfaces-storage-message-formats)
 - The showcase's conflict retry trusts the node's outright refusal. An SDK retry after a lost response, read from a lagging backend, could still send twice: fine for demo funds, not for real ones. [phase-15](archive/galactica-compliant-usdc/lessons/phase-15.md)
 
+## Showcase
+
+- The owner's acceptance of Presto on PR #16's Workers preview: with the desktop app running, Connect, a send that settles on testnet, "Prove · Presto" (testnet accepting a Presto proof). [plan](archive/presto-showcase/plan.md#manual-acceptance-owner-after-the-prs-preview-deploys)
+- `tryLock` (`packages/local-network/src/registry.ts`) reads the lock's holder, then checks it is alive: a holder that released the lock and exited in between is reported dead (two e2e runs starting together). Re-read the lock before throwing. [phase-4](archive/presto-showcase/lessons/phase-4.md)
+- Presto's SDK reads `setForceLocal` only as a proof starts, so a proof under way when the consent stops still goes to Presto; a cancellation in the SDK would close it. [plan](archive/presto-showcase/plan.md#implementation-audit)
+
 ## Before mainnet
 
 - Admin custody: the bridge owner and the merchant admin are one key on testnet. Production uses Galactica's multisig, which has no tooling here yet. [plan: Assumptions](archive/galactica-compliant-usdc/plan.md#assumptions)

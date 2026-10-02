@@ -1,5 +1,6 @@
 import { tv } from "tailwind-variants"
 import { TESTIDS } from "@/lib/testids"
+import type { ProofState } from "@/presto"
 
 export const STAGES = ["simulate", "prove", "send", "settle"] as const
 export type Stage = (typeof STAGES)[number]
@@ -41,10 +42,13 @@ function chipState(v: VerdictState, stage: Stage): ChipState {
 	}
 }
 
-function title(v: VerdictState): string {
-	if (v.kind === "working") return WORKING_TITLE[v.stage]
+function title(v: VerdictState, proof: ProofState): string {
+	if (v.kind === "working") return v.stage === "prove" && proof.attempt === "presto" ? "Proving with Presto" : WORKING_TITLE[v.stage]
 	return { idle: "Ready", settled: "Allowed", refused: "Refused", failed: "It did not go through" }[v.kind]
 }
+
+const label = (stage: Stage, state: ChipState, proof: ProofState): string =>
+	stage === "prove" && state === "done" && proof.ran === "presto" ? "Prove · Presto" : LABEL[stage]
 
 const banner = tv({
 	base: "flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border px-4 py-3 transition-colors duration-300",
@@ -103,15 +107,18 @@ function Icon({ kind }: { kind: VerdictState["kind"] }) {
 	)
 }
 
-/** The banner under the stage: what the wallet is doing, and what the rules said. `stages` leaves out what an action skips. */
-export function Verdict({ state, stages = STAGES }: { state: VerdictState; stages?: readonly Stage[] }) {
+/**
+ * The banner under the stage: what the wallet is doing, and what the rules said. `stages` leaves out what an action
+ * skips; `proof` is where the run's proof went, on a page that can prove through Presto.
+ */
+export function Verdict({ state, stages = STAGES, proof = {} }: { state: VerdictState; stages?: readonly Stage[]; proof?: ProofState }) {
 	return (
 		<div className={banner({ kind: state.kind })} data-testid={TESTIDS.verdict} data-kind={state.kind} aria-live="polite">
 			<span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white">
 				<Icon kind={state.kind} />
 			</span>
 			<div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
-				<span className={titleText({ kind: state.kind })}>{title(state)}</span>
+				<span className={titleText({ kind: state.kind })}>{title(state, proof)}</span>
 				{state.kind === "refused" && (
 					<q className="font-mono text-[13px] text-bad" data-testid={TESTIDS.verdictRule}>
 						{state.rule}
@@ -120,11 +127,14 @@ export function Verdict({ state, stages = STAGES }: { state: VerdictState; stage
 				<span className="text-sm leading-snug">{state.detail}</span>
 			</div>
 			<ol className="flex shrink-0 gap-1.5" aria-label="Progress">
-				{stages.map((s) => (
-					<li key={s} className={chip({ state: chipState(state, s) })} data-stage={s} data-state={chipState(state, s)}>
-						{LABEL[s]}
-					</li>
-				))}
+				{stages.map((s) => {
+					const at = chipState(state, s)
+					return (
+						<li key={s} className={chip({ state: at })} data-stage={s} data-state={at}>
+							{label(s, at, proof)}
+						</li>
+					)
+				})}
 			</ol>
 		</div>
 	)

@@ -7,6 +7,13 @@ import { resolveEndpoints } from "@inference-money/local-network/handle"
 
 export type Proofs = "real" | "fake"
 
+/** Where the page looks for Presto: the desktop app's ports, or a local run's own presto-server. */
+export interface PrestoPorts {
+	readonly port: number
+	readonly httpsPort: number
+}
+export const PRESTO_DEFAULT: PrestoPorts = { port: 59833, httpsPort: 59834 }
+
 /** What one build embeds. There is no runtime override: the bundle knows exactly one network. */
 export interface BuildTarget {
 	readonly manifest: BridgeManifest
@@ -15,6 +22,7 @@ export interface BuildTarget {
 	/** A public endpoint the page reads and sends L1 through, never a keyed run's SEPOLIA_RPC_URL. */
 	readonly l1RpcUrl: string
 	readonly proofs: Proofs
+	readonly presto: PrestoPorts
 	/** The guided tour's recording, as read: `build/manifest-identity.test.ts` and the page validate it. */
 	readonly tour: unknown
 }
@@ -29,7 +37,7 @@ const FIXTURE_TOUR = "apps/showcase/e2e/fixtures/tour.json"
 /** A keyed run's variables: a build that sees one refuses to run, so no secret can reach a bundle. */
 const KEYED = ["TESTNET_L1_PRIVATE_KEY", "TESTNET_DEPLOYER_SECRET", "TESTNET_ADMIN_SECRET", "SEPOLIA_RPC_URL"]
 /** bb.js fetches its proving key material from these, a host it hardcodes and its fallback. */
-const CRS_ORIGINS = ["https://crs.aztec-cdn.foundation", "https://crs.aztec-labs.com"]
+export const CRS_ORIGINS = ["https://crs.aztec-cdn.foundation", "https://crs.aztec-labs.com"]
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -49,6 +57,25 @@ function proofsFor(env: Env, m: BridgeManifest): Proofs {
 	if (p !== "real" && p !== "fake") throw new Error(`SHOWCASE_PROOFS is "real" or "fake", not "${p}"`)
 	if (m.network === "testnet" && p !== "real") throw new Error("A testnet build proves for real.")
 	return p
+}
+
+function portFrom(env: Env, name: string, fallback: number): number {
+	const raw = env[name]
+	if (raw === undefined) return fallback
+	const n = Number(raw)
+	if (!/^\d+$/.test(raw) || n < 1 || n > 65535) throw new Error(`${name} is a port (1-65535), not "${raw}"`)
+	return n
+}
+
+/** Only a local build moves Presto: a served bundle must find the visitor's own app where it listens. */
+function prestoFor(env: Env, m: BridgeManifest): PrestoPorts {
+	const set = ["PRESTO_PORT", "PRESTO_HTTPS_PORT"].filter((name) => env[name] !== undefined)
+	if (set.length === 0) return PRESTO_DEFAULT
+	if (m.network === "testnet") throw new Error(`A testnet build finds Presto on its own ports: unset ${set.join(", ")}.`)
+	const port = portFrom(env, "PRESTO_PORT", PRESTO_DEFAULT.port)
+	const httpsPort = portFrom(env, "PRESTO_HTTPS_PORT", PRESTO_DEFAULT.httpsPort)
+	if (port === httpsPort) throw new Error("PRESTO_PORT and PRESTO_HTTPS_PORT must differ.")
+	return { port, httpsPort }
 }
 
 /** A testnet deployment's recorded acceptance run sits beside its manifest (`smoke --record`). */
@@ -86,14 +113,20 @@ export function resolveTarget(env: Env, repoRoot: string): BuildTarget {
 		usersTag: demo.usersTag,
 		l1RpcUrl: l1RpcFor(path, manifest, env),
 		proofs: proofsFor(env, manifest),
+		presto: prestoFor(env, manifest),
 		tour: readTour(path, manifest, repoRoot),
 	}
 }
 
-/** Frames nothing, and talks to nothing but itself, the Aztec node, the L1 RPC and, when it proves, bb.js's CRS hosts. */
+/**
+ * Frames nothing, and talks to nothing but itself, the Aztec node, the L1 RPC and, when it proves, bb.js's CRS hosts and
+ * Presto. Presto proves over HTTPS only; its HTTP port answers just the SDK's witness-free `/health` diagnostic, which
+ * tells a running Presto with HTTPS off from no Presto at all.
+ */
 export function cspFor(t: BuildTarget): string {
 	const origins = [t.manifest.l2.nodeUrl, t.l1RpcUrl].map((u) => new URL(u).origin)
-	const connect = [...origins, ...(t.proofs === "real" ? CRS_ORIGINS : [])]
+	const presto = [`https://127.0.0.1:${t.presto.httpsPort}`, `http://127.0.0.1:${t.presto.port}`]
+	const connect = [...origins, ...(t.proofs === "real" ? [...CRS_ORIGINS, ...presto] : [])]
 	return [
 		"default-src 'self'",
 		"img-src 'self' data:",

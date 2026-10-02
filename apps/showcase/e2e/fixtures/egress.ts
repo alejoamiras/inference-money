@@ -9,14 +9,21 @@ import type { BrowserContext } from "@playwright/test"
 export interface Egress {
 	/** Every refused URL the context attempted, in order. */
 	readonly blocked: string[]
+	/** Every request let through, in order, so a spec can show what reached an origin, and what never did. */
+	readonly allowed: { method: string; url: string }[]
 }
 
-export async function confineEgress(context: BrowserContext, allowed: readonly string[]): Promise<Egress> {
-	const origins = new Set(allowed.map((u) => new URL(u).origin))
+export async function confineEgress(context: BrowserContext, reachable: readonly string[]): Promise<Egress> {
+	const origins = new Set(reachable.map((u) => new URL(u).origin))
 	const blocked: string[] = []
+	const allowed: Egress["allowed"] = []
 	await context.route("**/*", (route) => {
 		const url = new URL(route.request().url())
-		if (url.protocol === "data:" || url.protocol === "blob:" || origins.has(url.origin)) return route.continue()
+		if (url.protocol === "data:" || url.protocol === "blob:") return route.continue()
+		if (origins.has(url.origin)) {
+			allowed.push({ method: route.request().method(), url: url.href })
+			return route.continue()
+		}
 		blocked.push(url.href)
 		return route.abort("blockedbyclient")
 	})
@@ -24,5 +31,5 @@ export async function confineEgress(context: BrowserContext, allowed: readonly s
 		blocked.push(ws.url())
 		return ws.close({ code: 1008, reason: "outside the run" })
 	})
-	return { blocked }
+	return { blocked, allowed }
 }
