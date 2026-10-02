@@ -8,6 +8,7 @@ import {
 	type ClaimTicket,
 	type ClaimWait,
 	claim,
+	claimBinding,
 	confirmDeposit,
 	type DepositDraft,
 	type DepositKind,
@@ -115,8 +116,9 @@ export interface DepositPlan {
 
 /**
  * Deposits from a demo Ethereum account, handing the draft to `persist` once it may be broadcast, so a crash after that
- * point recovers it (`prior`) instead of depositing twice. A prior draft that provably never landed is deposited anew. A
- * public deposit to anyone but a switched-on merchant, which could only be returned, is refused before any approval.
+ * point recovers it (`prior`) instead of depositing twice. A prior draft that provably never landed is deposited anew.
+ * Refused before any approval, since either could only be returned: a public deposit to anyone but a switched-on
+ * merchant, and a private one to an account bound to another funding address (the session's wallet holds the cast).
  */
 export async function castDeposit(
 	s: DemoSession,
@@ -133,6 +135,7 @@ export async function castDeposit(
 		if (found !== "not-deposited") return found
 	}
 	if (p.kind === "public") assertPublicRecipient(await syncMerchantList(s.node, tokenOf(s.m)), p.to)
+	else await claimBinding(s.wallet, s.m, p.to, signer.account.address)
 	await approvePermit2(signer, s.m, p.amount)
 	const tip = (await l1.publicClient.getBlock()).timestamp
 	const d = await prepareDeposit({ amount: p.amount, recipient: p.to, kind: p.kind }, s.m, () => tip)
