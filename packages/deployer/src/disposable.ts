@@ -4,7 +4,7 @@ import type { Writable } from "node:stream"
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
-import { parseManifest, signingKeyFor, tokenBridgeArtifact } from "@inference-money/bridge-core"
+import { parseManifest, randomSecret, signingKeyFor, tokenBridgeArtifact } from "@inference-money/bridge-core"
 import { aztecAddressOf } from "@inference-money/demo"
 import { REPO_ROOT } from "@inference-money/local-network"
 import type { Address } from "viem"
@@ -44,7 +44,7 @@ export async function disposableInit(file = DISPOSABLE_FILE): Promise<Disposable
 
 async function drawBundle(file: string): Promise<DisposableAddresses> {
 	const l1Key = generatePrivateKey()
-	const [deployerSecret, adminSecret] = [Fr.random(), Fr.random()]
+	const [deployerSecret, adminSecret] = [randomSecret(), randomSecret()]
 	const admin = await accountOf(adminSecret)
 	const lines = [
 		`${KEYED.l1PrivateKey}=${l1Key}`,

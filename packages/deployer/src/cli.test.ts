@@ -29,4 +29,12 @@ describe("the CLI's entry point", () => {
 		expect(childrenAfter(imports)).toBe(0)
 		expect(childrenAfter(`require("node:child_process").spawn("sleep", ["5"], { detached: true }).unref()`)).toBe(1)
 	})
+
+	it("refuses every command while SEED is set", () => {
+		const env = { PATH: process.env.PATH ?? "", SEED: "1" }
+		const r = Bun.spawnSync([process.execPath, join(import.meta.dir, "cli.ts"), "manifest-path", "local"], { env })
+		expect(r.exitCode).toBe(2)
+		expect(String(r.stderr)).toContain("SEED is set")
+		expect(String(r.stdout)).toBe("")
+	})
 })
