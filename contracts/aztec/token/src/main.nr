@@ -43,7 +43,9 @@ pub contract Token {
         protocol::{hash::compute_siloed_nullifier, traits::{Deserialize, Serialize}},
         state_vars::DelayedPublicMutable,
     };
-    use merchant_stamp::{pad, REQUEST_OPENED_EFFECT, stamp};
+    use merchant_stamp::{
+        pad, paid, REQUEST_OPENED_EFFECT, stamp, stamp_bucket, stamp_deadline, STAMP_LIVE_BUCKETS,
+    };
 
     // The switch-off delay's bounds. The floor is DelayedPublicMutable's minimum; above the ceiling a delay changes
     // nothing, because the kernel already caps every tx at anchor + 86399 (MAX_TX_LIFETIME).
@@ -293,11 +295,14 @@ pub contract Token {
         amount: u128,
         _nonce: Field,
     ) {
+        // A request takes one payment, and a zero one would spend it: upstream's private completion accepts zero.
+        assert(amount != 0, "Payment refused: the amount is zero");
         let side = self.internal._prove_payment_side(from, commitment);
         assert(
             side != NEITHER,
             "Payment refused: users may only pay into requests opened for a merchant",
         );
+        self.internal._push_paid(commitment);
 
         self.internal._call_auth_private(from, amount);
 
@@ -404,15 +409,20 @@ pub contract Token {
         amount: u128,
         _nonce: Field,
     ) {
-        // Public, so it reads the chain's tip: a request stamped earlier in this same tx counts.
-        let stamped =
-            self.context.nullifier_exists_unsafe(stamp(commitment), self.context.this_address());
-        if !stamped {
+        // The payer first: a merchant needs no stamp, which spares it the search.
+        if !self.internal._is_merchant(from) {
             assert(
-                self.internal._is_merchant(from),
+                self.internal._has_live_stamp(commitment),
                 "Payment refused: users may only pay into requests opened for a merchant",
             );
         }
+        let paid_nullifier = paid(commitment);
+        // A repeated nullifier reverts by itself; this only says why.
+        assert(
+            !self.context.nullifier_exists_unsafe(paid_nullifier, self.context.this_address()),
+            "Payment refused: the request is already paid",
+        );
+        self.context.push_nullifier_unsafe(paid_nullifier);
 
         self.internal._call_auth_public(from, amount);
 
@@ -1084,25 +1094,23 @@ pub contract Token {
         side
     }
 
-    /// @notice Proves a payment into `commitment` allowed: the request was stamped (opened for a merchant), or
-    ///         `from` is a merchant, whichever the side hint picks
-    /// @dev The stamp must be settled at the anchor, like upstream's private completion reads its validity commitment
+    /// @notice Proves a payment into `commitment` allowed: the request holds a stamp (opened for a merchant) that
+    ///         has not expired, or `from` is a merchant, whichever the side hint picks
+    /// @dev The stamp must be settled at the anchor, like upstream's private completion reads its validity
+    ///      commitment. Proving it caps the tx's expiry at the stamp's deadline.
     /// @param from The payer
     /// @param commitment The request paid into
     /// @return The side proven; NEITHER proves nothing, and the caller refuses
     #[internal("private")]
     fn _prove_payment_side(from: AztecAddress, commitment: Field) -> u8 {
-        let stamp_nullifier = stamp(commitment);
-        // Safety: the hint only picks which proof is made below; a wrong pick is unprovable, never a pass. Every value
-        // proves something or refuses: FIRST the stamp, NEITHER nothing (the caller refuses), any other the payer.
-        let side = unsafe {
-            payment_side_hint(
-                merchant_list(self.context, self.storage),
-                stamp_nullifier,
-                from,
-            )
+        // Safety: the hint only picks which proof is made below, and of which bucket's stamp; a wrong pick is
+        // unprovable, never a pass. Every side proves something or refuses: FIRST the stamp, NEITHER nothing (the
+        // caller refuses), any other the payer. The one bucket feeds both the stamp proven and the deadline enforced.
+        let (side, bucket) = unsafe {
+            payment_side_hint(merchant_list(self.context, self.storage), commitment, from)
         };
         if side == FIRST {
+            let stamp_nullifier = stamp(commitment, bucket);
             // Safety: fails early and readably where the kernel would reject the existence request (TXE runs no
             // kernel); aztec-nr's PublicImmutable read pre-checks the same way.
             let stamped = unsafe { check_nullifier_exists(stamp_nullifier) };
@@ -1110,9 +1118,16 @@ pub contract Token {
                 stamped,
                 "Payment refused: users may only pay into requests opened for a merchant",
             );
+            let deadline = stamp_deadline(bucket);
+            assert(
+                self.context.get_anchor_block_header().timestamp() <= deadline,
+                "Payment refused: the request's stamp has expired",
+            );
             self.context.assert_nullifier_exists(NullifierExistenceRequest::for_settled(
                 compute_siloed_nullifier(self.context.this_address(), stamp_nullifier),
             ));
+            // The anchor may be a day old: only the tx's own expiry keeps the payment from landing past the deadline.
+            self.context.set_expiration_timestamp(deadline);
         } else if side != NEITHER {
             self.internal._assert_merchant(from);
         }
@@ -1120,19 +1135,51 @@ pub contract Token {
     }
 
     /// @notice Records who a request was opened for: its stamp if the recipient was proven a merchant, else its pad
-    /// @dev Also hands the commitment to the opener's client as an offchain effect
+    /// @dev The stamp carries the hour of the anchor block, which the opener cannot choose later than the present, and
+    ///      expires a day after it. Also hands the commitment to the opener's client as an offchain effect.
     /// @param commitment The request just opened
     /// @param side The side `_prove_merchant_side` proved, recipient first
     #[internal("private")]
     fn _push_request_stamp(commitment: Field, side: u8) {
         let nullifier = if side == FIRST {
-            stamp(commitment)
+            stamp(commitment, stamp_bucket(self.context.get_anchor_block_header().timestamp()))
         } else {
             pad(commitment)
         };
         self.context.push_nullifier_unsafe(nullifier);
         // Safety: an offchain effect only reaches the prover's own client and is neither constrained nor published.
         unsafe { emit_offchain_effect([REQUEST_OPENED_EFFECT, commitment]) };
+    }
+
+    /// @notice Marks `commitment` paid: a request takes one payment, whichever path it comes by
+    /// @dev The kernel refuses a repeated nullifier; the check before it only fails earlier and readably
+    /// @param commitment The request paid into
+    #[internal("private")]
+    fn _push_paid(commitment: Field) {
+        let paid_nullifier = paid(commitment);
+        // Safety: advice for a readable refusal only; uniqueness is the kernel's to enforce.
+        let already = unsafe { check_nullifier_exists(paid_nullifier) };
+        assert(!already, "Payment refused: the request is already paid");
+        self.context.push_nullifier_unsafe(paid_nullifier);
+    }
+
+    /// @notice Whether `commitment` holds a stamp still payable at this block's timestamp
+    /// @dev Public, so it reads the chain's tip: a request stamped earlier in this same tx counts. Every bucket
+    ///      searched is live by construction, newest first.
+    /// @param commitment The request paid into
+    #[internal("public")]
+    fn _has_live_stamp(commitment: Field) -> bool {
+        let newest = stamp_bucket(self.context.timestamp());
+        let mut found = false;
+        for i in 0..STAMP_LIVE_BUCKETS {
+            if !found & (i <= newest) {
+                found = self.context.nullifier_exists_unsafe(
+                    stamp(commitment, newest - i),
+                    self.context.this_address(),
+                );
+            }
+        }
+        found
     }
 
     // A library method, not #[internal]: the header is not a valid entry-point type, which internal returns must be.

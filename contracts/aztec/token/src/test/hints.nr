@@ -10,7 +10,9 @@ use aztec::{
     oracle::capsules, protocol::address::AztecAddress,
     test::helpers::test_environment::TestEnvironment,
 };
-use merchant_stamp::{MERCHANT_SIDE_SLOT, stamp};
+use merchant_stamp::{
+    MERCHANT_SIDE_SLOT, stamp_bucket, STAMP_BUCKET_SLOT, stamp_deadline, stamp_unmarked_until,
+};
 
 global AMOUNT: u128 = 100;
 global DAY: u64 = 86400;
@@ -36,22 +38,39 @@ unconstrained fn side(
     w.env.private_context_at(w.token, |_| merchant_side_hint(list, first, second, opening))
 }
 
-unconstrained fn payment_side(w: MerchantWorld, commitment: Field, from: AztecAddress) -> u8 {
+unconstrained fn payment_side(
+    w: MerchantWorld,
+    commitment: Field,
+    from: AztecAddress,
+) -> (u8, u64) {
     let list = list_at_anchor(w.env, w.token);
-    w.env.private_context_at(w.token, |_| payment_side_hint(list, stamp(commitment), from))
+    w.env.private_context_at(w.token, |_| payment_side_hint(list, commitment, from))
 }
 
 // Stands in for the capsule bridge-core attaches to a tx: TXE takes none per call, but the PXE falls back from a
 // tx's capsules to the contract's stored ones, so a stored capsule reaches every later call.
-unconstrained fn store_side_capsule(w: MerchantWorld, value: Field) {
+unconstrained fn store_capsule(w: MerchantWorld, slot: Field, value: Field) {
     w.env.private_context_at(w.token, |context| {
-        capsules::store(
-            context.this_address(),
-            MERCHANT_SIDE_SLOT,
-            value,
-            AztecAddress::zero(),
-        )
+        capsules::store(context.this_address(), slot, value, AztecAddress::zero())
     });
+}
+
+unconstrained fn store_side_capsule(w: MerchantWorld, value: Field) {
+    store_capsule(w, MERCHANT_SIDE_SLOT, value);
+}
+
+unconstrained fn store_bucket_capsule(w: MerchantWorld, bucket: u64) {
+    store_capsule(w, STAMP_BUCKET_SLOT, bucket as Field);
+}
+
+/// A request for `m1` that alice may pay, with the bucket of its stamp.
+unconstrained fn stamped_request(w: MerchantWorld) -> (Field, u64) {
+    let bucket = stamp_bucket(w.env.last_block_timestamp());
+    let c = w.env.call_private(
+        w.alice,
+        Token::at(w.token).initialize_transfer_commitment(w.m1, w.alice),
+    );
+    (c, bucket)
 }
 
 unconstrained fn switch_off(w: MerchantWorld, merchant: AztecAddress) -> u64 {
@@ -98,16 +117,30 @@ unconstrained fn a_switched_off_merchant_is_never_picked() {
     assert_eq(side(w, w.m1, w.m2, true), SECOND);
 }
 
+// A stamp still unmarked, else a merchant payer, else a live stamp, else neither.
 #[test]
-unconstrained fn the_payment_probe_checks_the_stamp_before_the_payer() {
+unconstrained fn the_payment_probe_follows_its_order() {
     let w = utils::setup_merchant_world(false);
-    let token = Token::at(w.token);
-    let stamped = w.env.call_private(w.alice, token.initialize_transfer_commitment(w.m1, w.alice));
-    let padded = w.env.call_private(w.m1, token.initialize_transfer_commitment(w.bob, w.m2));
-    assert_eq(payment_side(w, stamped, w.m2), FIRST);
-    assert_eq(payment_side(w, stamped, w.alice), FIRST);
-    assert_eq(payment_side(w, padded, w.m2), SECOND);
-    assert_eq(payment_side(w, padded, w.alice), NEITHER);
+    let (stamped, bucket) = stamped_request(w);
+    let padded =
+        w.env.call_private(w.m1, Token::at(w.token).initialize_transfer_commitment(w.bob, w.m2));
+    assert_eq(payment_side(w, padded, w.m2), (SECOND, 0));
+    assert_eq(payment_side(w, padded, w.alice), (NEITHER, 0));
+
+    utils::anchor_at(w.env, stamp_unmarked_until(bucket) - 1);
+    assert_eq(payment_side(w, stamped, w.m2), (FIRST, bucket));
+    assert_eq(payment_side(w, stamped, w.alice), (FIRST, bucket));
+
+    utils::anchor_at(w.env, stamp_unmarked_until(bucket));
+    assert_eq(payment_side(w, stamped, w.m2), (SECOND, bucket));
+    assert_eq(payment_side(w, stamped, w.alice), (FIRST, bucket));
+
+    utils::anchor_at(w.env, stamp_deadline(bucket));
+    assert_eq(payment_side(w, stamped, w.alice), (FIRST, bucket));
+
+    utils::anchor_at(w.env, stamp_deadline(bucket) + 1);
+    assert_eq(payment_side(w, stamped, w.m2), (SECOND, 0));
+    assert_eq(payment_side(w, stamped, w.alice), (NEITHER, 0));
 }
 
 #[test]
@@ -177,6 +210,33 @@ unconstrained fn a_capsule_claiming_a_missing_stamp_fails_the_payment() {
     let padded = w.env.call_private(w.m1, token.initialize_transfer_commitment(w.bob, w.alice));
     store_side_capsule(w, FIRST as Field);
     w.env.call_private(w.alice, token.transfer_private_to_commitment(w.alice, padded, AMOUNT, 0));
+}
+
+// The bucket named feeds the deadline enforced, so a true stamp past its deadline is refused in the circuit, whatever
+// the hint says.
+#[test(should_fail_with = "Payment refused: the request's stamp has expired")]
+unconstrained fn a_capsule_naming_an_expired_stamp_fails_the_payment() {
+    let w = utils::setup_merchant_world(false);
+    let (stamped, bucket) = stamped_request(w);
+    utils::anchor_at(w.env, stamp_deadline(bucket) + 1);
+    store_side_capsule(w, FIRST as Field);
+    store_bucket_capsule(w, bucket);
+    w.env.call_private(
+        w.alice,
+        Token::at(w.token).transfer_private_to_commitment(w.alice, stamped, AMOUNT, 0),
+    );
+}
+
+// A later bucket would buy a later deadline, but the stamp proven is that bucket's, and there is none.
+#[test(should_fail_with = "Payment refused: users may only pay into requests opened for a merchant")]
+unconstrained fn a_capsule_naming_another_bucket_fails_the_payment() {
+    let w = utils::setup_merchant_world(false);
+    let (stamped, bucket) = stamped_request(w);
+    store_bucket_capsule(w, bucket + 1);
+    w.env.call_private(
+        w.alice,
+        Token::at(w.token).transfer_private_to_commitment(w.alice, stamped, AMOUNT, 0),
+    );
 }
 
 #[test]

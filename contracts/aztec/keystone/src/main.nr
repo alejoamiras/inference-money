@@ -13,8 +13,9 @@ use aztec::protocol::hash::poseidon2_hash_bytes;
 use aztec::protocol::traits::{Deserialize, FromField};
 use claim_secret_lib::{derive_claim_secret, DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET};
 use merchant_stamp::{
-    DOM_SEP__MERCHANT_STAMP, DOM_SEP__MERCHANT_STAMP_PAD, MERCHANT_SIDE_SLOT, pad,
-    REQUEST_OPENED_EFFECT, stamp,
+    DOM_SEP__MERCHANT_REQUEST_PAID, DOM_SEP__MERCHANT_STAMP, DOM_SEP__MERCHANT_STAMP_PAD,
+    MERCHANT_SIDE_SLOT, pad, paid, REQUEST_OPENED_EFFECT, stamp, stamp_bucket, STAMP_BUCKET_SLOT,
+    stamp_deadline, stamp_unmarked_until,
 };
 use portal_messages::{mint_to_private_content_hash, mint_to_public_content_hash, withdraw_content_hash};
 
@@ -165,10 +166,11 @@ fn fuzz_derive_changes_with_recipient(salt: Field, recipient_field: Field) {
     );
 }
 
-// ─── Merchant token: request stamps and the side-hint capsule slot ───
-// The token pushes stamp(c) or pad(c) when a request opens, and a payment proves the stamp; the TS mirror
-// (packages/bridge-core/src/stamp.ts) computes both to predict and check them. A separator shared with a protocol or
-// aztec-nr one could let another nullifier the token emits pass as a stamp, so every known separator is excluded.
+// ─── Merchant token: request stamps, the paid marker and the hint capsule slots ───
+// The token pushes stamp(c, b) or pad(c) when a request opens and paid(c) when it is paid, and a payment proves the
+// stamp; the TS mirror (packages/bridge-core/src/stamp.ts) computes all three to predict and check them. A separator
+// shared with a protocol or aztec-nr one could let another nullifier the token emits pass as one of them, so every
+// known separator is excluded.
 
 #[test]
 fn merchant_stamp_separators_are_derived_and_pinned() {
@@ -176,13 +178,19 @@ fn merchant_stamp_separators_are_derived_and_pinned() {
     assert(DOM_SEP__MERCHANT_STAMP == derived);
     let derived_pad = poseidon2_hash_bytes("dom_sep__merchant_token_stamp_pad".as_bytes()) as u32;
     assert(DOM_SEP__MERCHANT_STAMP_PAD == derived_pad);
+    let derived_paid =
+        poseidon2_hash_bytes("dom_sep__merchant_token_request_paid".as_bytes()) as u32;
+    assert(DOM_SEP__MERCHANT_REQUEST_PAID == derived_paid);
     assert(DOM_SEP__MERCHANT_STAMP == 1404036670);
     assert(DOM_SEP__MERCHANT_STAMP_PAD == 3491815610);
+    assert(DOM_SEP__MERCHANT_REQUEST_PAID == 3533394975);
 }
 
 #[test]
 fn merchant_stamp_separators_are_distinct_from_every_known_one() {
     assert(DOM_SEP__MERCHANT_STAMP != DOM_SEP__MERCHANT_STAMP_PAD);
+    assert(DOM_SEP__MERCHANT_STAMP != DOM_SEP__MERCHANT_REQUEST_PAID);
+    assert(DOM_SEP__MERCHANT_STAMP_PAD != DOM_SEP__MERCHANT_REQUEST_PAID);
     // After the protocol's: aztec-nr's crate-private ones (authwit and tx nullifiers, initialization nullifier,
     // single-use claim, partial-note commitment and completion tag, constrained-message nullifier, ECDH subkey and
     // mask), then the claim secret's and the FPC fuel's.
@@ -266,15 +274,35 @@ fn merchant_stamp_separators_are_distinct_from_every_known_one() {
     for other in others {
         assert(DOM_SEP__MERCHANT_STAMP != other);
         assert(DOM_SEP__MERCHANT_STAMP_PAD != other);
+        assert(DOM_SEP__MERCHANT_REQUEST_PAID != other);
     }
 }
 
 #[test]
 fn merchant_stamp_vectors_match_ts() {
-    assert(stamp(0) == 0x10590c7bccccb48d97692fb2528ca43554d6b12622e28b131d42b347901e4b89);
+    assert(stamp(0, 0) == 0x0246f351a2d862ef1a0b26087a58b567c43c6b71e1ffdee3846e0970b5b93eb7);
     assert(pad(0) == 0x250314702e0895fb86c6891bf980397f03d9b03867023ad8e3772a6221f3a23a);
-    assert(stamp(0x1234) == 0x04f721388a805f610d777fd9a4d80c760cb690ab6ee8d6f87b1ba15df910a4cd);
+    assert(paid(0) == 0x145475d2e73acabbba12ef12c76dca11fc59f50172069a0cc519d0f53bc0a61c);
+    assert(
+        stamp(0x1234, 494000) == 0x1de43c3f6d595d0365d1e86c4a907b099f093cdbbfb4a7e25ba3418054187fcd,
+    );
     assert(pad(0x1234) == 0x23662d79d573c0597e92623a6bfc4d11dcb41fd3c0d34b54bff4eadaafdc3c9b);
+    assert(paid(0x1234) == 0x10eaeca867df48fca9c59f06812fe5a5dcd008d5ef5dedb4ee3c4955c086b1af);
+    // The last second of bucket 494000, and what the clients compute from it.
+    assert(stamp_bucket(1778403599) == 494000);
+    assert(stamp_bucket(1778403600) == 494001);
+    assert(stamp_deadline(494000) == 1778489999);
+    assert(stamp_unmarked_until(494000) == 1778407200);
+}
+
+#[test]
+fn merchant_stamp_bucket_capsule_slot_is_derived_and_pinned() {
+    let derived = poseidon2_hash_bytes("merchant_token_stamp_bucket_capsule_slot".as_bytes());
+    assert(STAMP_BUCKET_SLOT == derived);
+    assert(
+        STAMP_BUCKET_SLOT == 0x2781e8e10232a75d18a5d66dda25e487067dcf360eb97ae2cfecc1166e4e946c,
+    );
+    assert(STAMP_BUCKET_SLOT != MERCHANT_SIDE_SLOT);
 }
 
 #[test]
