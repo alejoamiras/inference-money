@@ -103,6 +103,7 @@ export async function deployTestnet(opts: DeployOptions): Promise<BridgeManifest
 			wallet,
 			usdc: TESTNET.usdc,
 			permit2: TESTNET.permit2,
+			registry: TESTNET.registry,
 			deployerSecret,
 			fees: selfFundedFees(keys, node, log),
 			sponsoredFpc: TESTNET.sponsoredFpc,
