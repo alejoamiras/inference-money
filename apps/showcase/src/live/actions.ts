@@ -11,6 +11,7 @@ import {
 	ExitRevertedError,
 	encodeTicket,
 	exitToL1,
+	finalFate,
 	isClaimConsumed,
 	L2_DONE,
 	type ListOptions,
@@ -315,18 +316,25 @@ async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | 
 	return { kind: "settled", detail, rows: await aztecRows(ctx, since, ["exit"]) }
 }
 
-/** Whether the node's copy of `hash` landed, waited for while pending; false when the node never held it. */
-async function landed(ctx: LiveCtx, hash: string): Promise<boolean> {
-	const txHash = TxHash.fromString(hash)
-	if ((await ctx.demo.node.getTxReceipt(txHash)).status === TxStatus.DROPPED) return false
-	return (await waitForTx(ctx.demo.node, txHash, { ...L2_DONE, dontThrowOnRevert: true })).hasExecutionSucceeded()
+const MAY_STILL_LAND =
+	"The network may still take the first try, so this page won't send it again. Check the balances in a few minutes, and try again if nothing moved."
+
+/**
+ * A sent tx's fate, waited for while the node holds it. A node's "dropped" proves nothing: a lost response or another
+ * node behind the same URL can hide a tx that still lands, so it stays "unsettled" until it expires unincluded.
+ */
+async function fateOf(ctx: LiveCtx, tx: SentTx): Promise<"landed" | "gone" | "unsettled"> {
+	const hash = TxHash.fromString(tx.hash)
+	if ((await ctx.demo.node.getTxReceipt(hash)).status === TxStatus.DROPPED) return finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
+	const receipt = await waitForTx(ctx.demo.node, hash, { ...L2_DONE, dontThrowOnRevert: true })
+	return receipt.hasExecutionSucceeded() ? "landed" : "gone"
 }
 
 /**
- * On a duplicate nullifier, a send the node refused may be a copy of a tx it already holds: for a one-send action, that
- * tx's fate decides, and no retry runs while it is pending. Anything else runs once more, after the wallet's sync: a
- * conflict with another tx, or a payment, whose refused send may be the request it opened (the payment gate refuses
- * paying a request twice).
+ * On a duplicate nullifier, a one-send action whose tx left for the node is decided by that tx's fate, and sent again
+ * only once it provably cannot land. Anything else runs once more, after the wallet's sync: a conflict found before
+ * anything was sent, or a payment, whose refused send may be the request it opened (the payment gate refuses paying a
+ * request twice).
  */
 export async function withConflictRetry(ctx: LiveCtx, attempt: () => Promise<Outcome>, kinds: readonly TxKind[]): Promise<Outcome> {
 	const since = ctx.demo.sent.length
@@ -335,10 +343,11 @@ export async function withConflictRetry(ctx: LiveCtx, attempt: () => Promise<Out
 	} catch (e) {
 		if (!DUPLICATE_NULLIFIER.test(message(e))) throw e
 		const last = ctx.demo.sent.length > since ? ctx.demo.sent.at(-1) : undefined
-		if (kinds.length === 1 && last?.refused && (await landed(ctx, last.hash))) {
+		const fate = kinds.length === 1 && last ? await fateOf(ctx, last) : "gone"
+		if (fate === "landed") {
 			return { kind: "settled", detail: "It went through: the network had it already.", rows: await aztecRows(ctx, since, kinds) }
 		}
-		return attempt()
+		return fate === "unsettled" ? { kind: "failed", detail: MAY_STILL_LAND } : attempt()
 	}
 }
 

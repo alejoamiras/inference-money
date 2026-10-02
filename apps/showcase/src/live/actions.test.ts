@@ -60,8 +60,8 @@ vi.mock("@inference-money/demo", async (original) => ({
 
 const HASH = `0x${"12".repeat(32)}`
 
-/** A context whose node knows one tx: landed (checkpointed, succeeded) or never held (dropped). */
-function ctxWith(landed: boolean): LiveCtx {
+/** A context whose node knows one tx, landed (checkpointed, succeeded) or dropped, and finalizes at `finalizedAt`. */
+function ctxWith(landed: boolean, finalizedAt = 0n): LiveCtx {
 	const sent: SentTx[] = []
 	const receipt = {
 		status: landed ? TxStatus.CHECKPOINTED : TxStatus.DROPPED,
@@ -70,22 +70,25 @@ function ctxWith(landed: boolean): LiveCtx {
 		isMined: () => landed,
 		hasExecutionSucceeded: () => landed,
 	}
-	const node = { getTxReceipt: async () => receipt, getTxEffect: async () => undefined }
+	const node = {
+		getTxReceipt: async () => receipt,
+		getTxEffect: async () => undefined,
+		getBlockData: async () => ({ header: { globalVariables: { timestamp: finalizedAt } } }),
+	}
 	const demo = { sent, node, exclusive: oneAtATime() } as unknown as DemoWallet
 	return { demo, m: MANIFEST, l1RpcUrl: "", tickets: undefined as never, tour: TOUR, explorer: undefined, requests: new Map() }
 }
 
-const send = (ctx: LiveCtx, refused?: true) =>
-	ctx.demo.sent.push({ hash: HASH, feePayer: "0x0", expiresAt: 0n, anchorTs: 0n, ...(refused && { refused }) })
+const send = (ctx: LiveCtx, expiresAt = 0n) => ctx.demo.sent.push({ hash: HASH, feePayer: "0x0", expiresAt, anchorTs: 0n })
 const DONE: Outcome = { kind: "settled", detail: "done", rows: [] }
 
 describe("withConflictRetry", () => {
-	it("settles on a refused send whose earlier copy landed, without sending again", async () => {
+	it("settles on a send whose earlier copy landed, without sending again", async () => {
 		const ctx = ctxWith(true)
 		let attempts = 0
 		const outcome = await withConflictRetry(ctx, async () => {
 			attempts++
-			send(ctx, true)
+			send(ctx)
 			throw new Error("Tx dropped: Existing nullifier")
 		}, ["transfer"])
 		expect([attempts, outcome.kind, outcome.kind === "settled" && outcome.detail]).toEqual([
@@ -95,17 +98,31 @@ describe("withConflictRetry", () => {
 		])
 	})
 
-	it("runs once more on another tx's conflict, and never settles a payment on one of its sends", async () => {
-		for (const [landed, refused] of [
-			[false, true],
-			[true, undefined],
-			[true, true],
+	it("sends a one-send action again only once its first try provably cannot land", async () => {
+		// The node no longer holds the first try, which expires at 10: only a finalized block past that proves it gone.
+		for (const [finalizedAt, retried] of [
+			[10n, false],
+			[11n, true],
 		] as const) {
+			const ctx = ctxWith(false, finalizedAt)
+			let attempts = 0
+			const outcome = await withConflictRetry(ctx, async () => {
+				if (attempts++ > 0) return DONE
+				send(ctx, 10n)
+				throw new Error("Existing nullifier")
+			}, ["transfer"])
+			if (retried) expect([attempts, outcome]).toEqual([2, DONE])
+			else expect([attempts, outcome]).toEqual([1, { kind: "failed", detail: expect.stringMatching(/may still take the first try/) }])
+		}
+	})
+
+	it("runs once more on a conflict found before sending, and never settles a payment on one of its sends", async () => {
+		for (const landed of [false, true]) {
 			const ctx = ctxWith(landed)
 			let attempts = 0
 			const outcome = await withConflictRetry(ctx, async () => {
 				if (attempts++ > 0) return DONE
-				send(ctx, refused)
+				send(ctx)
 				throw new Error("Duplicate nullifier in tx")
 			}, ["request", "pay"])
 			expect([attempts, outcome]).toEqual([2, DONE])
