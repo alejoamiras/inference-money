@@ -24,19 +24,29 @@ export function withBridgeWallet<T>(nodeUrl: string, opts: { prove: boolean }, f
 	})
 }
 
-/** A tx a wallet submitted, with the fee payer its kernel committed to (receipts and effects do not carry it). */
+/**
+ * A tx a wallet submitted, with what its kernel committed to that receipts and effects do not carry: the fee payer,
+ * and the expiry with the anchor block's timestamp it counts from.
+ */
 export interface SentTx {
 	hash: string
 	feePayer: string
+	expiresAt: bigint
+	anchorTs: bigint
 }
 
-/** Wraps `node` so every `sendTx` through it records the tx's hash and committed fee payer before forwarding. */
+/** Wraps `node` so every `sendTx` through it records the tx's hash and kernel commitments before forwarding. */
 export function recordingNode(node: AztecNode, sent: SentTx[]): AztecNode {
 	return new Proxy(node, {
 		get(target, key, receiver) {
 			if (key !== "sendTx") return Reflect.get(target, key, receiver)
 			return (tx: Tx) => {
-				sent.push({ hash: tx.getTxHash().toString(), feePayer: tx.data.feePayer.toString() })
+				sent.push({
+					hash: tx.getTxHash().toString(),
+					feePayer: tx.data.feePayer.toString(),
+					expiresAt: tx.data.expirationTimestamp,
+					anchorTs: tx.data.constants.anchorBlockHeader.globalVariables.timestamp,
+				})
 				return target.sendTx(tx)
 			}
 		},

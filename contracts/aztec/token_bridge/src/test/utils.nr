@@ -39,7 +39,7 @@ pub unconstrained fn setup() -> (TestEnvironment, AztecAddress, AztecAddress, Az
         proxy,
         AztecAddress::zero(),
     );
-    let token = env.deploy("@token_contract/Token").with_public_initializer(admin, token_init);
+    let token = env.deploy("@merchant_token/Token").with_public_initializer(admin, token_init);
 
     // The bridge binds proxy + portal; its owner (pause rights) is admin too.
     let bridge_init = TokenBridge::interface().constructor(proxy, PORTAL);

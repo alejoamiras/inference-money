@@ -28,14 +28,23 @@ async function normalizeFunction(f: Fn & { functionType?: string }) {
 	}
 }
 
-/** Canonical JSON of the SDK-facing ABI: every function with its selector, the storage layout and the outputs. */
-export async function normalizedAbi(artifact: ContractArtifact): Promise<string> {
+/** Every function as aztec.js sees it (selector, type, attributes, parameters, returns), sorted. */
+export async function normalizedFunctions(artifact: ContractArtifact) {
 	const fns = await Promise.all([...artifact.functions, ...artifact.nonDispatchPublicFunctions].map(normalizeFunction))
-	fns.sort((a, b) => `${a.name}/${a.functionType}`.localeCompare(`${b.name}/${b.functionType}`))
-	const storage = Object.entries(artifact.storageLayout)
+	return fns.sort((a, b) => `${a.name}/${a.functionType}`.localeCompare(`${b.name}/${b.functionType}`))
+}
+
+/** Each storage field's slot, sorted by field name. */
+export function storageSlots(artifact: ContractArtifact) {
+	return Object.entries(artifact.storageLayout)
 		.map(([name, layout]) => ({ name, slot: layout.slot.toString() }))
 		.sort((a, b) => a.name.localeCompare(b.name))
-	return JSON.stringify({ name: artifact.name, functions: fns, storage, outputs: artifact.outputs })
+}
+
+/** Canonical JSON of the SDK-facing ABI: every function with its selector, the storage layout and the outputs. */
+export async function normalizedAbi(artifact: ContractArtifact): Promise<string> {
+	const functions = await normalizedFunctions(artifact)
+	return JSON.stringify({ name: artifact.name, functions, storage: storageSlots(artifact), outputs: artifact.outputs })
 }
 
 export async function artifactIdentity(json: NoirCompiledContract): Promise<ArtifactIdentity> {

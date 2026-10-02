@@ -8,8 +8,29 @@ harden: "/harden security scoped to contracts/ only, after all arcs and the fina
 budget: "recon 3 agents (done); /code-review off; codex at high on gpt-6-astra"
 quality_bar: production-grade code (value-bearing design), deployed to local + Sepolia/Aztec testnet in this plan
 source: "a prior single-token bridge (V1) + test-harness patterns from its successor (V2)"
-status: v5 — approved by the user 2026-09-25 (codex r5 APPROVE); delivered 2026-09-28 (D25); arcs 1–3 merge without testnet, arc 4 carries Aztec v6 + testnet (D26)
+status: closed 2026-09-30, completed (see Outcome)
 ---
+
+## Outcome
+
+**Closed 2026-09-30: completed.** This plan is now a historical record. The `/goal` and `/loop` seeds under **Seeds** are retired: do not run them, and do not treat any section below as a task list.
+
+**Shipped**, all merged to `main`:
+- **Arcs 1–3**, a 3-PR stack opened 2026-09-28 and merged 2026-09-29 (landed as `ff8279a`):
+  - #1 `feat(contracts)`: the guarded `TokenPortal`, the ownerless `Permit2DepositRouter`, and `token_bridge` / `token_minter_proxy` / `claim_secret` / `keystone`, with the V2-grade forge, halmos and TXE suites.
+  - #2 `feat(core)`: `bridge-core`, `local-network`, `deployer` and the integration suite.
+  - #3 `feat(web)`: the React app, the 18-spec Playwright harness, and the fixes from the final cross-arc codex pass and `/harden security` on `contracts/` (no Critical or High; the one Medium, `compile.sh` compiling without verifying the pinned Noir deps, was fixed).
+- **Arc 4**, #5 (merged 2026-09-30): every Aztec pin moved to `6.0.0-rc.1`; the bridge was deployed and verified on the v6 testnet (rollup `2914217885`) and passed a four-leg smoke with real proofs (public and private deposit → claim, public and private exit → withdraw); `deployments/testnet.json` is committed and CI builds `build:testnet` again.
+- #6 (merged 2026-09-30) renamed the Worker `inference-money`, the name connected in Workers Builds.
+
+**Changed, dropped or deferred, and why:**
+- **Toolchain.** Planned: node 5.0.0 with JS 5.2.0 and Noir 5.0.1. Shipped: `6.0.0-rc.1` throughout. On 2026-09-28 Sepolia's canonical Aztec rollup switched to one that only v6 nodes serve, so a 5.x deploy would have bound the portal to a rollup its node did not follow. The mixed-version compat layer went with the old pins.
+- **Delivery order.** With the testnet deploy blocked by that switch, the user chose to merge arcs 1–3 without it (D25, D26); the v6 re-pin, the testnet deploy and the testnet build became a fourth PR, #5.
+- **Temporary waivers.** The rc.1 npm packages bypass bun's 7-day release-age gate by exact name (D27), and the testnet node URL is dRPC's, the only endpoint serving the v6 rollup (D29). Both are open in `implementations-plan/follow-ups.md`.
+- **Out of scope throughout:** the fuel/swap leg, the faucet drip, V2's factory and hub, persistence (journal/backup), a relayer service, and mainnet.
+- **Deferred to mainnet** (open in `implementations-plan/follow-ups.md`): admin-key custody, the rollup-upgrade story, a mainnet fee path, a relayer, an external audit with a `/harden` re-run, and a revisit of unlimited Permit2 approval.
+
+**Superseded:** the repo is being redesigned by the `galactica-compliant-usdc` plan, which reworks the contracts' public and withdrawal paths, replaces the web app with a demo-only showcase, and moves testnet secrets to 1Password keyed runs.
 
 # usdc-bridge — USDC-only L1 ↔ Aztec bridge for Galactica
 
@@ -945,7 +966,7 @@ Phase 7 (above) then runs against the v6 pins.
 
 ## Seeds
 
-ELI5 companion: Artifact https://claude.ai/artifact/283yftTmVtW6JGRQytKYPo (source: `implementations-plan/usdc-bridge/eli5.html`; republish that file to update the same URL).
+ELI5 companion: Artifact https://claude.ai/artifact/283yftTmVtW6JGRQytKYPo.
 
 Finalized 2026-09-25 on the user's go-ahead (they asked for the /goal after reviewing v5).
 

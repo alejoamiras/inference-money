@@ -7,13 +7,13 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | Path | What |
 |---|---|
 | `contracts/evm` | Foundry: `TokenPortal` (L1 escrow, Aztec messaging) and `Permit2DepositRouter` |
-| `contracts/aztec` | Aztec.nr: `token_bridge`, `token_minter_proxy`, `claim_secret`, `keystone` (cross-toolchain vectors) |
-| `packages/bridge-core` | Framework-agnostic protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw, the manifest schema |
+| `contracts/aztec` | Aztec.nr: `token` (the merchant fork of aztec-standards' Token), `token_bridge`, `token_minter_proxy`, `claim_secret`, `merchant_stamp`, `keystone` (cross-toolchain vectors) |
+| `packages/bridge-core` | Framework-agnostic protocol logic: hashes, secrets, Permit2 typed data, deposit/claim/exit/withdraw, the manifest schema, the merchant list and payment requests |
 | `packages/local-network` | Per-run anvil + Aztec local network (`toolchain.json`'s node): registry-claimed ports, owned process groups |
 | `packages/deployer` | Network probe, deploy, verify and smoke (local + testnet) |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
 | `apps/web` | The React app: wagmi L1, the Aztec wallet-sdk session, a build-embedded manifest; `e2e/` holds the browser harness |
-| `implementations-plan/` | Plans and per-phase lessons; `usdc-bridge/plan.md` is the active plan |
+| `implementations-plan/` | Plans: `index.md` lists the active ones, `lessons.md` and `follow-ups.md` are the curated layer, closed plans live under `archive/` |
 
 ## Commands
 
@@ -46,7 +46,7 @@ bun run test:evm:formal # halmos, strict: exact proof names and counts (scripts/
 bun run test:evm:gas    # .gas-snapshot --check --tolerance 2
 SEPOLIA_RPC_URL=… bun run test:evm:fork  # real Permit2, Circle USDC, Aztec registry + Inbox; refuses to run unset
 
-bun run test:noir                                     # TXE suites (token_bridge, keystone), manifest-gated
+bun run test:noir                                     # TXE suites (token, token_bridge, keystone), manifest-gated
 bash contracts/aztec/scripts/noir-deps.sh             # fetch + verify the pinned Noir git deps (--self-test)
 bash contracts/aztec/scripts/compile.sh [--check]     # rebuild artifacts; --check: committed == source (class id + ABI)
 bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment static guard (--self-test)
@@ -61,6 +61,8 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment sta
 - **Solidity deps come from npm** (`@openzeppelin/contracts`, `@aztec-foundation/l1-artifacts`, remapped to the `@aztec/` import prefix) and forge-std from a pinned GitHub commit (the npm `forge-std` is an unofficial repackage). `foundry.toml` remaps through `contracts/evm/node_modules` with relative targets so bytecode metadata reproduces across machines. Foundry and halmos move together: a newer Foundry breaks halmos 0.3.3.
 - **Formal canaries:** every halmos `check_` delegates to a public `prove*` body, and a forge canary runs that body against a one-rule-deleted mutant (`test/mocks/Mutants.sol`) and requires it to fail on that rule's assertion (`ProofCanary`). A new proof needs its mutant, its canary, and its (contract, name) pair in `scripts/halmos-gate.sh`.
 - **Noir artifacts are committed and must equal their source:** rebuild only through `contracts/aztec/scripts/compile.sh` (a bare `nargo compile` writes an untranspiled artifact and skips the pinned-dependency check compile.sh runs first), and run `compile.sh --check` before committing a `.nr` change. A new Noir git dependency, direct or transitive, goes into `noir-deps.sh`'s pinned table or CI's `--exact` step fails.
+- **The token stays an ABI superset of aztec-standards' Token, upstream storage first:** every upstream function keeps its selector, signature and attributes, new storage appends after upstream's, and `contracts/aztec/scripts/abi-superset.test.ts` lists every addition, so integrations written against upstream keep working.
+- **Rule checks are private reads, never public calls:** a merchant check proves the register and the switch-off entry at the tx's anchor block. A public call would publish both accounts of every private transfer.
 - **TXE manifests:** every new Noir test gets its name in the crate's `txe-manifest.txt`; `run-txe-tests.sh` fails on a listed test that did not pass or a count under the crate's floor.
 - **One network per bundle:** a web build embeds exactly one manifest at build time and has no runtime override; iframe wallet URLs (`WEB_WALLET_URLS`) are accepted only for a `local` manifest, and `build:testnet` refuses every override.
 - **The e2e test wallet enforces its grant:** every call outside what the app requested is refused, as a real wallet does. A new wallet call in the app needs its scope in `src/wallet/capabilities.ts`, or the suite fails.
@@ -69,4 +71,3 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment sta
 - **One viem:** bridge-core and web read L1 through canonical `viem`; `@aztec-labs/ethereum` is banned there (biome `noRestrictedImports`).
 - **Run isolation:** local networks claim ports from `~/.agents/ports.md`, spawn detached, and tear down only the process groups they prove they own (leader pid and start time, or once the leader exits a member carrying the group's `INFERENCE_MONEY_OWNER` marker; unprovable means untouched); data dirs live on real disk under `~/.cache/inference-money/`. Deploys build forge output into a per-run dir, never the shared `contracts/evm/out`.
 - **Standard contracts:** a local network seeds only AuthRegistry and testnet none of the standard contracts aztec-nr reaches in public; the deploy publishes whichever the node lacks.
-- **Release-age gate:** the Aztec release is newer than bun's 7-day `minimumReleaseAge`, so all three bunfigs (root and both toolchains) exclude its packages by exact name (bun has no scope wildcard), including the platform-specific optional packages bun would otherwise skip silently. Drop the lists once the release clears the gate.

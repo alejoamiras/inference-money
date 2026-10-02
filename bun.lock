@@ -82,7 +82,6 @@
       "name": "@inference-money/bridge-core",
       "version": "0.0.0",
       "dependencies": {
-        "@aztec-foundation/aztec-standards": "6.0.0-rc.1",
         "@aztec-labs/aztec.js": "6.0.0-rc.1",
         "@aztec-labs/constants": "6.0.0-rc.1",
         "@aztec-labs/foundation": "6.0.0-rc.1",
