@@ -1,6 +1,6 @@
 # Operations
 
-Every operation is one `bun run bridge <command>`. `<manifest>` is a path, or `local` for this `RUN_ID`'s local run. Commands that need keys read them from their process environment only (see Keyed runs); everything else is keyless.
+Every operation is one `bun run bridge <command>`. `<manifest>` is a path, or `local` for this `RUN_ID`'s local run. Commands that need keys read them from their process environment only (see Keyed runs); everything else is keyless. The script starts the CLI with `bun --no-env-file`, and the CLI refuses to start without it: Bun would otherwise load a `.env` from the working directory into it.
 
 ## Commands
 

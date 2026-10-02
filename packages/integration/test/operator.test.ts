@@ -35,7 +35,7 @@ const CLI = join(REPO_ROOT, "packages", "deployer", "src", "cli.ts")
 
 /** `bun run bridge …` in a process of its own, as an operator runs it: its exit code and everything it printed. */
 async function bridge(...args: string[]): Promise<{ code: number; out: string }> {
-	const p = Bun.spawn(["bun", CLI, ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
+	const p = Bun.spawn(["bun", "--no-env-file", CLI, ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
 	const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
 	return { code, out: `${out}${err}` }
 }
