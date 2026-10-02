@@ -45,3 +45,20 @@ Deploy (`bf31f5a0`) and admin accept (`1f2bdca1`) both exited 0 on `7b2f442`: po
 The resumed Codex pass on `dd330b4` reported the code changes converged, high confidence, with no new material findings. The encoder covers both exits and both returns. The portal refusal sits before the message and the burn. The tests exercise the ABI-decoded wide address and need the exact refusal text. The deployment finding stays open until the second redeploy commits `testnet.json`, `testnet-demo.json` and `testnet-tour.json` together and `verify --tour` and the live check pass.
 
 The full gate on `1b52e37` (the exit fixes) passed all eight lines: TXE 153/74/19, integration 42 of 42, the local deploy and strict verify, showcase components 64, e2e 7.
+
+## Final cross-arc pass
+
+Codex ran in a fresh session (`01a0fc15…`) over the net diff from `e1103f8`. The pass converged in round 4, one confirmation past the 3-round cap, under the owner's standing rule: keep going with minimal fixes. Its verdict: "Converged for `3ca86c3` (high confidence); no material findings."
+- **Round 1:** seven Medium and two Low.
+  - Fixed:
+    - the showcase's journals could fall back to memory and still let the send go out;
+    - a consumed deposit was announced as a mint;
+    - bridge-core's public-recipient preflight had no production caller;
+    - `verify` ignored a deploy key holding the guardian role;
+    - `export` copied artifacts beside any manifest, without the promised checksums;
+    - the showcase gate skipped its embedded tag and tour;
+    - the exit refusals were missing from the catalog.
+  - Argued, and withdrawn: the token's NatSpec, which is upstream's convention in a verbatim fork.
+  - Argued and lost: the conflict retry. `refused` marked every rejection, a lost response included, and the testnet node sits behind a balanced URL.
+- **Round 2:** the retry now decides a recorded send by its fate. A private deposit to an account bound to another funding address is refused before approval: the demo wallet holds the cast, so it can read the binding.
+- **Round 3:** a checkpointed revert counted as gone, though a prune can undo it; it now waits for finality too.
