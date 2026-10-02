@@ -33,3 +33,5 @@ Codex (default model, `medium`, read-only) over `9f84cdb..HEAD`.
 4. *Minor, accepted:* `claim-secret.ts` told integrators to draw the salt with `Fr.random()`; it now names `randomSecret()`.
 
 **Round 2: 1 material.** A record written by older code in its own zone can equal the UTC reading of a reused pid to the second, and equality returned "ours" before the marker was consulted. Accepted: start times read by this code carry a `utc` tag, so an untagged record never equals one and is proven by its marker or not at all. Checked on a live network (up, status "ours", down).
+
+**Round 3: converged.** The resumed session's whole reply: "VERDICT: no new material findings".
