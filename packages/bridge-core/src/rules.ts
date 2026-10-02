@@ -19,7 +19,7 @@ export const TOKEN_REFUSALS = {
 
 export type TokenRule = keyof typeof TOKEN_REFUSALS
 
-/** The bridge's refusals, found verbatim in its Noir source by `rules.test.ts`. */
+/** The bridge's refusals, found verbatim in its Noir source (or the withdraw encoder's) by `rules.test.ts`. */
 export const BRIDGE_REFUSALS = {
 	paused: "Bridge is paused",
 	publicClaimToUser: "Public claims are for merchants only",
@@ -28,6 +28,8 @@ export const BRIDGE_REFUSALS = {
 	merchantDepositReturn: "A merchant's public deposit is claimed, not returned",
 	publicExitByUser: "Public exits are for merchants only",
 	exitDestination: "Withdrawals from a user account go only to its funding address",
+	exitToPortal: "Recipient cannot be the portal",
+	withdrawAddressWidth: "A withdraw names only 20-byte Ethereum addresses",
 } as const
 
 export type BridgeRule = keyof typeof BRIDGE_REFUSALS

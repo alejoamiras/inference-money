@@ -28,13 +28,15 @@ jobs:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
-          # The showcase bundles bridge-core and the demo cast, and embeds the committed testnet manifest.
+          # The showcase bundles bridge-core and the demo cast, and embeds the committed testnet manifest, users' tag and tour.
           filters: |
             relevant:
               - 'apps/showcase/**'
               - 'packages/bridge-core/**'
               - 'contracts/aztec/*/target/**'
               - 'deployments/testnet.json'
+              - 'deployments/testnet-demo.json'
+              - 'deployments/testnet-tour.json'
               - 'toolchain.json'
               - 'package.json'
               - 'bun.lock'

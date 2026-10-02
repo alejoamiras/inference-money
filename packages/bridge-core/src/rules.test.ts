@@ -3,6 +3,7 @@ import { BRIDGE_REFUSALS, bridgeRefusalOf, TOKEN_REFUSALS, tokenRefusalOf } from
 
 const TOKEN_SOURCE = new URL("../../../contracts/aztec/token/src/main.nr", import.meta.url).pathname
 const BRIDGE_SOURCE = new URL("../../../contracts/aztec/token_bridge/src/main.nr", import.meta.url).pathname
+const ENCODER_SOURCE = new URL("../../../contracts/aztec/portal_messages/src/lib.nr", import.meta.url).pathname
 
 describe("token refusals", () => {
 	it("each appears verbatim as a string literal in the token's Noir source", async () => {
@@ -22,8 +23,8 @@ describe("token refusals", () => {
 })
 
 describe("bridge refusals", () => {
-	it("each appears verbatim as a string literal in the bridge's Noir source", async () => {
-		const source = await Bun.file(BRIDGE_SOURCE).text()
+	it("each appears verbatim as a string literal in the bridge's Noir source, or the withdraw encoder's", async () => {
+		const source = (await Bun.file(BRIDGE_SOURCE).text()) + (await Bun.file(ENCODER_SOURCE).text())
 		for (const text of Object.values(BRIDGE_REFUSALS)) expect(source, text).toContain(`"${text}"`)
 	})
 
