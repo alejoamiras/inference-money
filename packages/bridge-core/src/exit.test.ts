@@ -139,10 +139,10 @@ describe("exitToL1", () => {
 			)
 		const err = await revertedAt(REVERTED).catch((e: unknown) => e)
 		expect(err).toBeInstanceOf(ExitRevertedError)
-		expect(err).toMatchObject({ final: false, message: expect.stringMatching(/nothing was burned/) })
-		// A prune can re-include a tx its checkpoint reverted, which may then burn.
+		// A prune can re-include a tx its checkpoint reverted, which may then burn: no retry advice until it is final.
+		expect(err).toMatchObject({ final: false, message: expect.stringMatching(/keep this hash/) })
 		const settled = await revertedAt({ ...REVERTED, status: TxStatus.FINALIZED }).catch((e: unknown) => e)
-		expect(settled).toMatchObject({ name: "ExitRevertedError", final: true })
+		expect(settled).toMatchObject({ name: "ExitRevertedError", final: true, message: expect.stringMatching(/nothing was burned/) })
 
 		const noEffect = { getTxEffect: async () => undefined, getTxReceipt: async () => REVERTED } as unknown as ExitNode
 		const unread = await exitToL1(intent(), boundWallet().wallet, noEffect, M).catch((e: unknown) => e)

@@ -104,17 +104,20 @@ export class ExitUnconfirmedError extends Error {
 }
 
 /**
- * The exit tx reverted, so its burn and withdraw message were discarded with the rest of its app logic, and exiting
- * again is safe. Only a `final` one has nothing left to finish: until its block is finalized a prune can re-include the
- * tx, which may then burn, so keep its hash and read {@link locateWithdrawal} again.
+ * The exit tx reverted, so its burn and withdraw message were discarded with the rest of its app logic. Once `final`,
+ * there is nothing to finish and exiting again is safe. Before that a prune can re-include the tx, which may then burn:
+ * keep its hash and read {@link locateWithdrawal} again, and an exit sent meanwhile may land beside it.
  */
 export class ExitRevertedError extends Error {
 	constructor(
 		readonly l2TxHash: TxHash,
 		readonly final: boolean,
 	) {
+		const rejected = `The withdrawal ${l2TxHash} was rejected on Aztec`
 		super(
-			`The withdrawal ${l2TxHash} was rejected on Aztec, so nothing was burned. If the bridge is paused, wait for it to resume; otherwise try again.`,
+			final
+				? `${rejected}, so nothing was burned. If the bridge is paused, wait for it to resume; otherwise try again.`
+				: `${rejected}, and nothing is burned so far. A reorg can still bring it back: keep this hash, and wait until it is final before trying again.`,
 		)
 		this.name = "ExitRevertedError"
 	}

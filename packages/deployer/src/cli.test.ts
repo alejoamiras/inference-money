@@ -55,6 +55,14 @@ describe("the CLI's entry point", () => {
 			const flagged = cli(["--no-env-file"], { cwd: dir })
 			expect(flagged.exitCode, String(flagged.stderr)).toBe(0)
 			expect(String(flagged.stdout).trim()).toEndWith("manifest.json")
+			// As an operator starts it: `bun run` itself reads the file, and must hand none of it to the script it runs.
+			const script = `bun --no-env-file ${join(import.meta.dir, "cli.ts")}`
+			writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { bridge: script } }))
+			const viaRun = Bun.spawnSync([process.execPath, "run", "bridge", "manifest-path", "local"], {
+				cwd: dir,
+				env: { PATH: process.env.PATH ?? "" },
+			})
+			expect(viaRun.exitCode, String(viaRun.stderr)).toBe(0)
 		} finally {
 			rmSync(dir, { recursive: true, force: true })
 		}

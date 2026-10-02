@@ -29,16 +29,16 @@ describe("owned process groups", () => {
 		expect(groupState(p)).toBe("gone")
 	})
 
-	it("never signals a group whose leader's start time differs from the record", async () => {
+	it("never signals a group whose leader's start time differs from the record and whose members lack its marker", async () => {
 		const p = await spawnDetached("victim", "sleep", ["60"], { env: process.env, logFile: join(dir, "victim.log") })
 		spawned.push(p)
-		const impostor = { ...p, started: "Thu Jan  1 00:00:00 1970" }
+		const impostor = { ...p, started: "Thu Jan  1 00:00:00 1970", marker: "another-run" }
 		expect(groupState(impostor)).toBe("reused")
 		expect(await stopOwnedGroup(impostor)).toBe("reused")
 		expect(groupState(p)).toBe("ours")
 	})
 
-	it("still owns its group from a shell in another time zone, whichever zone the record was written in", async () => {
+	it("still owns its group from a shell in another time zone, and proves a record from another zone by its marker alone", async () => {
 		const p = await spawnDetached("zoned", "sleep", ["60"], { env: process.env, logFile: join(dir, "zoned.log") })
 		spawned.push(p)
 		const tz = process.env.TZ
@@ -48,6 +48,7 @@ describe("owned process groups", () => {
 			expect(local).not.toBe(p.started)
 			expect(groupState(p)).toBe("ours")
 			expect(groupState({ ...p, started: local })).toBe("ours")
+			expect(groupState({ ...p, started: local, marker: "another-run" })).toBe("reused")
 		} finally {
 			if (tz === undefined) delete process.env.TZ
 			else process.env.TZ = tz

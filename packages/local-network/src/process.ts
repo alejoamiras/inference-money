@@ -20,8 +20,9 @@ export interface OwnedProcess {
  * The pid's start time, or undefined when no process has it; any other `ps` failure throws. `ps` prints it in the
  * caller's time zone and locale, so both are fixed: the text must compare equal from any shell, at any later time.
  */
-export function processStart(pid: number, env: NodeJS.ProcessEnv = { ...process.env, TZ: "UTC", LC_ALL: "C" }): string | undefined {
+export function processStart(pid: number): string | undefined {
 	try {
+		const env = { ...process.env, TZ: "UTC", LC_ALL: "C" }
 		const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env })
 		return out.trim() || undefined
 	} catch (e) {
@@ -68,8 +69,10 @@ export type GroupState = "ours" | "gone" | "reused" | "unverified"
 export function groupState(p: OwnedProcess): GroupState {
 	try {
 		const start = processStart(p.pgid)
-		// A record may hold the caller's own zone and locale: handles outlive the code that wrote them.
-		if (start !== undefined) return start === p.started || processStart(p.pgid, process.env) === p.started ? "ours" : "reused"
+		if (start === p.started) return "ours"
+		// A record written in another zone differs for the same process. A pid is not reused while its group lives, so a
+		// member carrying the marker still proves the group; nothing else does.
+		if (start !== undefined) return markerEvidence(p.pgid, p.marker) === "ours" ? "ours" : "reused"
 		if (!groupAlive(p.pgid)) return "gone"
 		return markerEvidence(p.pgid, p.marker)
 	} catch {
