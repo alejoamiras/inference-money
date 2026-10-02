@@ -147,7 +147,7 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 
 **Validation gate.** `bun install --frozen-lockfile` after committing the lockfile; `bun run lint && bun run typecheck && bun run --cwd apps/showcase test:components`. Pass: exit 0 each, the new target tests green. Layers: lint, typecheck, unit.
 
-### Phase 2: e2e infrastructure for presto-server
+### Phase 2: e2e infrastructure for presto-server ✓
 
 - `packages/local-network/scripts/install-presto.sh <dir>`: the version from `toolchain.json` (`prestoServer`), the release asset checked against the committed `presto-server-<version>.sha256` before extraction, installed under a lock (`flock`) into a temporary dir and renamed into `~/.cache/inference-money/presto-server/<version>/`, so concurrent runs never see a half-written binary.
 - `e2e/env.ts`: a Presto run (`E2E_PRESTO_PORT`, `E2E_PRESTO_TLS_PORT`, `E2E_PRESTO_TLS_DIR`). `e2e/playwright.config.ts`: three explicit projects (showcase, proving, presto), each matching only its own specs; the preview server gets the run's proof mode and Presto ports, identical to the build's.
@@ -158,6 +158,8 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 - Scripts: `test:e2e:presto` (app and root).
 
 **Validation gate.** `bun run lint` (shellcheck covers both scripts); `bun run test:e2e:presto -- presto-infra.spec.ts` exits 0; afterwards the run's process group is gone (`pgrep -g <pgid>` empty, which covers `bb` children), the run's ports are released, and the certificate's key is deleted. Then the same after an interrupted run (`kill -INT` the runner mid-spec). Layers: lint, e2e (local network).
+
+**As built.** The installer is `apps/showcase/e2e/run/install-presto.sh`, its digest beside it (its only consumers are the showcase's browser runs). presto-server's `PRESTO_HOME` and the certificate live under `~/.cache/inference-money/presto-{home,tls}/<run>`, outside the state dir CI uploads. The browser marks the page, its node and anvil public (production's address spaces), so Presto is the only loopback target; Playwright's Chromium refuses an ungranted loopback request at once (the permission still reads `prompt`) rather than prompting. Details: `lessons/phase-2.md`.
 
 ### Phase 3: the product
 

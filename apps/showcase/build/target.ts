@@ -37,7 +37,7 @@ const FIXTURE_TOUR = "apps/showcase/e2e/fixtures/tour.json"
 /** A keyed run's variables: a build that sees one refuses to run, so no secret can reach a bundle. */
 const KEYED = ["TESTNET_L1_PRIVATE_KEY", "TESTNET_DEPLOYER_SECRET", "TESTNET_ADMIN_SECRET", "SEPOLIA_RPC_URL"]
 /** bb.js fetches its proving key material from these, a host it hardcodes and its fallback. */
-const CRS_ORIGINS = ["https://crs.aztec-cdn.foundation", "https://crs.aztec-labs.com"]
+export const CRS_ORIGINS = ["https://crs.aztec-cdn.foundation", "https://crs.aztec-labs.com"]
 
 type Env = Readonly<Record<string, string | undefined>>
 

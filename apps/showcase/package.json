@@ -12,6 +12,7 @@
 		"test": "vitest run",
 		"test:components": "vitest run",
 		"test:e2e": "bash e2e/agent.sh",
+		"test:e2e:presto": "bash e2e/presto.sh",
 		"test:proving": "bash e2e/proving.sh",
 		"test:testnet": "playwright test --config e2e/playwright.testnet.config.ts",
 		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p e2e/tsconfig.json && tsc --noEmit -p e2e/run/tsconfig.json"

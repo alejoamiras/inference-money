@@ -4,9 +4,11 @@
  * page's errors in the runner's output. `page` is the test's own visitor's.
  */
 import { type BrowserContext, test as base, expect, type Page } from "@playwright/test"
+import { CRS_ORIGINS } from "../../build/target"
 import { type RunEnv, runEnv } from "../env"
 import { type RunManifest, readRunManifest } from "./chain"
 import { confineEgress, type Egress } from "./egress"
+import { type PrestoProxy, prestoOrigins, prestoProxy } from "./presto"
 import { type RpcLog, recordRpc } from "./rpc"
 
 export interface Visitor {
@@ -20,6 +22,8 @@ interface Fixtures {
 	me: Visitor
 	/** Opens another visitor, closed with the test. */
 	another: () => Promise<Visitor>
+	/** A Presto run's HTTPS proxy to presto-server, listening for the test's length. */
+	presto: PrestoProxy
 }
 
 interface WorkerFixtures {
@@ -27,8 +31,16 @@ interface WorkerFixtures {
 	manifest: RunManifest
 }
 
+/** A Presto run proves for real, so it reaches bb.js's CRS hosts too. */
+const reachable = (run: RunEnv, m: RunManifest): string[] => [
+	run.webOrigin,
+	m.l2.nodeUrl,
+	run.anvilUrl,
+	...(run.presto ? [...prestoOrigins(run.presto), ...CRS_ORIGINS] : []),
+]
+
 async function visit(context: BrowserContext, run: RunEnv, m: RunManifest): Promise<Visitor> {
-	const egress = await confineEgress(context, [run.webOrigin, m.l2.nodeUrl, run.anvilUrl])
+	const egress = await confineEgress(context, reachable(run, m))
 	const rpc = await recordRpc(context, [m.l2.nodeUrl, run.anvilUrl])
 	const page = await context.newPage()
 	page.on("console", (msg) => {
@@ -51,6 +63,14 @@ export const test = base.extend<Fixtures & { page: Page }, WorkerFixtures>({
 		leftNothing(v)
 	},
 	page: async ({ me }, use) => use(me.page),
+
+	presto: async ({ run }, use) => {
+		if (!run.presto) throw new Error("only a Presto run (`bun run test:e2e:presto`) has presto-server")
+		const proxy = prestoProxy(run.presto, run.webOrigin)
+		await proxy.start()
+		await use(proxy)
+		await proxy.stop()
+	},
 
 	another: async ({ browser, run, manifest }, use, testInfo) => {
 		const opened: Visitor[] = []

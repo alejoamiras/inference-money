@@ -15,26 +15,12 @@ SIDECAR_PGID=""
 SIDECAR_START=""
 SIDECAR_MARKER="sidecar-$RUN_ID"
 
-# A pid alone is not ownership: the kernel recycles pids, so the group leader's start time must still be the one
-# recorded at spawn. Once the leader is gone, a member carrying this run's marker proves it (Linux /proc only).
-owns_sidecar() {
-  [ -n "$SIDECAR_PGID" ] || return 1
-  [ "$(ps -o lstart= -p "$SIDECAR_PGID" 2>/dev/null)" = "$SIDECAR_START" ] && return 0
-  local pid
-  for pid in $(pgrep -g "$SIDECAR_PGID" 2>/dev/null); do
-    tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -qx "INFERENCE_MONEY_OWNER=$SIDECAR_MARKER" && return 0
-  done
-  return 1
-}
+owns_sidecar() { owns_group "$SIDECAR_PGID" "$SIDECAR_START" "$SIDECAR_MARKER"; }
 
 # shellcheck disable=SC2317,SC2329  # invoked from reap, which the EXIT trap runs
 stop_sidecar() {
   [ -n "$SIDECAR_PGID" ] || return 0
-  if owns_sidecar; then
-    kill -TERM -- "-$SIDECAR_PGID" 2>/dev/null || true
-    for _ in $(seq 1 20); do owns_sidecar || break; sleep 1; done
-    if owns_sidecar; then kill -KILL -- "-$SIDECAR_PGID" 2>/dev/null || true; fi
-  fi
+  stop_group "$SIDECAR_PGID" "$SIDECAR_START" "$SIDECAR_MARKER"
   # Its wallet stores live in its own pid's dir, which a killed sidecar leaves behind and `secrets:scan` fails on. The
   # dir goes once the whole group has exited; a group still standing, ours or a reuse of its id, keeps it.
   for _ in $(seq 1 5); do kill -0 -- "-$SIDECAR_PGID" 2>/dev/null || break; sleep 1; done
