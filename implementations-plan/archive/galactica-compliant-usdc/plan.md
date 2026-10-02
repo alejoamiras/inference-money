@@ -7,8 +7,39 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); implemented 2026-10-02: P1–P15 ✓, every arc loop and the cross-arc pass converged; delivery and close-out next"
+status: closed 2026-10-02, completed (see Outcome)
 ---
+
+## Outcome
+
+**Closed 2026-10-02: completed.** The seven-PR stack below awaits the owner's merge. This plan is now a historical record. The `/goal` and `/loop` seeds under **Seeds** are retired: do not run them, and do not treat any section below as a task list.
+
+**Shipped**, as a stack on `main` (`gh stack merge --squash` on the top PR lands it all):
+- #7 `feat(token)`, arc 1: the merchant-only fork of aztec-standards' Token, an ABI superset of upstream. The merchant list, the guardian and delayed switch-offs live in the token.
+- #8 `feat(bridge)`, arc 2: deposits name their depositor. Only the router, bound at initialization, may name another one: the Permit2 signer it pulled from. Ten halmos proofs back the portal.
+- #9 `feat(bridge)`, arc 3: an account is bound to its first funding address, a deposit nobody may claim goes back to its depositor, and exits follow the sender's role.
+- #10 `feat(deployer)`, arc 4: the operator CLI, keyed runs, strict `verify` and `export`, and the disposable testnet fallback.
+- #11 `feat(showcase)`, arc 5: P9, the testnet deployment, plus the showcase: a guided tour of the recorded testnet run, and "Try it yourself" on an embedded demo wallet, covered by local e2e and a live testnet check.
+- #12 `fix(contracts)`, arc 6: `/harden security medium` on the contracts, fixes for its finding (C-001) and for the two exit lock-ups the arc review found, a testnet redeploy, and the fixes from the final cross-arc pass.
+- The docs-only close-out on top: this Outcome, the promoted lessons and follow-ups, and the archive move.
+
+**Live on testnet:** bridge `0x23d8cce5…f8ca`, portal `0x6148010F…41Dc`, deployed from `dc6b2ce` (`deployments/testnet.json`). Two earlier deployments are superseded and still hold demo funds, listed in [phase-15](lessons/phase-15.md):
+- `0x0c179967…1924`, from `a95839e`;
+- `0x115d7e1a…5d9c`, from `7b2f442`.
+
+**Changed, dropped or deferred, and why:**
+- **Delivery.** P9 ran after arc 4's branch had closed, so its commits sit in the showcase PR (see Delivery). As a result, #10's testnet build and Workers preview are red at its head: arc 4 moved the manifest to v2, and the first v2 testnet manifest arrives in #11. The stack merges atomically, so `main` never sits there.
+- **Arc 6 grew past its finding.** The owner chose to fix and redeploy twice: once for C-001, and once for the exit lock-ups the arc-6 review found.
+- **Deferred** (open in `implementations-plan/follow-ups.md`):
+  - demo rotation, the only fix for a poisoned demo binding;
+  - multisig tooling;
+  - delayed adds;
+  - the delayed admin handover (Ask 11);
+  - a mainnet fee path and sponsor strategy;
+  - the rollup-upgrade story;
+  - an external audit;
+  - the Permit2 approval review;
+  - the showcase retry's residual risk outside demo funds.
 
 # galactica-compliant-usdc
 
