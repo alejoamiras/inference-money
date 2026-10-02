@@ -106,13 +106,15 @@ export async function scheduleMerchant(s: Session, admin: AztecAddress, account:
 /**
  * Sets the delay, then schedules it on every added merchant in the same txs, so up to {@link CALLS_PER_TX} entries share
  * one change time and the rest fall into a few cohorts, never one per merchant (each pending change marks its merchant's
- * txs). An increase applies at once; a decrease waits old − new.
+ * txs). An increase applies at once; a decrease waits old − new. `synced` counts the merchants the node listed: one it
+ * left out, by lag or otherwise, keeps its old delay until a rerun reaches it.
  */
-export async function setMerchantDelay(s: Session, admin: AztecAddress, delay: bigint): Promise<number> {
+export async function setMerchantDelay(s: Session, admin: AztecAddress, delay: bigint): Promise<{ txs: number; synced: number }> {
 	const token = tokenOf(s.wallet, s.m)
 	const list = await syncMerchantList(s.node, at(s.m.l2.token.address))
 	const syncs = [...list.entries.keys()].map((account) => token.methods.sync_merchant_delay!(at(account)))
-	return sendChunked(s.wallet, [token.methods.set_merchant_delay!(delay), ...syncs], admin, sponsored(s.m))
+	const txs = await sendChunked(s.wallet, [token.methods.set_merchant_delay!(delay), ...syncs], admin, sponsored(s.m))
+	return { txs, synced: syncs.length }
 }
 
 /** Schedules the cancel-only guardian (zero removes it), effective after the guardian slot's delay. */

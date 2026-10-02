@@ -15,7 +15,7 @@ const COMMANDS = {
 	"merchants cancel": { args: ["manifest", "account"] },
 	"merchants list": { args: ["manifest"] },
 	pause: { args: ["manifest", "on|off"] },
-	verify: { args: ["manifest"], flags: ["tour", "node", "l1-rpc"] },
+	verify: { args: ["manifest"], flags: ["tour", "node", "l1-rpc", "guardian"] },
 	smoke: { args: ["manifest"], flags: ["record"] },
 	export: { args: ["manifest"], flags: ["out"] },
 	"manifest-path": { args: ["local"] },

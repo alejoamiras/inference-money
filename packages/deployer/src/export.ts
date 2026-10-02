@@ -26,7 +26,9 @@ The ${m.network} deployment of bridge \`${m.l2.bridge.address}\`, deployed from 
 - \`SHA256SUMS\`: every file's sha256 (\`sha256sum -c SHA256SUMS\`).
 
 Who may do what, every refusal, the message formats and what each action makes public: \`docs/integration.md\` at that
-commit. Before trusting an address here, run \`bun run bridge verify <manifest>\` against your own endpoints.
+commit. \`bun run bridge verify <manifest>\`, against your own endpoints, proves this deployment matches the manifest and
+that commit's code. It cannot tell whose deployment it is: compare the manifest's USDC, Permit2 and admin with addresses
+you already trust first.
 `
 
 const loadArtifact = (path: string): ContractArtifact => loadContractArtifact(JSON.parse(readFileSync(path, "utf8")))

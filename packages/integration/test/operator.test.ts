@@ -121,11 +121,11 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			expect(await failing()).toEqual([])
 		})
 
-		it("a deploy key scheduled as the guardian", async () => {
+		it("a guardian nobody named, scheduled by a deploy key", async () => {
 			const deployer = AztecAddress.fromStringUnsafe(harness().manifest.l2.bridge.deployer)
 			await tokenAt().methods.schedule_merchant_guardian!(deployer).send(asAdmin())
 			try {
-				expect(await failing()).toEqual(["no deploy key is the guardian, now or scheduled"])
+				expect(await failing()).toEqual(["guardian == the expected one (none unless named), now and scheduled"])
 			} finally {
 				await tokenAt().methods.schedule_merchant_guardian!(AztecAddress.ZERO).send(asAdmin())
 			}
