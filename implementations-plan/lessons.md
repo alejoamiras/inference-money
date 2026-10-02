@@ -22,7 +22,7 @@ Gotchas that cost a past run and would bite other work, one line each with its a
 ## Bun / TypeScript / tests
 
 - bun reads `bunfig.toml` from the cwd only: a nested standalone project misses the root's age gate and linker, and `bun run --cwd` its preload. [phase-3](archive/usdc-bridge/lessons/phase-3.md), [phase-10](archive/usdc-bridge/lessons/phase-10.md)
-- A skipped optional package stays skipped after joining `minimumReleaseAgeExcludes` while `bun.lock` holds its parent (symptom: `aztec-wsdb binary not found`): drop the parent's entry to re-resolve. [phase-11](archive/usdc-bridge/lessons/phase-11.md)
+- bun's age gate applies only at resolution: lock a young version under a temporary `minimumReleaseAgeExcludes` entry, never commit one. An optional package skipped before joining the excludes stays skipped while `bun.lock` holds its parent (`aztec-wsdb binary not found`): drop the parent's entry. [phase-11](archive/usdc-bridge/lessons/phase-11.md), [phase-1](archive/presto-showcase/lessons/phase-1.md)
 - bun blocks lifecycle scripts; the Aztec node needs `trustedDependencies: ["bcrypto"]` (discv5 loads its native build). [phase-10](archive/usdc-bridge/lessons/phase-10.md)
 - Pin `@types/node` to bun-types' version; another becomes the isolated linker's hoisted fallback and breaks typecheck. [phase-8](archive/usdc-bridge/lessons/phase-8.md)
 - `Bun.spawn` (1.4.0) ignores `process.env` deletions: spawn a child that must not inherit a secret through `node:child_process` or `Bun.$`. [phase-8](archive/galactica-compliant-usdc/lessons/phase-8.md)
@@ -37,9 +37,10 @@ Gotchas that cost a past run and would bite other work, one line each with its a
 
 ## Browser e2e
 
-- bb.js loads its wasm from a `data:` URL and real proving fetches the CRS from `crs.aztec-cdn.foundation` or `crs.aztec-labs.com`: CSP `connect-src` needs `data: blob:` and both. [phase-8](archive/usdc-bridge/lessons/phase-8.md), [phase-10](archive/galactica-compliant-usdc/lessons/phase-10.md)
 - Playwright runs under Node: Bun-only packages (`import.meta.dir`) live in a Bun sidecar the specs call over HTTP. [phase-8](archive/usdc-bridge/lessons/phase-8.md)
 - A local network can finish a flow between Playwright polls: assert durable state, not a transient step. [phase-10](archive/usdc-bridge/lessons/phase-10.md)
+- Playwright's Chromium refuses an ungranted loopback request outright: to test Local Network Access, mark the page and its own services public (`--ip-address-space-overrides`). [phase-2](archive/presto-showcase/lessons/phase-2.md)
+- presto-server 1.1.3 ignores unknown flags (`--help` too) and serves on its default port; `PRESTO_PORT` needs `PRESTO_HOME`. [phase-2](archive/presto-showcase/lessons/phase-2.md)
 
 ## CI
 

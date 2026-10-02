@@ -10,6 +10,16 @@ budget: recon 2 agents; one Codex plan audit; Codex fix loop after implementatio
 status: approved by the owner 2026-10-02 (approve; A1 accept, A2 keep, A3 Presto's own fonts)
 ---
 
+## Outcome
+
+**2026-10-02: completed, delivered in PR #16** (merging is the owner's call). "Try it yourself" proves through Presto once the visitor connects it: the official ribbon above the wallets; consent before any request reaches the visitor's machine; per-proof attribution, so "Prove · Presto" appears only for a proof that finished there; a re-check after a fallback, so the ribbon shows Presto's state; Presto's faces self-hosted. Real-proof builds only; the tour and the proving harness always prove in the page. The e2e proves through a sha256-pinned presto-server behind a per-run HTTPS proxy, locally and as the `presto` CI job. The Codex review converged in its third round.
+
+**Changed from the plan:** `startProof()` plus a commit on `proved` became `around()`, crediting a proof when it settles (the SDK reports `proved` before it decodes Presto's answer). The composer hint names no source per check (a proof can fall back while `/health` answers). The Vite simulator dedupe proved unnecessary. **Dropped:** cancelling a proof already under way when the consent stops (it needs an SDK change).
+
+**Open, in `implementations-plan/follow-ups.md`:** the owner's acceptance on the Workers preview (testnet accepting a Presto proof), the port registry's lock race, and SDK-side cancellation.
+
+The `/goal` and `/loop` seeds below are retired: this plan is a record of what was decided and why, not a task list.
+
 # Presto in the showcase
 
 The live showcase ("Try it yourself", `#live`) proves every transaction in the visitor's browser: 7–21 s per proof. [Presto](https://presto.build) proves natively on the visitor's machine. This plan wires Presto into the showcase the way Presto documents it: the official `<presto-banner variant="ribbon">` above "Inside the wallets" asks before anything reaches the visitor's machine, Connect switches the page's prover to Presto, and every failure falls back to the browser as today.
