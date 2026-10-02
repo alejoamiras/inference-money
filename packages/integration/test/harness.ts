@@ -2,6 +2,7 @@ import { rmSync } from "node:fs"
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node"
+import { type AztecNodeDebug, createAztecNodeDebugClient } from "@aztec-labs/stdlib/interfaces/client"
 import type { Tx } from "@aztec-labs/stdlib/tx"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
@@ -37,6 +38,8 @@ export interface Harness {
 	/** The written manifest, as the operator CLI takes it. */
 	manifestPath: string
 	node: AztecNode
+	/** The node's debug API: moves the network's clock, L1's with it. */
+	debug: AztecNodeDebug
 	/** Holds every actor account; each tx it submits lands in `sent`. */
 	wallet: EmbeddedWallet
 	sent: SentTx[]
@@ -86,13 +89,21 @@ function holdingNode(node: AztecNode): AztecNode {
 	})
 }
 
+/** Holds the actor wallet's submissions from now until `release` sends them: proofs made now, delivered later. */
+export function holdSends(): { queued: () => number; release: () => Promise<void> } {
+	if (held) throw new Error("sends are already held")
+	const batch: Held = { count: Number.POSITIVE_INFINITY, queued: [] }
+	held = batch
+	return { queued: () => batch.queued.length, release: () => release(batch) }
+}
+
 /**
  * Runs `actions` with the actor wallet's submissions held until every action has proven its tx, then sends them back to
  * back: all were built against the same state, so the sequencer decides any conflict between them. An action that
  * settles without submitting releases the rest.
  */
 export async function sendTogether<T>(actions: (() => Promise<T>)[]): Promise<PromiseSettledResult<T>[]> {
-	if (held) throw new Error("sendTogether is already collecting")
+	if (held) throw new Error("sends are already held")
 	const batch: Held = { count: actions.length, queued: [] }
 	held = batch
 	try {
@@ -100,6 +111,18 @@ export async function sendTogether<T>(actions: (() => Promise<T>)[]): Promise<Pr
 	} finally {
 		if (held === batch) held = undefined
 	}
+}
+
+export async function latestTimestamp(): Promise<bigint> {
+	const data = await harness().node.getBlockData("latest")
+	if (!data) throw new Error("the node has no latest block")
+	return data.header.globalVariables.timestamp
+}
+
+/** Moves the network's clock to at least `timestamp` (never back), and returns the latest block's timestamp after. */
+export async function warpTo(timestamp: bigint): Promise<bigint> {
+	if (timestamp > (await latestTimestamp())) await harness().debug.warpL2TimeAtLeastTo(Number(timestamp))
+	return latestTimestamp()
 }
 
 async function openWallet(node: AztecNode, m: BridgeManifest): Promise<EmbeddedWallet> {
@@ -143,6 +166,7 @@ async function open(log: (m: string) => void): Promise<Harness> {
 		manifest,
 		manifestPath,
 		node,
+		debug: createAztecNodeDebugClient(net.nodeUrl),
 		wallet,
 		sent,
 		gate,
