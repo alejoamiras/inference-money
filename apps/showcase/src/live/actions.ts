@@ -136,6 +136,8 @@ async function deposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Out
 }
 
 const NOTHING_TO_CLAIM = "There is nothing to claim: deposit first."
+/** A consumed message cannot tell a claim from a return, so it is never reported as a mint. */
+const ALREADY_CONSUMED = "That deposit was already taken on Aztec, by an earlier claim or a return, so nothing was minted now."
 
 /**
  * Whether `p`'s claim still holds at a checkpoint; its record goes once the claim is final. One no longer checkpointed
@@ -224,8 +226,11 @@ async function claimDeposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promis
 	if (found === NOTHING_TO_CLAIM && user === "alice") return replay(ctx, "claim", found)
 	if (typeof found === "string") return { kind: "failed", detail: found }
 	const since = ctx.demo.sent.length
-	await castClaim(session(ctx), found.ticket, () => report("simulate", "Waiting for the deposit's message to reach Aztec."))
+	const result = await castClaim(session(ctx), found.ticket, () =>
+		report("simulate", "Waiting for the deposit's message to reach Aztec."),
+	)
 	ctx.tickets.putDeposit({ ...found.p, claimed: true })
+	if (result === "already") return { kind: "settled", detail: ALREADY_CONSUMED, rows: [] }
 	const amount = usdc2(found.ticket.draft.intent.amount)
 	return { kind: "settled", detail: `${HOLDER_NAME[user]} claimed ${amount} USDC.`, rows: await aztecRows(ctx, since, ["claim"]) }
 }

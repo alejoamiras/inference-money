@@ -14,7 +14,11 @@ import type { Outcome } from "./outcome"
 const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as Promise<void> | undefined }))
 
 /** Where a claim this page made stands on L2, and how many claims it sent. */
-const claims = vi.hoisted(() => ({ state: "checkpointed" as "checkpointed" | "finalized" | "pruned", sent: 0 }))
+const claims = vi.hoisted(() => ({
+	state: "checkpointed" as "checkpointed" | "finalized" | "pruned",
+	sent: 0,
+	result: "claimed" as "claimed" | "already",
+}))
 
 // A deposit this page sent is still unconfirmed on Ethereum (a "broken" one cannot even be read back); a claim
 // ticket's nullifier is wherever `claims` says.
@@ -50,7 +54,7 @@ vi.mock("@inference-money/demo", async (original) => ({
 	...(await original<typeof import("@inference-money/demo")>()),
 	castClaim: async () => {
 		claims.sent++
-		return "claimed"
+		return claims.result
 	},
 }))
 
@@ -161,6 +165,30 @@ describe("claim", () => {
 		store.set("d3", { id: "d3", user: "bob", since: 2, claim: "ticket" })
 		claims.state = "pruned"
 		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
+	})
+
+	it("never reports a mint for a message something consumed before, and keeps its secret until that is final", async () => {
+		const store = new Map<string, PendingDeposit>([["d1", { id: "d1", user: "bob", since: 0, claim: "ticket" }]])
+		const tickets = {
+			deposits: () => [...store.values()],
+			putDeposit: (d: PendingDeposit) => store.set(d.id, d),
+			dropDeposit: (id: string) => store.delete(id),
+		} as unknown as Tickets
+		claims.state = "pruned"
+		claims.result = "already"
+		try {
+			const outcome = await runDraft({ ...ctxWith(false), tickets }, { actor: "bob", action: "claim", to: "bob" }, WALLETS, () => {})
+			expect([outcome, store.get("d1")?.claimed]).toEqual([
+				{
+					kind: "settled",
+					detail: "That deposit was already taken on Aztec, by an earlier claim or a return, so nothing was minted now.",
+					rows: [],
+				},
+				true,
+			])
+		} finally {
+			claims.result = "claimed"
+		}
 	})
 
 	it("never lets a deposit still confirming, or one it cannot read back right now, hold up the claims after it", async () => {
