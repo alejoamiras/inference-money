@@ -494,3 +494,17 @@ export async function payRequest(
 		await gate.releaseUnsent(key, owner)
 	}
 }
+
+/**
+ * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale`, into the request `reopen`
+ * opens. `stale` is told only to the attempt holding the stored request's reservation, so nothing is in flight or paid
+ * for it from this client and the new request is not a second payment; any other refusal is thrown as is.
+ */
+export async function payReplacingStale<T>(stored: Fr, pay: (commitment: Fr) => Promise<T>, reopen: () => Promise<Fr>): Promise<T> {
+	try {
+		return await pay(stored)
+	} catch (e) {
+		if (!(e instanceof PaymentRefusedError && e.reason === "stale")) throw e
+		return pay(await reopen())
+	}
+}

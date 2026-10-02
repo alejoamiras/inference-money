@@ -16,6 +16,7 @@ import {
 	type PaymentIntent,
 	type PaymentStore,
 	paymentKey,
+	payReplacingStale,
 	payRequest,
 	RESERVATION_TTL_MS,
 	requestStamp,
@@ -389,6 +390,38 @@ describe("payRequest", () => {
 		const marked = await tab(store, w, { lifetime: STANDARD_TX_LIFETIME - 3_600n })
 		await expect(marked.pay(c)).rejects.toEqual(refusal("stale"))
 		expect([w.chain.included.length, await store.get(paymentKey(token, c))]).toEqual([0, undefined])
+	})
+})
+
+describe("payReplacingStale", () => {
+	const opener = (w: World) => {
+		const opened: Fr[] = []
+		const reopen = async () => {
+			opened.push(await stampedRequest(w))
+			return opened.at(-1)!
+		}
+		return { opened, reopen }
+	}
+
+	it("pays a request opened anew when the stored one is refused as stale", async () => {
+		const w = fakeChain()
+		const t = await tab(memoryPaymentStore(), w)
+		const stored = await stampedRequest(w)
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const { opened, reopen } = opener(w)
+		await payReplacingStale(stored, (c) => t.pay(c), reopen)
+		expect([opened.length, w.chain.included.length]).toEqual([1, 1])
+	})
+
+	it("opens nothing for a stale request whose first payment is still recorded as sent", async () => {
+		const w = fakeChain()
+		const t = await tab(memoryPaymentStore(), w)
+		const stored = await stampedRequest(w)
+		await t.pay(stored)
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const { opened, reopen } = opener(w)
+		await expect(payReplacingStale(stored, (c) => t.pay(c), reopen)).rejects.toEqual(refusal("in-flight"))
+		expect([opened.length, w.chain.included.length]).toEqual([0, 1])
 	})
 })
 

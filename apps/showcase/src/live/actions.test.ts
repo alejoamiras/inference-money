@@ -12,8 +12,11 @@ import type { Outcome } from "./outcome"
 
 /** Requests the page opened, in order, each held open until `hold` settles. */
 const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as Promise<void> | undefined }))
-/** Whether a payment is refused before sending, as one into a request whose stamp a prune removed. */
-const payments = vi.hoisted(() => ({ refuse: false }))
+/**
+ * The commitments payments went into, and how the next are refused before sending: by `PaymentRefusedError` reasons
+ * in order, then, with `refuse`, as one into a request whose stamp a prune removed.
+ */
+const payments = vi.hoisted(() => ({ refuse: false, refusals: [] as string[], into: [] as unknown[] }))
 
 /** Where a claim this page made stands on L2, and how many claims it sent. */
 const claims = vi.hoisted(() => ({
@@ -49,7 +52,10 @@ vi.mock("@inference-money/bridge-core", async (original) => {
 			requests.order.push("opened")
 			return { commitment: 1 }
 		},
-		payRequest: async () => {
+		payRequest: async (_gate: unknown, _wallet: unknown, _token: unknown, p: { commitment: unknown }) => {
+			payments.into.push(p.commitment)
+			const reason = payments.refusals.shift()
+			if (reason) throw new real.PaymentRefusedError(reason as never)
 			if (payments.refuse) throw new Error(real.TOKEN_REFUSALS.payment)
 		},
 		// Each tip holds the blocks of the tips after it: a proposed claim shows only at "proposed", a pruned one nowhere.
@@ -283,7 +289,7 @@ describe("runDraft", () => {
 		expect(requests.order).toEqual(["open", "opened", "open", "opened"])
 	})
 
-	it("forgets a request a refused payment proves stale, so the next payment opens a fresh one", async () => {
+	it("forgets a request whose stamp a refused payment proves gone, so the next payment opens a fresh one", async () => {
 		const base = ctxWith(false)
 		const cast = { galactica: { address: "0xg" }, alice: { address: "0xa" } }
 		const ctx: LiveCtx = { ...base, demo: { ...base.demo, cast } as unknown as DemoWallet }
@@ -298,5 +304,22 @@ describe("runDraft", () => {
 		const opened = requests.order.length
 		expect((await runDraft(ctx, pay, WALLETS, () => {})).kind).toBe("settled")
 		expect(requests.order.slice(opened)).toEqual(["open", "opened"])
+	})
+
+	it.each([
+		["stale", "replaces it and pays the new one in the same action", ["open", "opened"], [2, 1], "settled"],
+		["in-flight", "opens nothing and pays nothing more while its first payment may land", [], [2], "failed"],
+	] as const)("a stored request refused as %s: %s", async (reason, _, opens, into, kind) => {
+		const base = ctxWith(false)
+		const cast = { galactica: { address: "0xg" }, alice: { address: "0xa" } }
+		const ctx: LiveCtx = { ...base, demo: { ...base.demo, cast } as unknown as DemoWallet }
+		ctx.requests.set("galactica>alice", 2 as never)
+		const pay = { actor: "alice", action: "pay", to: "galactica", amount: 10_000n } as const
+		payments.refusals.push(reason)
+		payments.into.length = 0
+		const opened = requests.order.length
+		expect((await runDraft(ctx, pay, WALLETS, () => {})).kind).toBe(kind)
+		expect([requests.order.slice(opened), payments.into]).toEqual([opens, into])
+		expect(ctx.requests.get("galactica>alice")).toBe(kind === "settled" ? undefined : (2 as never))
 	})
 })
