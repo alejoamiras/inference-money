@@ -42,7 +42,7 @@ C-001 (`packages/deployer/src/deploy.ts`, `testnet.ts`), C-002 (`packages/bridge
 
 **Validation gate.** Commands: `bun run lint && bun run typecheck && bun run test && bun run lint:actions && bun run test:evm:formal`. Pass: all exit 0; the halmos gate prints "exactly the 11 expected proofs passed". Layers: lint, typecheck, unit, formal.
 
-#### Phase 2: `--no-env-file` and the three routed bugs
+#### Phase 2: `--no-env-file` and the three routed bugs ✓
 
 - `--no-env-file` on the operator CLI's scripts (`package.json`: `bridge`, `secrets:scan`, and any script that runs `packages/deployer/src/cli.ts`); the keyed-run and disposable re-exec paths (`packages/deployer/src/redact.ts`, `disposable.ts`) must pass it too, or a child loads the file its parent refused. A test proves a `.env` in the working directory no longer reaches the CLI.
 - Teardown under a changed time zone: `packages/local-network/src/process.ts:20-23`, `:67-68`, `network.ts:198` compare `ps lstart` text. Compare a time-zone-independent start time; unprovable still means untouched.
