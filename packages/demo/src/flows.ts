@@ -3,6 +3,7 @@ import { type AztecNode, waitForTx } from "@aztec-labs/aztec.js/node"
 import type { TxHash } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import {
+	assertPublicRecipient,
 	type BridgeManifest,
 	type ClaimTicket,
 	type ClaimWait,
@@ -99,6 +100,8 @@ export async function approvePermit2(signer: DemoL1, m: BridgeManifest, needed: 
 	})
 }
 
+const tokenOf = (m: BridgeManifest): AztecAddress => AztecAddress.fromStringUnsafe(m.l2.token.address)
+
 /** The sponsor pays every demo tx: the demo accounts hold no fee juice. */
 export const sponsoredFee = (m: BridgeManifest) => ({ paymentMethod: sponsoredPayment(m) })
 
@@ -112,7 +115,8 @@ export interface DepositPlan {
 
 /**
  * Deposits from a demo Ethereum account, handing the draft to `persist` once it may be broadcast, so a crash after that
- * point recovers it (`prior`) instead of depositing twice. A prior draft that provably never landed is deposited anew.
+ * point recovers it (`prior`) instead of depositing twice. A prior draft that provably never landed is deposited anew. A
+ * public deposit to anyone but a switched-on merchant, which could only be returned, is refused before any approval.
  */
 export async function castDeposit(
 	s: DemoSession,
@@ -128,6 +132,7 @@ export async function castDeposit(
 		if (found === "pending") throw new Error("A stored deposit is not readable on Ethereum yet; try again in a few minutes.")
 		if (found !== "not-deposited") return found
 	}
+	if (p.kind === "public") assertPublicRecipient(await syncMerchantList(s.node, tokenOf(s.m)), p.to)
 	await approvePermit2(signer, s.m, p.amount)
 	const tip = (await l1.publicClient.getBlock()).timestamp
 	const d = await prepareDeposit({ amount: p.amount, recipient: p.to, kind: p.kind }, s.m, () => tip)
@@ -157,7 +162,7 @@ export async function castClaim(s: DemoSession, t: ClaimTicket, onWait?: (w: Cla
  * proven, with the token's own refusal text.
  */
 export async function sendPrivate(s: DemoSession, from: AztecAddress, to: AztecAddress, amount: bigint): Promise<TxHash> {
-	const token = AztecAddress.fromStringUnsafe(s.m.l2.token.address)
+	const token = tokenOf(s.m)
 	const list = await syncMerchantList(s.node, token)
 	const txHash = await transferPrivate(s.wallet, token, { from, to, amount }, { list, fee: sponsoredFee(s.m) })
 	await waitForTx(s.node, txHash, L2_DONE)
