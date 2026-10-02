@@ -5,7 +5,7 @@ on:
   pull_request:
 
 concurrency:
-  group: demo-${{ github.head_ref || github.ref }}
+  group: demo-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:

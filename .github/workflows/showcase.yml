@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 concurrency:
-  group: showcase-${{ github.head_ref || github.ref }}
+  group: showcase-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:

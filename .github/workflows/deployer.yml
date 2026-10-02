@@ -5,7 +5,7 @@ on:
   pull_request:
 
 concurrency:
-  group: deployer-${{ github.head_ref || github.ref }}
+  group: deployer-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -33,6 +33,7 @@ jobs:
               - 'packages/demo/**'
               - 'packages/local-network/**'
               - 'contracts/aztec/*/target/**'
+              - 'deployments/*.env.example'
               - 'toolchain.json'
               - 'package.json'
               - 'bun.lock'
