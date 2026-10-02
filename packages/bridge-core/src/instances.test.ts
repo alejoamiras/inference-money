@@ -12,7 +12,7 @@ describe("instance records", () => {
 		const proxy = await AztecAddress.random()
 		const cases = [
 			[tokenArtifact, "constructor_with_minter", ["USD Coin", "USDC", 6, proxy, AztecAddress.ZERO]],
-			[tokenBridgeArtifact, "constructor", [proxy, EthAddress.fromString(M.l1.portal)]],
+			[tokenBridgeArtifact, "constructor", [proxy, await AztecAddress.random(), EthAddress.fromString(M.l1.portal)]],
 		] as const
 		for (const [artifact, initializer, args] of cases) {
 			const instance = await getContractInstanceFromInstantiationParams(artifact, {

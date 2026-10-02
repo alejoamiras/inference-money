@@ -1,6 +1,6 @@
-// exit_to_l1_public / exit_to_l1_private: burn the user's tokens and enqueue the L2→L1 withdraw
-// message. TXE has no outgoing-message oracle, so the burn side-effect is the assertion surface;
-// the message CONTENT is pinned separately by the keystone + ContentHash.t.sol pair.
+// Exits burn the sender's tokens and enqueue the L2→L1 withdraw. TXE has no outgoing-message oracle, so the burn is the
+// assertion surface; the message content is pinned by the keystone + ContentHash.t.sol pair. A merchant exits publicly
+// or privately to any address; a user exits only privately, and only to its funding address.
 
 use super::utils;
 use crate::TokenBridge;
@@ -9,125 +9,127 @@ use aztec::{
     test::helpers::authwit::{add_private_authwit_from_call, add_public_authwit_from_call},
 };
 use token::Token;
-use claim_secret_lib::derive_claim_secret;
-use portal_messages::mint_to_private_content_hash;
 
 global NONCE: Field = 7;
+global ELSEWHERE: EthAddress = EthAddress::from_field(0xCAFE);
 
-/// Public exit: the user's public balance burns by exactly the exited amount.
 #[test]
-unconstrained fn exit_to_l1_public_burns_caller_balance() {
-    let (mut env, _admin, _proxy, token, bridge) = utils::setup();
-    let user = env.create_light_account();
-    let minted: u128 = 2_000_000;
-    let exit_amount: u128 = 700_000;
-    let recipient = aztec::protocol::address::EthAddress::from_field(0xBEEF);
+unconstrained fn a_merchant_exits_publicly_anywhere() {
+    let (mut env, admin, proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    utils::fund_public(env, merchant, 2_000_000, 42, bridge);
 
-    // Fund via a public claim (the bridge mints through the proxy).
-    let leaf = utils::send_mint_to_public_message(env, user, minted, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf, utils::depositor()));
-
-    // The token sees msg_sender == PROXY, so the user must publicly authorize the proxy for
-    // burn_public(user, amount, nonce) — same shape the wallet's authwit flow produces.
-    add_public_authwit_from_call(
-        env,
-        user,
-        _proxy,
-        Token::at(token).burn_public(user, exit_amount, NONCE),
-    );
+    add_public_authwit_from_call(env, merchant, proxy, Token::at(token).burn_public(merchant, 700_000, NONCE));
     env.call_public(
-        user,
-        TokenBridge::at(bridge).exit_to_l1_public(recipient, exit_amount, aztec::protocol::address::EthAddress::zero(), NONCE),
+        merchant,
+        TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 700_000, EthAddress::zero(), NONCE),
     );
 
-    assert_eq(env.view_public(Token::at(token).balance_of_public(user)), minted - exit_amount);
+    assert_eq(env.view_public(Token::at(token).balance_of_public(merchant)), 1_300_000);
 }
 
-/// Private exit: the caller's private notes burn by exactly the exited amount.
-#[test]
-unconstrained fn exit_to_l1_private_burns_private_balance() {
-    let (mut env, _admin, _proxy, token, bridge) = utils::setup();
-    let user = env.create_contract_account(); // full keys for private note spending
-    let minted: u128 = 900_000;
-    let exit_amount: u128 = 400_000;
-    let salt = 555;
-    let recipient = aztec::protocol::address::EthAddress::from_field(0xCAFE);
-
-    let content = mint_to_private_content_hash(minted, utils::depositor());
-    let secret_hash = aztec::hash::compute_secret_hash([derive_claim_secret(salt, user)]);
-    let leaf = env.send_l1_to_l2_message_from_secret_hash(content, secret_hash, utils::portal(), bridge);
-    env.call_private(user, TokenBridge::at(bridge).claim_private(user, minted, salt, leaf, utils::depositor()));
-
-    add_private_authwit_from_call(
-        env,
-        user,
-        _proxy,
-        Token::at(token).burn_private(user, exit_amount, NONCE),
-    );
-    env.call_private(
-        user,
-        TokenBridge::at(bridge).exit_to_l1_private(recipient, exit_amount, aztec::protocol::address::EthAddress::zero(), NONCE),
-    );
-
-    assert_eq(env.execute_utility(Token::at(token).balance_of_private(user)), minted - exit_amount);
-}
-
-/// A paused bridge refuses public exits.
-#[test(should_fail_with = "Bridge is paused")]
-unconstrained fn exit_to_l1_public_paused_rejected() {
-    let (mut env, admin, _proxy, _token, bridge) = utils::setup();
-    let user = env.create_light_account();
-
-    env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
-    env.call_public(
-        user,
-        TokenBridge::at(bridge).exit_to_l1_public(
-            aztec::protocol::address::EthAddress::from_field(0xBEEF),
-            1,
-            aztec::protocol::address::EthAddress::zero(),
-            NONCE,
-        ),
-    );
-}
-
-/// Zero L1 recipient is rejected before authwit evaluation or burning.
-#[test(should_fail_with = "Recipient cannot be zero")]
-unconstrained fn exit_to_l1_public_zero_recipient_rejected() {
+/// Refused before the burn, so the authwit and balance never matter.
+#[test(should_fail_with = "Public exits are for merchants only")]
+unconstrained fn a_user_cannot_exit_publicly() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let user = env.create_light_account();
-    env.call_public(
+    env.call_public(user, TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 1, EthAddress::zero(), NONCE));
+}
+
+#[test]
+unconstrained fn a_user_exits_privately_to_its_funding_address() {
+    let (mut env, _admin, proxy, token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    utils::fund_private(env, user, 900_000, 555, bridge);
+
+    add_private_authwit_from_call(env, user, proxy, Token::at(token).burn_private(user, 400_000, NONCE));
+    env.call_private(
         user,
-        TokenBridge::at(bridge).exit_to_l1_public(
-            aztec::protocol::address::EthAddress::zero(),
-            1,
-            aztec::protocol::address::EthAddress::zero(),
-            NONCE,
-        ),
+        TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 400_000, EthAddress::zero(), NONCE, false),
+    );
+
+    assert_eq(env.execute_utility(Token::at(token).balance_of_private(user)), 500_000);
+}
+
+#[test(should_fail_with = "Withdrawals from a user account go only to its funding address")]
+unconstrained fn a_user_cannot_exit_elsewhere() {
+    let (mut env, _admin, proxy, token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    utils::fund_private(env, user, 900_000, 555, bridge);
+
+    add_private_authwit_from_call(env, user, proxy, Token::at(token).burn_private(user, 400_000, NONCE));
+    env.call_private(user, TokenBridge::at(bridge).exit_to_l1_private(ELSEWHERE, 400_000, EthAddress::zero(), NONCE, false));
+}
+
+/// An account that never claimed has no funding address, so it cannot exit at all; refused before any note is read.
+#[test(should_fail_with = "Withdrawals from a user account go only to its funding address")]
+unconstrained fn an_unbound_user_cannot_exit() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    env.call_private(
+        user,
+        TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 1, EthAddress::zero(), NONCE, false),
     );
 }
 
-/// The private exit carries the same two guards as the public one, reached through the
-/// enqueued public assert rather than inline. Only the public path was covered, so a
-/// regression that dropped either guard from the private entrypoint would have gone unseen.
-/// Funded and authorized before pausing: the private exit's pause gate runs in the ENQUEUED
-/// public assert, so the private phase (note nullification, authwit) must succeed first.
-/// Without the balance the test would fail on the missing note and prove nothing about pause.
+#[test(should_fail_with = "Withdrawals from a user account go only to its funding address")]
+unconstrained fn a_user_cannot_exit_as_a_merchant() {
+    let (mut env, _admin, proxy, token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    utils::fund_private(env, user, 900_000, 555, bridge);
+
+    add_private_authwit_from_call(env, user, proxy, Token::at(token).burn_private(user, 400_000, NONCE));
+    env.call_private(user, TokenBridge::at(bridge).exit_to_l1_private(ELSEWHERE, 400_000, EthAddress::zero(), NONCE, true));
+}
+
+/// A merchant's binding does not limit it: listed, it exits privately to an address other than its funding address.
+#[test]
+unconstrained fn a_merchant_exits_privately_anywhere() {
+    let (mut env, admin, proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    utils::fund_private(env, merchant, 900_000, 555, bridge);
+
+    add_private_authwit_from_call(env, merchant, proxy, Token::at(token).burn_private(merchant, 400_000, NONCE));
+    env.call_private(
+        merchant,
+        TokenBridge::at(bridge).exit_to_l1_private(ELSEWHERE, 400_000, EthAddress::zero(), NONCE, true),
+    );
+
+    assert_eq(env.execute_utility(Token::at(token).balance_of_private(merchant)), 500_000);
+}
+
+#[test(should_fail_with = "Bridge is paused")]
+unconstrained fn exit_to_l1_public_paused_rejected() {
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+
+    env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
+    env.call_public(merchant, TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 1, EthAddress::zero(), NONCE));
+}
+
+/// Funded and authorized before pausing: the private exit's pause gate runs in the ENQUEUED public assert, so the
+/// private phase (binding, note nullification, authwit) must succeed first or the test proves nothing about pause.
 #[test(should_fail_with = "Bridge is paused")]
 unconstrained fn exit_to_l1_private_paused_rejected() {
-    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let (mut env, admin, proxy, token, bridge) = utils::setup();
     let user = env.create_contract_account();
     utils::fund_private(env, user, 500_000, 4242, bridge);
 
-    add_private_authwit_from_call(env, user, _proxy, Token::at(token).burn_private(user, 1, NONCE));
+    add_private_authwit_from_call(env, user, proxy, Token::at(token).burn_private(user, 1, NONCE));
     env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
     env.call_private(
         user,
-        TokenBridge::at(bridge).exit_to_l1_private(
-            aztec::protocol::address::EthAddress::from_field(0xBEEF),
-            1,
-            aztec::protocol::address::EthAddress::zero(),
-            NONCE,
-        ),
+        TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 1, EthAddress::zero(), NONCE, false),
+    );
+}
+
+#[test(should_fail_with = "Recipient cannot be zero")]
+unconstrained fn exit_to_l1_public_zero_recipient_rejected() {
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    env.call_public(
+        merchant,
+        TokenBridge::at(bridge).exit_to_l1_public(EthAddress::zero(), 1, EthAddress::zero(), NONCE),
     );
 }
 
@@ -137,76 +139,46 @@ unconstrained fn exit_to_l1_private_zero_recipient_rejected() {
     let user = env.create_contract_account();
     env.call_private(
         user,
-        TokenBridge::at(bridge).exit_to_l1_private(
-            aztec::protocol::address::EthAddress::zero(),
-            1,
-            aztec::protocol::address::EthAddress::zero(),
-            NONCE,
-        ),
+        TokenBridge::at(bridge).exit_to_l1_private(EthAddress::zero(), 1, EthAddress::zero(), NONCE, false),
     );
 }
 
-/// Exiting more than the caller holds must fail on the burn rather than emitting an L2→L1
-/// withdraw message for value that was never destroyed — the shape that would let a user
-/// exit twice against one balance.
+/// Exiting more than the sender holds fails on the burn, never emitting a withdraw for value that was not destroyed.
 #[test(should_fail_with = "attempt to subtract with overflow")]
 unconstrained fn exit_to_l1_public_insufficient_balance_rejected() {
-    let (mut env, _admin, _proxy, token, bridge) = utils::setup();
-    let user = env.create_light_account();
-    let minted: u128 = 100_000;
-    let recipient = aztec::protocol::address::EthAddress::from_field(0xBEEF);
+    let (mut env, admin, proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    utils::fund_public(env, merchant, 100_000, 42, bridge);
 
-    let leaf = utils::send_mint_to_public_message(env, user, minted, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf, utils::depositor()));
-
-    add_public_authwit_from_call(
-        env,
-        user,
-        _proxy,
-        Token::at(token).burn_public(user, minted + 1, NONCE),
-    );
+    add_public_authwit_from_call(env, merchant, proxy, Token::at(token).burn_public(merchant, 100_001, NONCE));
     env.call_public(
-        user,
-        TokenBridge::at(bridge).exit_to_l1_public(recipient, minted + 1, aztec::protocol::address::EthAddress::zero(), NONCE),
+        merchant,
+        TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 100_001, EthAddress::zero(), NONCE),
     );
 }
 
-/// Same property on the private path, where the burn nullifies notes rather than decrementing a
-/// public balance. Both exits enqueue their withdraw message, so a burn that does not actually
-/// destroy the value is what would let one balance be exited twice.
+/// The private twin: the burn nullifies notes, so it must fail rather than exit one balance twice.
 #[test(should_fail_with = "Balance too low")]
 unconstrained fn exit_to_l1_private_insufficient_balance_rejected() {
-    let (mut env, _admin, _proxy, token, bridge) = utils::setup();
+    let (mut env, _admin, proxy, token, bridge) = utils::setup();
     let user = env.create_contract_account();
-    let minted: u128 = 100_000;
-    let recipient = aztec::protocol::address::EthAddress::from_field(0xCAFE);
+    utils::fund_private(env, user, 100_000, 8675309, bridge);
 
-    utils::fund_private(env, user, minted, 8675309, bridge);
-
-    add_private_authwit_from_call(
-        env,
-        user,
-        _proxy,
-        Token::at(token).burn_private(user, minted + 1, NONCE),
-    );
+    add_private_authwit_from_call(env, user, proxy, Token::at(token).burn_private(user, 100_001, NONCE));
     env.call_private(
         user,
-        TokenBridge::at(bridge).exit_to_l1_private(recipient, minted + 1, aztec::protocol::address::EthAddress::zero(), NONCE),
+        TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 100_001, EthAddress::zero(), NONCE, false),
     );
 }
 
-/// The proxy burns on the caller's behalf, so the caller's authwit is the only thing authorizing it.
+/// The proxy burns on the sender's behalf, so the sender's authwit is the only thing authorizing it.
 #[test(should_fail_with = "unauthorized")]
 unconstrained fn exit_public_without_authwit_rejected() {
-    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
-    let user = env.create_light_account();
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    utils::fund_public(env, merchant, 100_000, 42, bridge);
 
-    let leaf = utils::send_mint_to_public_message(env, user, 100_000, 42, bridge);
-    env.call_public(user, TokenBridge::at(bridge).claim_public(user, 100_000, 42, leaf, utils::depositor()));
-    env.call_public(
-        user,
-        TokenBridge::at(bridge).exit_to_l1_public(EthAddress::from_field(0xBEEF), 50_000, EthAddress::zero(), NONCE),
-    );
+    env.call_public(merchant, TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 50_000, EthAddress::zero(), NONCE));
 }
 
 /// Private twin: the missing witness surfaces when the token asks the oracle for it during private execution.
@@ -214,22 +186,19 @@ unconstrained fn exit_public_without_authwit_rejected() {
 unconstrained fn exit_private_without_authwit_rejected() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let user = env.create_contract_account();
-
     utils::fund_private(env, user, 100_000, 31337, bridge);
+
     env.call_private(
         user,
-        TokenBridge::at(bridge).exit_to_l1_private(EthAddress::from_field(0xCAFE), 50_000, EthAddress::zero(), NONCE),
+        TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 50_000, EthAddress::zero(), NONCE, false),
     );
 }
 
 #[test(should_fail_with = "Amount must be greater than zero")]
 unconstrained fn exit_public_zero_amount_rejected() {
-    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
-    let user = env.create_light_account();
-    env.call_public(
-        user,
-        TokenBridge::at(bridge).exit_to_l1_public(EthAddress::from_field(0xBEEF), 0, EthAddress::zero(), NONCE),
-    );
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    env.call_public(merchant, TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 0, EthAddress::zero(), NONCE));
 }
 
 #[test(should_fail_with = "Amount must be greater than zero")]
@@ -238,6 +207,6 @@ unconstrained fn exit_private_zero_amount_rejected() {
     let user = env.create_contract_account();
     env.call_private(
         user,
-        TokenBridge::at(bridge).exit_to_l1_private(EthAddress::from_field(0xBEEF), 0, EthAddress::zero(), NONCE),
+        TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 0, EthAddress::zero(), NONCE, false),
     );
 }

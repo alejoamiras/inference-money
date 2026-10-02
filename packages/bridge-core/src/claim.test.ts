@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
+import { NotFundingAddressError } from "./binding"
 import {
 	type ClaimNode,
 	claim,
@@ -65,6 +66,25 @@ describe("claim", () => {
 		expect(sponsoredPublic.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_public"], feePayer: M.l2.sponsoredFpc })
 	})
 
+	it("binds the recipient's account on its first private claim, and on no later one", async () => {
+		const bindArg = (w: ReturnType<typeof fakeWallet>) => w.sent[0]?.args.at(-1)?.at(-1)
+		const first = fakeWallet()
+		await claim(await ticket("private"), NO_NULLIFIER, first.wallet, M, { from: recipient })
+		expect(bindArg(first)).toBe(1n)
+
+		const bound = fakeWallet({ utility: () => [new Fr(0xd0d0)] })
+		await claim(await ticket("private"), NO_NULLIFIER, bound.wallet, M, { from: recipient })
+		expect(bindArg(bound)).toBe(0n)
+	})
+
+	it("refuses a private deposit from another address than the bound one before any simulation", async () => {
+		const bound = fakeWallet({ utility: () => [new Fr(0xbeefn)] })
+		await expect(claim(await ticket("private"), NO_NULLIFIER, bound.wallet, M, { from: recipient })).rejects.toBeInstanceOf(
+			NotFundingAddressError,
+		)
+		expect(bound.simulated.length + bound.sent.length).toBe(0)
+	})
+
 	it("returns only once the node reports the claim checkpointed, whatever the wallet would wait for", async () => {
 		const statuses = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED]
 		const node: ClaimNode = { ...NO_NULLIFIER, getTxReceipt: async () => receiptAt(statuses.shift() ?? TxStatus.CHECKPOINTED) as never }
@@ -73,7 +93,7 @@ describe("claim", () => {
 		expect(statuses).toEqual([])
 	})
 
-	it("reports already-consumed only when this ticket's nullifier is on L2; any other nullifier error stays retryable", async () => {
+	it("reports consumed-unknown only when this ticket's nullifier is on L2; any other nullifier error stays retryable", async () => {
 		for (const kind of ["public", "private"] as const) {
 			const t = await ticket(kind)
 			const { wallet } = fakeWallet({ send: fail("Assertion failed: L1-to-L2 message is already nullified") })
@@ -87,7 +107,7 @@ describe("claim", () => {
 					return leaves.map(() => ({ data: 7n }) as never)
 				},
 			}
-			expect(await claim(t, nullified, wallet, M, { from: recipient })).toBe("already-consumed")
+			expect(await claim(t, nullified, wallet, M, { from: recipient })).toBe("consumed-unknown")
 			await expect(claim(t, NO_NULLIFIER, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
 			const unreachable: ClaimNode = { findLeavesIndexes: fail("503") as never, getTxReceipt: CHECKPOINTED }
 			await expect(claim(t, unreachable, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
@@ -172,6 +192,6 @@ describe("waitClaimable", () => {
 		const { wallet } = fakeWallet()
 		await expect(
 			waitClaimable(await ticket("public"), never, wallet, M, recipient, undefined, { sleep: noSleep, attempts: 3 }),
-		).rejects.toThrow(/not claimable yet/)
+		).rejects.toThrow(/not reached your wallet yet/)
 	})
 })

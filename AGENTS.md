@@ -49,7 +49,7 @@ SEPOLIA_RPC_URL=… bun run test:evm:fork  # real Permit2, Circle USDC, Aztec re
 bun run test:noir                                     # TXE suites (token, token_bridge, keystone), manifest-gated
 bash contracts/aztec/scripts/noir-deps.sh             # fetch + verify the pinned Noir git deps (--self-test)
 bash contracts/aztec/scripts/compile.sh [--check]     # rebuild artifacts; --check: committed == source (class id + ABI)
-bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment static guard (--self-test)
+bash contracts/aztec/scripts/check-sole-consumer.sh   # static guard: the four consume sites and the bridge's rules (--self-test)
 ```
 
 ## Rules
@@ -63,6 +63,7 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # recipient-commitment sta
 - **Noir artifacts are committed and must equal their source:** rebuild only through `contracts/aztec/scripts/compile.sh` (a bare `nargo compile` writes an untranspiled artifact and skips the pinned-dependency check compile.sh runs first), and run `compile.sh --check` before committing a `.nr` change. A new Noir git dependency, direct or transitive, goes into `noir-deps.sh`'s pinned table or CI's `--exact` step fails.
 - **The token stays an ABI superset of aztec-standards' Token, upstream storage first:** every upstream function keeps its selector, signature and attributes, new storage appends after upstream's, and `contracts/aztec/scripts/abi-superset.test.ts` lists every addition, so integrations written against upstream keep working.
 - **Rule checks are private reads, never public calls:** a merchant check proves the register and the switch-off entry at the tx's anchor block. A public call would publish both accounts of every private transfer.
+- **Private rule checks never go public:** a private function checks merchant status with `try_prove_merchant` and a binding through its owner's notes, never by enqueueing a public call, which would publish the checked address.
 - **TXE manifests:** every new Noir test gets its name in the crate's `txe-manifest.txt`; `run-txe-tests.sh` fails on a listed test that did not pass or a count under the crate's floor.
 - **One network per bundle:** a web build embeds exactly one manifest at build time and has no runtime override; iframe wallet URLs (`WEB_WALLET_URLS`) are accepted only for a `local` manifest, and `build:testnet` refuses every override.
 - **The e2e test wallet enforces its grant:** every call outside what the app requested is refused, as a real wallet does. A new wallet call in the app needs its scope in `src/wallet/capabilities.ts`, or the suite fails.

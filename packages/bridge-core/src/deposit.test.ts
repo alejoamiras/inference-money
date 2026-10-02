@@ -16,7 +16,16 @@ import {
 } from "viem"
 import { PERMIT2_DEPOSIT_ROUTER_ABI } from "./abi"
 import { claimSecretHash } from "./claim-secret"
-import { confirmDeposit, type DepositDraft, prepareDeposit, reconcileDeposit, submitDeposit, ticketFromReceiptLogs } from "./deposit"
+import {
+	assertPublicRecipient,
+	confirmDeposit,
+	type DepositDraft,
+	PublicDepositToUserError,
+	prepareDeposit,
+	reconcileDeposit,
+	submitDeposit,
+	ticketFromReceiptLogs,
+} from "./deposit"
 import { NetworkMismatchError } from "./network"
 import { BridgePausedError, type PauseSource } from "./pause"
 import { a, MANIFEST as M } from "./test/fixtures"
@@ -354,5 +363,22 @@ describe("reconcileDeposit", () => {
 	it("a draft never submitted is not-deposited without touching the chain", async () => {
 		const d = await draft()
 		expect(await reconcileDeposit(d, chain().l1, M)).toBe("not-deposited")
+	})
+})
+
+describe("assertPublicRecipient", () => {
+	it("passes a switched-on merchant and refuses a user or a switched-off merchant", async () => {
+		const [merchant, user, off] = await Promise.all([AztecAddress.random(), AztecAddress.random(), AztecAddress.random()])
+		const list = {
+			block: 1,
+			at: NOW,
+			entries: new Map([
+				[merchant.toString(), { off: false, scheduledOff: false, changeAt: 0n }],
+				[off.toString(), { off: true, scheduledOff: true, changeAt: 0n }],
+			]),
+		}
+		expect(() => assertPublicRecipient(list, merchant)).not.toThrow()
+		expect(() => assertPublicRecipient(list, user)).toThrow(PublicDepositToUserError)
+		expect(() => assertPublicRecipient(list, off)).toThrow(PublicDepositToUserError)
 	})
 })
