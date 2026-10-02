@@ -6,7 +6,9 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
-		"./manifest": "./src/manifest.ts"
+		"./manifest": "./src/manifest.ts",
+		"./rules": "./src/rules.ts",
+		"./types": "./src/types.ts"
 	},
 	"scripts": {
 		"test": "bun run --cwd ../../contracts/evm build && bun test --preload ../../test-preload.ts src",

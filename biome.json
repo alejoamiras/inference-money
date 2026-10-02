@@ -44,7 +44,7 @@
 			"linter": { "rules": { "complexity": { "noExcessiveLinesPerFunction": "off" } } }
 		},
 		{
-			"includes": ["packages/bridge-core/**", "apps/web/**"],
+			"includes": ["packages/bridge-core/**", "apps/showcase/**"],
 			"linter": {
 				"rules": {
 					"style": {

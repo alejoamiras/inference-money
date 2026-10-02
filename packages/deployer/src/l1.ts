@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { withGasHeadroom } from "@inference-money/bridge-core"
 import {
 	type Abi,
 	type Account,
@@ -58,7 +59,9 @@ export async function deployEvm(l1: L1Signer, name: string, a: EvmArtifact, args
 }
 
 export async function writeEvm(l1: L1Signer, what: string, address: Address, abi: Abi, functionName: string, args: unknown[]) {
-	const hash = await l1.walletClient.writeContract({ address, abi, functionName, args, account: l1.account, chain: l1.chain })
+	const call = { address, abi, functionName, args, account: l1.account }
+	const gas = withGasHeadroom(await l1.publicClient.estimateContractGas(call))
+	const hash = await l1.walletClient.writeContract({ ...call, gas, chain: l1.chain })
 	return mined(l1, hash, what)
 }
 

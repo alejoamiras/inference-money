@@ -1,5 +1,6 @@
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { Hex } from "viem"
+import { TESTNET } from "./networks"
 
 /**
  * The keyed-run variables. A command gets them through its environment alone (env-exec's approved process, or a
@@ -80,12 +81,26 @@ function urlForms(url: string): string[] {
 const forms = (value: string): string[] =>
 	/^0x[0-9a-f]+$/i.test(value) ? [value, value.slice(2)] : /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? urlForms(value) : [value]
 
+function normalUrl(value: string): string | undefined {
+	try {
+		return new URL(value.trim()).href.replace(/\/+$/, "")
+	} catch {
+		return undefined
+	}
+}
+
+/** The endpoints `networks.ts` commits are public: as needles they would match the source that pins them, failing every scan. */
+const PUBLIC_ENDPOINTS = new Set([TESTNET.defaultL1RpcUrl, TESTNET.nodeUrl].map(normalUrl))
+const isPublicEndpoint = (value: string): boolean => PUBLIC_ENDPOINTS.has(normalUrl(value))
+
 /**
  * Every credential-named variable of `env` in every form text could carry it, longest first, lowercased: hex with and
  * without 0x, and every URL form. A keyless environment yields none.
  */
 export function secretNeedles(env: NodeJS.ProcessEnv = process.env): string[] {
-	const values = Object.entries(env).flatMap(([k, v]) => (SECRET_NAME.test(k) && v && v.length >= MIN_SECRET ? [v] : []))
+	const values = Object.entries(env).flatMap(([k, v]) =>
+		SECRET_NAME.test(k) && v && v.length >= MIN_SECRET && !isPublicEndpoint(v) ? [v] : [],
+	)
 	return [...new Set(values.flatMap(forms).map((n) => n.toLowerCase()))].sort((a, b) => b.length - a.length)
 }
 

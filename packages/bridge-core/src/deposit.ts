@@ -11,7 +11,7 @@ import { type MerchantList, merchantStatus } from "./merchants"
 import { assertReaderChain, assertSigningContext, NetworkMismatchError } from "./network"
 import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
-import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, sendChain, signerOf } from "./types"
+import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, sendChain, signerOf, withGasHeadroom } from "./types"
 
 export type DepositKind = "public" | "private"
 
@@ -136,26 +136,28 @@ async function signAndSend(d: DepositDraft, l1: L1Ctx, m: BridgeManifest, l2: Pa
 	on?.("signing")
 	const signature = await l1.walletClient.signTypedData({ account: signerOf(l1), ...d.typedData })
 	await Promise.all([assertSigningContext(l1, null, m, expected), assertBridgeLive(l2, m)])
+	const { message } = d.typedData
+	const call = {
+		address: m.l1.router,
+		abi: PERMIT2_DEPOSIT_ROUTER_ABI,
+		functionName: "deposit",
+		args: [
+			message.permitted.amount,
+			d.witness.aztecRecipient,
+			d.witness.secretHash,
+			d.witness.isPrivate,
+			message.nonce,
+			message.deadline,
+			signature,
+		],
+		account: signerOf(l1),
+	} as const
+	// Estimated before the draft counts as sent: a deposit that would revert fails here, with nothing broadcast.
+	const gas = withGasHeadroom(await l1.publicClient.estimateContractGas(call))
 	d.submission = { account: l1.account, chainId: m.l1.chainId, fromBlock: finalized.number, fromBlockHash: finalized.hash }
 	on?.("depositing")
-	const { message } = d.typedData
 	try {
-		d.l1TxHash = await l1.walletClient.writeContract({
-			address: m.l1.router,
-			abi: PERMIT2_DEPOSIT_ROUTER_ABI,
-			functionName: "deposit",
-			args: [
-				message.permitted.amount,
-				d.witness.aztecRecipient,
-				d.witness.secretHash,
-				d.witness.isPrivate,
-				message.nonce,
-				message.deadline,
-				signature,
-			],
-			account: signerOf(l1),
-			chain: sendChain(l1, m.l1.chainId),
-		})
+		d.l1TxHash = await l1.walletClient.writeContract({ ...call, gas, chain: sendChain(l1, m.l1.chainId) })
 	} catch (e) {
 		// An explicit refusal means nothing was broadcast; any other failure may have been, so the draft stays submitted.
 		if (isUserRejection(e)) d.submission = undefined

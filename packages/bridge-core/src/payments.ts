@@ -173,6 +173,25 @@ export async function openRequest(
 	return { commitment, txHash: sent.txHash }
 }
 
+/**
+ * A private transfer, which the rules allow only to or from a merchant; refused before proving otherwise. Returns once
+ * sent: the caller waits for the status it needs.
+ */
+export async function transferPrivate(
+	wallet: Wallet,
+	token: AztecAddress,
+	t: { from: AztecAddress; to: AztecAddress; amount: bigint },
+	opts: ListOptions,
+): Promise<TxHash> {
+	const sent = await withFreshList(opts.list, opts.resync, async (list) => {
+		const side = merchantSide(list, t.to, t.from, false)
+		if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.transfer)
+		const call = Contract.at(token, tokenArtifact, wallet).methods.transfer_private_to_private!(t.from, t.to, t.amount, 0)
+		return call.with({ capsules: [sideCapsule(token, side)] }).send({ from: t.from, fee: opts.fee, wait: NO_WAIT })
+	})
+	return sent.txHash
+}
+
 interface Expected {
 	owner: string
 	token: AztecAddress

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { Writable } from "node:stream"
@@ -10,7 +10,13 @@ import { assertOwnerOnly, disposableDestroy, disposableExec, disposableInit } fr
 import type { Roles } from "./token-reads"
 
 const someone = new Fr(0x5eedn)
-const NOBODY: Roles = { owner: someone, pendingOwner: Fr.ZERO, admin: someone, pendingAdmin: Fr.ZERO }
+const NOBODY = {
+	owner: someone,
+	pendingOwner: Fr.ZERO,
+	admin: someone,
+	pendingAdmin: Fr.ZERO,
+	token: Fr.fromHexString(MANIFEST.l2.token.address),
+}
 
 const roots: string[] = []
 const temp = () => {
@@ -88,6 +94,29 @@ describe("the disposable fallback", () => {
 		expect(await disposableExec(accept, { ...opts, argv: () => CHILD, out: sink().stream, err: sink().stream, scan: leaked })).toBe(1)
 	})
 
+	it("a signal during exec reaps its child and runs the scan before the bundle is released", async () => {
+		const [keys, checkout] = [temp(), temp()]
+		const file = join(keys, "testnet.env")
+		await disposableInit(file)
+		let scanned = false
+		const scan = () => {
+			scanned = true
+			return { found: false, files: 0, skipped: 0, walletDirs: [] }
+		}
+		const opts = { file, root: checkout, keyedRoot: checkout, scan, out: sink().stream, err: sink().stream }
+		const pidFile = join(keys, "child.pid")
+		const lingers = `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
+		const run = disposableExec(["verify", "x"], { ...opts, argv: () => ["-e", lingers] })
+		while (!existsSync(pidFile)) await Bun.sleep(20)
+		await expect(disposableExec(["verify", "x"], opts)).rejects.toThrow("in use")
+
+		process.emit("SIGTERM", "SIGTERM")
+		expect(await run).not.toBe(0)
+		expect(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0)).toThrow()
+		expect(scanned).toBe(true)
+		expect(await disposableExec(["verify", "x"], { ...opts, argv: () => ["-e", ""] })).toBe(0)
+	})
+
 	it("binds a bundle to the deployment its deploy made: a second deploy is refused, and destroy takes only that one", async () => {
 		const [keys, checkout] = [temp(), temp()]
 		const file = join(keys, "testnet.env")
@@ -108,7 +137,7 @@ describe("the disposable fallback", () => {
 		expect(await disposableExec(["deploy", "testnet"], opts)).toBe(0)
 		await expect(disposableExec(["deploy", "testnet"], opts)).rejects.toThrow("one deployment per bundle")
 
-		const roles = async (): Promise<Roles> => NOBODY
+		const roles = async () => NOBODY
 		const other = {
 			path: "other.json",
 			m: { ...m, l2: { ...m.l2, bridge: { ...m.l2.bridge, address: `0x${"cd".repeat(32)}` as Hex } } },
@@ -118,16 +147,61 @@ describe("the disposable fallback", () => {
 		expect(existsSync(file)).toBe(false)
 	})
 
+	it("a deploy that fails, or dies, before recording its bridge blocks a second deploy and destroy until resolved", async () => {
+		const [keys, checkout] = [temp(), temp()]
+		const file = join(keys, "testnet.env")
+		const { l1 } = await disposableInit(file)
+		const m = { ...MANIFEST, l1: { ...MANIFEST.l1, deployer: l1 } }
+		const opts = {
+			file,
+			root: checkout,
+			keyedRoot: checkout,
+			argv: () => ["-e", "process.exit(3)"],
+			out: sink().stream,
+			err: sink().stream,
+		}
+		expect(
+			await disposableExec(["deploy", "testnet"], { ...opts, scan: () => ({ found: false, files: 0, skipped: 0, walletDirs: [] }) }),
+		).toBe(3)
+		await expect(disposableExec(["deploy", "testnet"], opts)).rejects.toThrow("never recorded its bridge")
+		await expect(disposableDestroy({ path: "testnet.json", m }, { file, roles: async () => NOBODY })).rejects.toThrow("never recorded")
+		expect(existsSync(file)).toBe(true)
+	})
+
+	it("one operation per bundle: while a destroy is in flight, another destroy and an init refuse", async () => {
+		const file = join(temp(), "testnet.env")
+		const { l1 } = await disposableInit(file)
+		const ref = {
+			path: "testnet.json",
+			m: { ...MANIFEST, l1: { ...MANIFEST.l1, deployer: l1 }, l2: { ...MANIFEST.l2, admin: someone.toString() as Hex } },
+		}
+		writeFileSync(`${file}.deployment`, `${MANIFEST.l2.bridge.address}\n`)
+		let release = () => {}
+		const gate = new Promise<void>((r) => {
+			release = r
+		})
+		const first = disposableDestroy(ref, { file, roles: () => gate.then(() => NOBODY) })
+		await expect(disposableDestroy(ref, { file, roles: async () => NOBODY })).rejects.toThrow("in use")
+		await expect(disposableInit(file)).rejects.toThrow("in use")
+		release()
+		await first
+		expect(existsSync(file)).toBe(false)
+		await disposableInit(file)
+	})
+
 	it("destroy removes the keys only on finalized proof that the manifest's admin, not a disposable one, holds both roles alone", async () => {
 		const file = join(temp(), "testnet.env")
 		const { l1, admin } = await disposableInit(file)
 		const mine = { ...MANIFEST, l1: { ...MANIFEST.l1, deployer: l1 } }
 		const handedOver = { path: "testnet.json", m: { ...mine, l2: { ...mine.l2, admin: someone.toString() as Hex } } }
-		const roles = (r: Partial<Roles>) => async (): Promise<Roles> => ({ ...NOBODY, ...r })
+		const roles = (r: Partial<Roles & { token: Fr }>) => async () => ({ ...NOBODY, ...r })
 
+		await expect(disposableDestroy(handedOver, { file, roles: roles({}) })).rejects.toThrow("recorded no deployment")
+		writeFileSync(`${file}.deployment`, `${MANIFEST.l2.bridge.address}\n`)
 		await expect(disposableDestroy({ path: "other.json", m: MANIFEST }, { file, roles: roles({}) })).rejects.toThrow(
 			"not the deployment",
 		)
+		await expect(disposableDestroy(handedOver, { file, roles: roles({ token: someone }) })).rejects.toThrow("configured with token")
 		const before = { owner: Fr.ZERO, admin: Fr.ZERO }
 		await expect(disposableDestroy(handedOver, { file, roles: roles(before) })).rejects.toThrow("does not hold both roles alone")
 		await expect(disposableDestroy(handedOver, { file, roles: roles({ pendingAdmin: admin.toField() }) })).rejects.toThrow("alone")

@@ -17,7 +17,7 @@ import { type AwaitL1ReceiptOptions, awaitL1Receipt } from "./l1-receipt"
 import type { BridgeManifest } from "./manifest"
 import { assertSigningContext } from "./network"
 import type { OutboxReader } from "./outbox"
-import { type L1Ctx, type StageSink, sendChain, signerOf } from "./types"
+import { type L1Ctx, type StageSink, sendChain, signerOf, withGasHeadroom } from "./types"
 
 /**
  * The Outbox membership proof `TokenPortal.withdraw` takes. Only one {@link buildWithdrawProof} returned is accepted,
@@ -194,8 +194,9 @@ export async function withdrawOnL1(
 		if (name && STALE_PROOF_REVERTS.has(name)) throw new StaleProofError({ cause: e })
 		throw e
 	}
+	const gas = withGasHeadroom(await l1.publicClient.estimateContractGas(call))
 	await assertSigningContext(l1, null, m, expected)
-	const hash = await l1.walletClient.writeContract({ ...call, chain: sendChain(l1, m.l1.chainId) })
+	const hash = await l1.walletClient.writeContract({ ...call, gas, chain: sendChain(l1, m.l1.chainId) })
 	return assertConsumedIn(await awaitWithdrawReceipt(l1.publicClient, hash, opts), t, p, m)
 }
 

@@ -87,6 +87,8 @@ function chain() {
 		chainId: M.l1.chainId,
 		readerChainId: M.l1.chainId,
 		sentOnChain: undefined as number | undefined,
+		sentGas: undefined as bigint | undefined,
+		estimateError: undefined as Error | undefined,
 		selected: ACCOUNT as Address,
 		sends: 0,
 		sendError: undefined as Error | undefined,
@@ -108,6 +110,10 @@ function chain() {
 		getBlockNumber: async () => s.latest,
 		getTransactionReceipt: receipt,
 		waitForTransactionReceipt: receipt,
+		estimateContractGas: async () => {
+			if (s.estimateError) throw s.estimateError
+			return 200_000n
+		},
 		getLogs: async (q: { address: Address; args: { depositor: Address }; fromBlock: bigint; toBlock: bigint }) => {
 			if (s.failGetLogs) throw new Error("RPC 503")
 			s.onGetLogs?.()
@@ -130,8 +136,9 @@ function chain() {
 			if (s.signError) throw s.signError
 			return pad("0x5195", { size: 65 })
 		},
-		writeContract: async (req: { chain: { id: number } | null }) => {
+		writeContract: async (req: { chain: { id: number } | null; gas?: bigint }) => {
 			s.sentOnChain = req.chain?.id
+			s.sentGas = req.gas
 			s.sends++
 			if (s.sendError) throw s.sendError
 			return TX
@@ -206,6 +213,16 @@ describe("submitDeposit", () => {
 		s.readerChainId = 1
 		await expect(submitDeposit(await draft(), l1, M, LIVE)).rejects.toBeInstanceOf(NetworkMismatchError)
 		expect(s.signs).toBe(0)
+	})
+
+	it("sends with headroom over the estimate; a deposit whose estimate reverts is never marked sent", async () => {
+		const { s, l1 } = chain()
+		await submitDeposit(await draft(), l1, M, LIVE)
+		expect(s.sentGas).toBe(300_000n)
+		const reverting = await draft()
+		s.estimateError = new Error("execution reverted")
+		await expect(submitDeposit(reverting, l1, M, LIVE)).rejects.toThrow("reverted")
+		expect([reverting.submission, s.sends]).toEqual([undefined, 1])
 	})
 
 	it("an explicit refusal of the send leaves the draft sendable; any other failure keeps it submitted", async () => {

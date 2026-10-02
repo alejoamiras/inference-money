@@ -1,0 +1,54 @@
+@import "tailwindcss";
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
+/* One light look, with the dark "what the world sees" panel inside it. */
+:root {
+	color-scheme: light;
+}
+
+@theme {
+	--font-display: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+	--font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+	--font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+	--color-page: #f3f6f8;
+	--color-ink: #14212b;
+	--color-muted: #566775;
+	--color-line: #d3dbe1;
+	--color-field: #c3ced6;
+	--color-usdc: #2775ca;
+	--color-usdc-soft: #e1ecf8;
+	--color-usdc-ink: #1f5fa6;
+	--color-ok: #1d7447;
+	--color-ok-soft: #dcf0e3;
+	--color-bad: #b93a2e;
+	--color-bad-soft: #f9e4e1;
+	--color-wait: #8f5c10;
+	--color-wait-soft: #f6ebd6;
+	--color-idle-soft: #e8edf1;
+	--color-lane-l1: #e6ecf3;
+	--color-lane-l2: #e2eeeb;
+	--color-world: #14212b;
+	--color-world-ink: #e3eaef;
+	--color-world-muted: #97a7b3;
+	--color-world-text: #c8d6e2;
+	--color-world-line: #33485a;
+	--color-world-row: #1f3242;
+	--color-readable: #4a3410;
+	--color-readable-ink: #f2c27a;
+	--color-hidden: #183553;
+	--color-hidden-ink: #a9cbf2;
+}
+
+body {
+	margin: 0;
+	background: var(--color-page);
+	color: var(--color-ink);
+	font-family: var(--font-sans);
+}
