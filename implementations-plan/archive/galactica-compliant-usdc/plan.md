@@ -28,7 +28,7 @@ status: closed 2026-10-02, completed (see Outcome)
 - `0x115d7e1a…5d9c`, from `7b2f442`.
 
 **Changed, dropped or deferred, and why:**
-- **Delivery.** P9 ran after arc 4's branch had closed, so its commits sit in the showcase PR (see Delivery).
+- **Delivery.** P9 ran after arc 4's branch had closed, so its commits sit in the showcase PR (see Delivery). As a result, #10's testnet build and Workers preview are red at its head: arc 4 moved the manifest to v2, and the first v2 testnet manifest arrives in #11. The stack merges atomically, so `main` never sits there.
 - **Arc 6 grew past its finding.** The owner chose to fix and redeploy twice: once for C-001, and once for the exit lock-ups the arc-6 review found.
 - **Deferred** (open in `implementations-plan/follow-ups.md`):
   - demo rotation, the only fix for a poisoned demo binding;
