@@ -1,8 +1,8 @@
 /**
  * Payment requests on the merchant token: open one, check its stamp, and pay it at most once from one client.
  *
- * A request is a partial note's commitment. Completion is not single-use, and the recipient discovers only the first
- * completion (aztec-nr `uint_note.nr`), so a second payment into one request lands on chain and is lost. `payRequest`
+ * A request is a partial note's commitment. Completion is not single-use, and a stock wallet discovers only the first
+ * completion (aztec-nr `uint_note.nr`), so a second payment into one request lands as a note nothing finds. `payRequest`
  * therefore refuses a request completed on chain, or one this client has paid or is paying, through one
  * {@link PaymentRecord} per request in an injected {@link PaymentStore}:
  * - `reserved`, under the store's lock before anything is simulated; a failure before the send releases it;

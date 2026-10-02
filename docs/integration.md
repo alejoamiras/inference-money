@@ -15,6 +15,8 @@ Every Aztec account is either a **merchant** (on the token's list, curated by th
 | Pay a request | Only one whose recipient is a merchant (stamped). | Any request. |
 | Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address. |
 
+A stamp outlives its merchant's switch-off. A switched-off merchant is a user from then on, but a request stamped for it before the switch-off landed stays payable by the payer it names, in any amount, with no end date.
+
 A deposit that can't be claimed (a public deposit to a user, or a private one from another address than the recipient's funding address) is **returned**: anyone holding its claim data consumes it on Aztec, nothing is minted, and the depositor is paid back on Ethereum once the epoch is proven. A merchant's public deposit is never returned, only claimed.
 
 ## Refusals
@@ -45,7 +47,7 @@ bridge-core raises typed errors before any signature or proof: `PublicDepositToU
 - **A claim that reports `consumed-unknown`** found its message already consumed, by an earlier claim or by a return. It is never a mint: `depositFate(ticket, node, manifest)` finds the consuming tx and whether it emitted a withdrawal to the depositor.
 - **Returns**: `waitReturnable`, then `returnDeposit(ticket, …)` gives an exit ticket for the depositor; `finishWithdrawal` pays it out on Ethereum, from any account. A depositor whose deposit someone else returned needs only the deposit ticket: `depositFate` names the return's tx, and `exitTicketFromTx(tx, depositor, amount, …)` builds the withdrawal. A tx that batches a claim with another return or exit of the same amount to the same address also reads as a withdrawal; finishing it pays the depositor either way.
 - **Merchant exits** pass `asMerchant: true`; the bridge proves the sender's listing at the tx's anchor block.
-- **Paying a request twice loses the second payment** (upstream completion is not single-use). `payRequest` refuses a request it has paid or is paying; a facilitator that pays without `payments.ts` needs the same guard.
+- **Paying a request twice loses the second payment to a stock wallet.** Upstream completion is not single-use: each payment lands as a valid note, and the recipient's wallet discovers only the first. `payRequest` refuses a request it has paid or is paying; a facilitator that pays without `payments.ts` needs the same guard.
 
 ## Messages between the chains
 
@@ -59,7 +61,11 @@ Each L1↔L2 message content is `sha256ToField(abi.encodeWithSignature(signature
 
 The depositor is the address the USDC came from: a direct deposit's caller, or the Permit2 signer when the deposit goes through the router. Vectors for all three formats are pinned in Solidity, Noir and TypeScript (`docs/architecture.md`).
 
-The portal refuses a deposit that no Aztec call could consume: an amount above u128 (`AmountExceedsL2Max`), and a public recipient above the largest field element (`RecipientExceedsFieldMax`), since an Aztec address is a field element. Encoding an `AztecAddress` (`toString()`, as bridge-core does) always fits. The bridge, in turn, refuses an exit no Ethereum call could pay: to the portal itself (`Recipient cannot be the portal`; its payout must lower its own balance), or naming a recipient or caller wider than 20 bytes, which the ABI would otherwise decode into an `EthAddress`.
+The portal refuses two deposits that no Aztec call could consume: an amount above u128 (`AmountExceedsL2Max`), and a public recipient above the largest field element (`RecipientExceedsFieldMax`), since an Aztec address is a field element. Encoding an `AztecAddress` (`toString()`, as bridge-core does) always fits.
+
+It cannot check a secret hash. A private deposit is claimed or returned only with the secret `prepareDeposit` derives from a claim salt and the recipient, so one made with any other hash stays escrowed for good, with no rescue path. The portal shares the canonical Aztec portal's function names and nothing else: Aztec's own portal tooling draws a plain secret and does not read this portal's events, so deposit through bridge-core, never with it.
+
+The bridge, in turn, refuses an exit no Ethereum call could pay: to the portal itself (`Recipient cannot be the portal`; its payout must lower its own balance), or naming a recipient or caller wider than 20 bytes, which the ABI would otherwise decode into an `EthAddress`.
 
 ## What each action makes public
 

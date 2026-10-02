@@ -12,12 +12,12 @@ Every operation is one `bun run bridge <command>`. `<manifest>` is a path, or `l
 | `admin propose <manifest> <address>` | admin secret | Proposes both roles to a new admin, which takes them with its own `admin accept` |
 | `merchants add <manifest> <account…>` | admin secret | Lists merchants, at once, four per tx |
 | `merchants off\|on <manifest> <account>` | admin secret | Schedules a switch-off, or back on; it lands after the entry's delay |
-| `merchants delay <manifest> <s>` | admin secret | Sets the delay (3600–86400 s) and syncs every listed merchant to it |
+| `merchants delay <manifest> <s>` | admin secret | Sets the delay (3600–86400 s) and syncs the merchants the node lists to it |
 | `merchants guardian <manifest> <address>` | admin secret | Schedules the guardian (cancel-only); zero removes it |
 | `merchants cancel <manifest> <account>` | admin or guardian secret | Cancels an entry's pending change |
 | `merchants list <manifest>` | none | Every merchant ever added, with its status |
 | `pause <manifest> on\|off` | admin secret | The bridge's L2 pause (see Emergency) |
-| `verify <manifest> [--tour <file>] [--node <url>] [--l1-rpc <url>]` | none | Strict read-back of the whole deployment; exits 1 on any failed check |
+| `verify <manifest> [--tour <file>] [--node <url>] [--l1-rpc <url>] [--guardian <address>]` | none | Strict read-back of the whole deployment; exits 1 on any failed check |
 | `export <manifest> --out <dir>` | none | The integration bundle: manifest, Aztec artifacts, L1 ABIs |
 | `smoke <manifest> [--record <file>]` | none | The acceptance run with the demo cast (see Demo) |
 | `demo setup [--rotate] \| status \| reset <manifest>` | none | The demo cast (see Demo) |
@@ -46,7 +46,7 @@ A keyed command runs in a process whose environment the owner fills, one approva
 
 `SEPOLIA_RPC_URL` is your own endpoint, or the committed public default (`networks.ts`), which the scan and the redaction treat as public.
 
-The deploy run never sees the admin secret, and the admin run never sees the L1 key. The deploy keys lose every role once the admin accepts; `verify` fails if one keeps any.
+The deploy run never sees the admin secret, and the admin run never sees the L1 key. The deploy keys lose every role once the admin accepts; `verify` fails if one keeps any. What a deploy key wrote before that stays: `verify` fails on a guardian it was not told to expect, and prints one line per listed merchant, to compare with the accounts you added. The register is append-only, so a deployment with a merchant you did not add is redeployed, not repaired.
 
 **Testnet, in order:** `admin address` (commit the printed address into the deploy template); `probe` + `deploy testnet` + `demo fund` (one run, one L1 key, which must already hold Sepolia ETH for gas and 50 Circle Sepolia USDC, since `demo fund` transfers what A_demo and B_demo lack and nothing checks first); `admin accept` + `merchants add <galactica> <supplier>` (their addresses: `demo status`); then, keyless, `demo setup` and `smoke --record deployments/testnet-tour.json`.
 
@@ -54,7 +54,7 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 
 ## Verifying a deployment
 
-`verify` is keyless and trusts what it reads through: the manifest's node and the pinned public L1 RPC by default. Check a deployment from the commit that made it, against your own endpoints. That commit predates the manifest it made, so copy the manifest out first:
+`verify` is keyless and trusts what it reads through: the manifest's node and the pinned public L1 RPC by default. A pass proves the deployment matches its manifest and this commit's code, not whose deployment it is: USDC, Permit2 and the admin are compared with the manifest's own fields, so take the manifest from this repository or compare those three with addresses you already trust. Check a deployment from the commit that made it, against your own endpoints. A URL passed as a flag shows in the process list and in `bun run`'s echo of the command, so don't pass one that carries an API key. That commit predates the manifest it made, so copy the manifest out first:
 
 ```sh
 cp deployments/testnet.json ~/testnet-manifest.json
@@ -62,16 +62,17 @@ git checkout <manifest.sourceCommit> && bun install --frozen-lockfile --ignore-s
 bun run bridge verify ~/testnet-manifest.json --node <your node> --l1-rpc <your L1 RPC>
 ```
 
-It checks the L1 bytecode against a fresh build, every binding between portal, router, bridge, proxy and token, the handover (complete, nothing pending, no deploy key holding a role), every merchant's delay and the guardian slot's against the setting, that the L2 supply is no higher than the portal's USDC (necessary, not sufficient: unclaimed deposits and unpaid withdrawals are liabilities too), and that demo merchants are listed only on local and testnet. `--tour` also checks a recorded tour's schema and that it belongs to this deployment.
+It checks the L1 bytecode against a fresh build, every binding between portal, router, bridge, proxy and token, the handover (complete, nothing pending, no deploy key holding a role), the guardian (none, in office or scheduled, unless `--guardian` names one), every merchant's delay and the guardian slot's against the setting, that the L2 supply is no higher than the portal's USDC (necessary, not sufficient: unclaimed deposits and unpaid withdrawals are liabilities too), and that demo merchants are listed only on local and testnet. `--tour` also checks a recorded tour's schema and that it belongs to this deployment.
 
 **Old deployments.** A manifest names its `protocolVersion` and `sourceCommit`, and every stored ticket names its protocol version. Finish an old deployment's claims and withdrawals with the CLI of its `sourceCommit`: a newer one refuses its artifacts and names that commit.
 
 ## Merchants
 
 - **Add**: `merchants add <manifest> <account…>`. At once; the admin may route adds through its own review (a multisig) instead.
-- **Switch off**: `merchants off <manifest> <account>`. The account stays a merchant for the entry's delay D (24 h by default), and each proof that reads it expires at the change − 1 meanwhile. `merchants on` switches it back.
+- **Switch off**: `merchants off <manifest> <account>`. The account stays a merchant for the entry's delay D (24 h by default), and each proof that reads it expires at the change − 1 meanwhile. `merchants on` switches it back. Once it lands the account is a user: it can no longer pay users or exit as a merchant. Requests stamped for it before then stay payable, in any amount, with no end date; nothing revokes a stamp.
 - **Cancel**: `merchants cancel <manifest> <account>` keeps the current value; the entry stays marked until the new change time. The guardian runs it with its own secret in the admin-secret variable: the token, not the CLI, decides who may cancel.
-- **Delay**: `merchants delay <manifest> <s>` sets D and syncs every listed merchant, in as few txs as four calls each allow. An increase applies at once; a decrease waits old − new (24 h → 1 h takes 23 h), and merchant txs are recognisable by their expiry meanwhile.
+- **Guardian**: none unless scheduled. One in office can cancel every switch-off until it is replaced, and replacing it takes the guardian slot's delay G (the delay setting, like D). So against a hostile guardian a removal lands G late if you replace it at once, and D + G late if a last-minute cancel is how you learn of it: 72 h from the first `merchants off` at the defaults.
+- **Delay**: `merchants delay <manifest> <s>` sets D and syncs the merchants the node lists, in as few txs as four calls each allow. It prints how many it synced: a merchant a lagging node left out keeps its old delay until a rerun reaches it. An increase applies at once; a decrease waits old − new (24 h → 1 h takes 23 h), and merchant txs are recognisable by their expiry meanwhile.
 
 **The 1 h option.** D = 1 h lets a switch-off land within the hour instead of a day. Its costs: every tx that proves a merchant side expires within the hour, rounded down to 30 minutes, so those txs stand out from the 23 h every other tx gets, and a slow device must prove and land a merchant tx within that window. Keep 24 h unless a day of exposure to a compromised merchant is unacceptable.
 
@@ -80,7 +81,8 @@ It checks the L1 bytecode against a fresh build, every binding between portal, r
 1. `pause <manifest> on`: instant. New claims, returns and exits on L2 are refused.
 2. `merchants off <manifest> <account>`.
 3. Wait D.
-4. `pause <manifest> off`.
+4. `merchants list <manifest>`: go on only if the account reads `off`. If it reads `on`, a guardian cancelled the switch-off: keep the pause, schedule a replacement (`merchants guardian <manifest> <address>`, zero for none), and repeat from step 2 once it has taken over.
+5. `pause <manifest> off`.
 
 The pause is L2-only. Token transfers on Aztec continue, withdrawals already emitted stay redeemable on Ethereum (`TokenPortal.withdraw` has no pause), and L1 deposits stay open, their messages waiting for the unpause. So it stops a bad merchant's new cash-outs, not one already in flight or its payments on Aztec.
 
@@ -98,6 +100,6 @@ The demo cast's keys are public by design: they derive from the deployment (`pac
 
 ## Showcase
 
-- **Build.** `bun run --cwd apps/showcase build:testnet` embeds `deployments/testnet.json` and its tour `deployments/testnet-tour.json`, and refuses any override or keyed variable. Workers Builds, connected in the Cloudflare dashboard, builds a preview of each branch and production from `main`; its deploy commands are `npx wrangler@4.138.0 deploy --config apps/showcase/wrangler.jsonc` and, for other branches, `npx wrangler@4.138.0 versions upload --config apps/showcase/wrangler.jsonc`. Pin wrangler there: a bare `npx wrangler` runs whatever was published last, with the build's Cloudflare token.
+- **Build.** `bun run --cwd apps/showcase build:testnet` embeds `deployments/testnet.json` and its tour `deployments/testnet-tour.json`, and refuses any override or keyed variable. Workers Builds, connected in the Cloudflare dashboard, builds a preview of each branch and production from `main`; its deploy commands are `bun run --cwd apps/showcase deploy` and, for other branches, `bun run --cwd apps/showcase deploy:preview`. Both run the wrangler that `bun.lock` pins, installed with the rest of the workspace: `npx wrangler` would resolve wrangler's dependencies afresh on every build, outside the lockfile and the release-age gate, and run them with the build's Cloudflare token.
 - **Check what is served.** `SHOWCASE_URL=<url> bun run --cwd apps/showcase test:testnet`: the served headers, manifest and tour; the tour's txs read back from both chains; the four cheats refused live with nothing sent; galactica refunding alice 0.01, proven in the browser; A_demo depositing 0.01. That deposit stays escrowed, unclaimed: its claim ticket lived in the test's browser.
 - **The float.** Visitors spend A_demo's and B_demo's USDC and gas, which `demo fund` (keyed) refills, and move alice's private balance, which `demo reset` or the page's Reset balances tops back up from galactica's. A step the float can't afford replays the recording and says so.
