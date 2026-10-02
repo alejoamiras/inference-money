@@ -30,7 +30,8 @@ bun run probe:testnet # keyless: pins, L1 wiring, assets, fee faucet budget
 RUN_ID=a bun run net:up        # anvil + the pinned aztec local network, detached; net:status / net:down
 RUN_ID=a bun run deploy:local  # deploy, verify every read-back, then write deployments/local/<run>/manifest.json
 RUN_ID=a bun run verify:local  # re-verify the manifest against a fresh forge build --force
-bun run test:integration      # own network + deploy (or NET_L1_RPC + NET_NODE_URL to attach), every spec, teardown
+bun run test:integration      # own network + deploy, every spec, teardown; then the clock specs on a network of their own
+                                # attach to a running network (NET_L1_RPC + NET_NODE_URL): bun run --cwd packages/integration test:specs
 bash packages/local-network/scripts/install-node.sh <dir>  # CI's node: frozen lock + sha-pinned Foundry; AZTEC_NODE_HOME=<dir> selects it
 
 bun run --cwd apps/showcase test:components      # vitest: components, build target, bundle check, proving decision
@@ -70,6 +71,7 @@ bash contracts/aztec/scripts/check-sole-consumer.sh   # static guard: the four c
 - **Formal canaries:** every halmos `check_` delegates to a public `prove*` body, and a forge canary runs that body against a one-rule-deleted mutant (`test/mocks/Mutants.sol`) and requires it to fail on that rule's assertion (`ProofCanary`). A new proof needs its mutant, its canary, and its (contract, name) pair in `scripts/halmos-gate.sh`.
 - **Noir artifacts are committed and must equal their source:** rebuild only through `contracts/aztec/scripts/compile.sh` (a bare `nargo compile` writes an untranspiled artifact and skips the pinned-dependency check compile.sh runs first), and run `compile.sh --check` before committing a `.nr` change. A new Noir git dependency, direct or transitive, goes into `noir-deps.sh`'s pinned table or CI's `--exact` step fails.
 - **The token stays an ABI superset of aztec-standards' Token, upstream storage first:** every upstream function keeps its selector, signature and attributes, new storage appends after upstream's, and `contracts/aztec/scripts/abi-superset.test.ts` lists every addition, so integrations written against upstream keep working.
+- **Request stamps expire:** a stamp carries its opening's hour and is live 25 hours; a private payment through one caps its tx at the stamp's deadline, and clients send it only while that cap is above the standard 82 800 s expiry (`STANDARD_TX_LIFETIME`). `paid(c)` makes a request take one payment. The clock specs (`packages/integration/clock`) move their network's clock, so they never attach to another run's.
 - **Rule checks are private reads, never public calls:** a merchant check proves the register and the switch-off entry at the tx's anchor block. A public call would publish both accounts of every private transfer.
 - **Private rule checks never go public:** a private function checks merchant status with `try_prove_merchant` and a binding through its owner's notes, never by enqueueing a public call, which would publish the checked address.
 - **TXE manifests:** every new Noir test gets its name in the crate's `txe-manifest.txt`; `run-txe-tests.sh` fails on a listed test that did not pass or a count under the crate's floor.
