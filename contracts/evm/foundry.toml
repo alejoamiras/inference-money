@@ -6,10 +6,13 @@ libs = ["node_modules"]
 solc = "0.8.28"
 evm_version = "cancun"
 via_ir = true
+# No metadata hash in the bytecode: a comment edit after a deploy must not fail `verify`'s byte-for-byte comparison
+# against a fresh build.
+bytecode_hash = "none"
 # The isolated linker symlinks each dependency into the repo-root store; solc must be allowed to read it.
 allow_paths = ["../../node_modules"]
 # Relative targets through this package's own node_modules symlinks keep source unit names machine-independent,
-# so bytecode metadata reproduces anywhere. scripts/check-remappings.ts asserts every target resolves.
+# so build metadata reproduces anywhere. scripts/check-remappings.ts asserts every target resolves.
 auto_detect_remappings = false
 remappings = [
   "@oz/=node_modules/@openzeppelin/contracts/",

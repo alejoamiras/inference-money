@@ -52,8 +52,8 @@ async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeMani
 	const read = (address: Address, abi: Abi, functionName: string) => l1.readContract({ address, abi, functionName }) as Promise<unknown>
 	const p = (fn: string) => read(m.l1.portal, portal.abi, fn)
 	const r = (fn: string) => read(m.l1.router, router.abi, fn)
-	const [registry, underlying, l2Bridge, rollupVersion, initializer, outbox, inbox] = await Promise.all(
-		["registry", "underlying", "l2Bridge", "rollupVersion", "initializer", "outbox", "inbox"].map(p),
+	const [registry, underlying, l2Bridge, rollupVersion, initializer, outbox, inbox, routerOfPortal] = await Promise.all(
+		["registry", "underlying", "l2Bridge", "rollupVersion", "initializer", "outbox", "inbox", "router"].map(p),
 	)
 	const [permit2, portalOfRouter, token] = await Promise.all(["PERMIT2", "PORTAL", "TOKEN"].map(r))
 	const permit2Code = await l1.getCode({ address: m.l1.permit2 })
@@ -67,6 +67,7 @@ async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeMani
 		pin("portal.initializer (L1 deployer)", initializer, l1Deployer),
 		pin("portal.outbox", outbox, m.l1.outbox),
 		pin("portal.inbox", inbox, m.l1.inbox),
+		pin("portal.router", routerOfPortal, m.l1.router),
 		pin("router.PERMIT2", permit2, m.l1.permit2),
 		pin("router.PORTAL", portalOfRouter, m.l1.portal),
 		pin("router.TOKEN", token, m.l1.usdc),

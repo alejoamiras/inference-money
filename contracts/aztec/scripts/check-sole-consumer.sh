@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # Static tripwire for what no TXE test can prove absent: the bridge consumes L1→L2 messages at EXACTLY two sites, and
 # each is bound to its own message type.
-#   claim_public:  hashes mint_to_public(to, amount), consumes it from config.portal, mints to `to`.
+#   claim_public:  hashes mint_to_public(to, amount, depositor), consumes it from config.portal, mints to `to`.
 #   claim_private: takes claim_salt and no raw-secret parameter; derives `derive_claim_secret(claim_salt, recipient)`;
-#                  hashes mint_to_private(amount); consumes with exactly that derived secret from config.portal;
-#                  mints to `recipient`.
+#                  hashes mint_to_private(amount, depositor); consumes with exactly that derived secret from
+#                  config.portal; mints to `recipient`.
 # No lower-level messaging/nullifier primitive may exist anywhere to consume around these checks. Any stray site, raw
 # secret, private hash reachable from claim_public, or foreign sender turns a deposit into something whoever holds
 # (salt, amount, leaf) can redirect, or lets an attacker's L1 contract mint unbacked tokens.
 #
-# Counts are occurrences across every non-test source the bridge executes (its crate plus the local claim_secret
-# lib), after stripping comments; bodies are analysed on a newline-flattened copy because signatures span lines.
+# Counts are occurrences across every non-test source the bridge executes (its crate plus the local claim_secret and
+# portal_messages libs), after stripping comments; bodies are analysed on a newline-flattened copy because signatures
+# span lines.
 # `--self-test` mutates the real source one rule at a time and requires each mutant to fail for its own reason.
 set -euo pipefail
 
 aztec_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bridge_main="$aztec_root/token_bridge/src/main.nr"
 lib_src="$aztec_root/claim_secret/src"
+messages_src="$aztec_root/portal_messages/src"
 
 # Drops block and line comments but keeps string literals (matched first in one alternation), so neither a
 # commented-out shape nor a comment opener inside a string can hide or fake live code.
@@ -44,8 +46,8 @@ bound_to() {
 check_public() {
   local body content
   body=$(fn_body "$1" claim_public)
-  content=$(bound_to "$body" "get_mint_to_public_content_hash${S}\\(${S}to${S},${S}amount${S}\\)")
-  [ -n "$content" ] || violation "claim_public does not hash mint_to_public(to, amount)" || return 1
+  content=$(bound_to "$body" "mint_to_public_content_hash${S}\\(${S}to${S},${S}amount${S},${S}depositor${S}\\)")
+  [ -n "$content" ] || violation "claim_public does not hash mint_to_public(to, amount, depositor)" || return 1
   printf '%s' "$body" | grep -qE "let config${S}=${S}self\\.storage\\.config\\.read\\(\\)" ||
     violation "claim_public does not read config from storage" || return 1
   printf '%s' "$body" |
@@ -59,7 +61,7 @@ check_private() {
   local body params derived content
   body=$(fn_body "$1" claim_private)
   params=$(printf '%s' "$body" | sed -E 's/\).*//')
-  # The legit parameters are {recipient, amount, claim_salt, message_leaf_index}; none contains "secret".
+  # The legit parameters are {recipient, amount, claim_salt, message_leaf_index, depositor}; none contains "secret".
   printf '%s' "$params" | grep -q claim_salt || violation "claim_private no longer takes claim_salt" || return 1
   if printf '%s' "$params" | grep -qi secret; then
     violation "claim_private accepts a raw secret parameter" || return 1
@@ -72,8 +74,8 @@ check_private() {
   printf '%s' "$body" |
     grep -qE "let ${derived}${S}=${S}derive_claim_secret${S}\\(${S}claim_salt${S},${S}recipient${S}\\)" ||
     violation "claim_private does not derive from (claim_salt, recipient)" || return 1
-  content=$(bound_to "$body" "get_mint_to_private_content_hash${S}\\(${S}amount${S}\\)")
-  [ -n "$content" ] || violation "claim_private does not hash mint_to_private(amount)" || return 1
+  content=$(bound_to "$body" "mint_to_private_content_hash${S}\\(${S}amount${S},${S}depositor${S}\\)")
+  [ -n "$content" ] || violation "claim_private does not hash mint_to_private(amount, depositor)" || return 1
   printf '%s' "$body" | grep -qE "let config${S}=${S}self\\.storage\\.config\\.read\\(\\)" ||
     violation "claim_private does not read config from storage" || return 1
   # aztec-nr 5 takes the secret as a one-element array; a second element would change the committed hash.
@@ -107,7 +109,7 @@ self_test() {
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: tmp is local
   trap "rm -rf '$tmp'" EXIT
-  check_file "$bridge_main" "$lib_src" >/dev/null 2>&1 || {
+  check_file "$bridge_main" "$lib_src" "$messages_src" >/dev/null 2>&1 || {
     echo "SELF-TEST FAIL: the real bridge source is rejected" >&2
     fails=1
   }
@@ -116,9 +118,10 @@ self_test() {
   # apply and must be rejected for the expected reason.
   mutant() {
     local name="$1" want="$2" dir="$tmp/$1" target reason
-    mkdir -p "$dir/src" "$dir/lib"
+    mkdir -p "$dir/src" "$dir/lib" "$dir/messages"
     cp "$bridge_main" "$dir/src/main.nr"
     cp "$lib_src"/*.nr "$dir/lib/"
+    cp "$messages_src"/*.nr "$dir/messages/"
     target="$dir/src/main.nr"
     [ "$3" = lib ] && target="$dir/lib/lib.nr"
     if ! FROM="$4" TO="$5" perl -0pi -e 's/\Q$ENV{FROM}\E/$ENV{TO}/ or die "no match\n"' "$target" 2>/dev/null; then
@@ -126,7 +129,7 @@ self_test() {
       fails=1
       return
     fi
-    if reason=$(check_file "$dir/src/main.nr" "$dir/lib" 2>&1); then
+    if reason=$(check_file "$dir/src/main.nr" "$dir/lib" "$dir/messages" 2>&1); then
       echo "SELF-TEST FAIL: '$name' accepted" >&2
       fails=1
     elif [[ "$reason" != *"$want"* ]]; then
@@ -150,7 +153,7 @@ fn exit_to_l1_public('
 [secret]," "content_hash,
 [claim_salt, secret],"
   mutant public_redeems_private "claim_public does not hash mint_to_public" main \
-    "get_mint_to_public_content_hash(to, amount)" "get_mint_to_private_content_hash(amount)"
+    "mint_to_public_content_hash(to, amount, depositor)" "mint_to_private_content_hash(amount, depositor)"
   mutant foreign_sender "claim_public does not consume its public content hash from config.portal" main \
     "[secret], config.portal, message_leaf_index);" "[secret], sender, message_leaf_index);"
   mutant mint_to_sender "claim_private does not mint to the committed recipient" main \
@@ -179,6 +182,6 @@ if [ "${1:-}" = "--self-test" ]; then
   self_test
   exit 0
 fi
-check_file "$bridge_main" "$lib_src" || exit 1
+check_file "$bridge_main" "$lib_src" "$messages_src" || exit 1
 echo "✅ sole-consumer invariant holds: claim_public and claim_private each consume only their own message type" \
   "from config.portal; claim_private consumes only the recipient-derived secret"

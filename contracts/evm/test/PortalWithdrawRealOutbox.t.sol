@@ -10,6 +10,7 @@ import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
+import {initializedPortal} from "./mocks/MockPortal.sol";
 import {BlacklistableERC20} from "./mocks/TestTokens.sol";
 
 /// The portal withdrawing through Aztec's REAL Outbox (membership proof and nullifier bitmap included) instead of
@@ -56,8 +57,7 @@ contract PortalWithdrawRealOutboxTest is Test {
         assertEq(rollup.VERSION(), VERSION, "fake rollup version");
 
         token = new BlacklistableERC20();
-        portal = new TokenPortal();
-        portal.initialize(address(new FakeRegistry(rollupAddr)), address(token), BRIDGE);
+        (portal,) = initializedPortal(address(new FakeRegistry(rollupAddr)), address(token), BRIDGE);
         assertEq(address(portal.outbox()), address(outbox), "portal is wired to the real outbox");
         token.mint(address(portal), RESERVE);
         token.mint(bystander, BYSTANDER_HOLDS);

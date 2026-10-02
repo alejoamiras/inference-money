@@ -6,7 +6,7 @@ import { sponsoredFpcArtifact, tokenArtifact, tokenBridgeArtifact, tokenMinterPr
 // The on-chain identities the deploy and every client register: a changed artifact must fail here before it ships.
 describe("L2 artifacts derive their pinned class ids", () => {
 	it.each([
-		["TokenBridge", tokenBridgeArtifact, "0x2b818998353a1e9885f5395017cdface0f71214a0b577f0c125190ddf0313d34"],
+		["TokenBridge", tokenBridgeArtifact, "0x25df25bc6b98e4f1e4a07589e3d98f975288c0d9d2e229fb61459d1bda5be9b2"],
 		["TokenMinterProxy", tokenMinterProxyArtifact, "0x0d218cb0d087edd630903d41a8a963c56ec7f46a852ee1a6e31d7e9943d0d2e6"],
 		["Token (merchant fork)", tokenArtifact, "0x0a1c52d7c23324567f60e817022467335af1c77d52c69e7751109411f73b87a5"],
 	] as const)("%s", async (_, artifact, classId) => {

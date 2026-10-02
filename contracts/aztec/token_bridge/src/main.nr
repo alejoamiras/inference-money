@@ -16,9 +16,7 @@ protocol::address::{AztecAddress, EthAddress},
 state_vars::{PublicImmutable, PublicMutable},
 };
 
-use token_portal_content_hash_lib::{
-get_mint_to_private_content_hash, get_mint_to_public_content_hash, get_withdraw_content_hash,
-};
+use portal_messages::{mint_to_private_content_hash, mint_to_public_content_hash, withdraw_content_hash};
 
 use claim_secret_lib::derive_claim_secret;
 
@@ -87,11 +85,13 @@ fn _assert_not_paused() {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
 }
 
+// Both claims hash the depositor the L1 message names, so a claim must present the Ethereum address the deposit came
+// from; any other consumes nothing.
 #[external("public")]
-fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
+fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field, depositor: EthAddress) {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
 assert(amount > 0, "Amount must be greater than zero");
-let content_hash = get_mint_to_public_content_hash(to, amount);
+let content_hash = mint_to_public_content_hash(to, amount, depositor);
 let config = self.storage.config.read();
 self.context.consume_l1_to_l2_message(content_hash, [secret], config.portal, message_leaf_index);
 self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_public(to, amount));
@@ -106,12 +106,13 @@ recipient: AztecAddress,
 amount: u128,
 claim_salt: Field,
 message_leaf_index: Field,
+depositor: EthAddress,
 ) {
 self.enqueue_self._assert_not_paused();
 assert(amount > 0, "Amount must be greater than zero");
 assert(!recipient.is_zero(), "Recipient cannot be zero");
 let config = self.storage.config.read();
-let content_hash = get_mint_to_private_content_hash(amount);
+let content_hash = mint_to_private_content_hash(amount, depositor);
 let secret = derive_claim_secret(claim_salt, recipient);
 self.context.consume_l1_to_l2_message(
 content_hash,
@@ -128,7 +129,7 @@ assert(self.storage.is_paused.read() == false, "Bridge is paused");
 assert(amount > 0, "Amount must be greater than zero");
 assert(!recipient.is_zero(), "Recipient cannot be zero");
 let config = self.storage.config.read();
-let content = get_withdraw_content_hash(recipient, amount, caller_on_l1);
+let content = withdraw_content_hash(recipient, amount, caller_on_l1);
 self.context.message_portal(config.portal, content);
 self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(self.msg_sender(), amount, authwit_nonce));
 }
@@ -139,7 +140,7 @@ self.enqueue_self._assert_not_paused();
 assert(amount > 0, "Amount must be greater than zero");
 assert(!recipient.is_zero(), "Recipient cannot be zero");
 let config = self.storage.config.read();
-let content = get_withdraw_content_hash(recipient, amount, caller_on_l1);
+let content = withdraw_content_hash(recipient, amount, caller_on_l1);
 self.context.message_portal(config.portal, content);
 self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_private(self.msg_sender(), amount, authwit_nonce));
 }

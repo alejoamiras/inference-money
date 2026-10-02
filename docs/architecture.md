@@ -1,10 +1,20 @@
 # Architecture
 
-**Deposit (L1 → L2).** The user signs one Permit2 witness transfer naming `Permit2DepositRouter`, which pulls exactly `amount` USDC and deposits it into `TokenPortal`. The portal locks the USDC and sends an L1→L2 message whose content hash binds the amount and (public) recipient. On Aztec, `token_bridge.claim_public` / `claim_private` consumes the message and mints through `token_minter_proxy`, the Token's only minter. Private claims re-derive the message secret in-circuit from a salt and the recipient, so only the committed recipient can be credited.
+**Deposit (L1 → L2).** The user signs one Permit2 witness transfer naming `Permit2DepositRouter`, which pulls exactly `amount` USDC and deposits it into `TokenPortal`. The portal locks the USDC and sends an L1→L2 message whose content hash binds the amount, the depositor and (public) the recipient. On Aztec, `token_bridge.claim_public` / `claim_private` consumes the message and mints through `token_minter_proxy`, the Token's only minter. Private claims re-derive the message secret in-circuit from a salt and the recipient, so only the committed recipient can be credited.
 
 **Withdraw (L2 → L1).** `token_bridge.exit_to_l1_*` burns the L2 balance and emits an L2→L1 message binding the L1 recipient and amount. Once the epoch is proven, anyone holding the membership witness calls `TokenPortal.withdraw`, which consumes the message in the Outbox and pays out.
 
 **Cross-toolchain keystone.** The content hashes and the claim-secret derivation are pinned by identical literal vectors in Noir, Solidity and TypeScript; a drift in any one strands deposits.
+
+**Message formats.** Each content is `sha256ToField(abi.encodeWithSignature(signature, args…))`, built by `TokenPortal.sol`, `contracts/aztec/portal_messages` and `packages/bridge-core/src/content-hash.ts`:
+
+| Message | Signature | Arguments |
+|---|---|---|
+| Public deposit | `mint_to_public(bytes32,uint256,address)` | recipient, amount, depositor |
+| Private deposit | `mint_to_private(uint256,address)` | amount, depositor; the recipient is bound through the claim secret |
+| Withdraw | `withdraw(address,uint256,address)` | L1 recipient, amount, L1 caller (zero: anyone may submit) |
+
+The depositor is the address the USDC came from on Ethereum. A direct deposit names its caller. `Permit2DepositRouter` calls the portal's router-only `depositToAztec{Public,Private}For`, which name the Permit2 signer the router pulled from. The portal accepts those calls from one router only: the one `initialize` bound after checking that it names this portal and its token. A claim must present the same depositor; any other address hashes to a message that does not exist.
 
 ## Merchant token
 

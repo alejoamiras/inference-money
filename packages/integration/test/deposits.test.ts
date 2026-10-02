@@ -11,7 +11,7 @@ import {
 	submitDeposit,
 	waitClaimFinalized,
 } from "@inference-money/bridge-core"
-import { type PublicClient, WaitForTransactionReceiptTimeoutError, type WalletClient } from "viem"
+import { isAddressEqual, type PublicClient, WaitForTransactionReceiptTimeoutError, type WalletClient } from "viem"
 import { claimable, claimFor, deposit, depositsBy, l1Actor, l1Now, l2Actor, l2Balances, sentDuring, USDC, usdcOf } from "./actors"
 import { harness, INTEGRATION } from "./harness"
 
@@ -48,6 +48,19 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		expect(await claim(t, harness().node, harness().wallet, harness().manifest, { from: relayer })).toBe("claimed")
 		expect((await l2Balances(bob)).private).toBe(3n * USDC)
 		expect((await l2Balances(relayer)).private).toBe(0n)
+	})
+
+	it("[A26] a router deposit names its signer, and a claim naming another depositor consumes nothing", async () => {
+		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
+		for (const kind of ["public", "private"] as const) {
+			const t = await deposit(l1, kind, bob, USDC)
+			expect(isAddressEqual(t.depositor, l1.account), `${kind}: the ticket names the signer`).toBe(true)
+			await claimable(t, bob)
+			const misnamed: ClaimTicket = { ...t, depositor: "0x000000000000000000000000000000000000dEaD" }
+			await expect(claimFor(misnamed)).rejects.toThrow(/No L1 to L2 message found|nonexistent L1-to-L2 message/)
+			expect(await claimFor(t), `${kind}: the signer's claim consumes the message`).toBe("claimed")
+		}
+		expect(await l2Balances(bob)).toEqual({ public: USDC, private: USDC })
 	})
 
 	it("[A3] a second claim of the same deposit reports already-consumed, public and private, on its nullifier alone", async () => {

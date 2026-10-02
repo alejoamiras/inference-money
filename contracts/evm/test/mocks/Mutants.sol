@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity >=0.8.27;
 
+import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {TokenPortal} from "../../src/TokenPortal.sol";
 import {Permit2DepositRouter} from "../../src/Permit2DepositRouter.sol";
 import {ISignatureTransfer} from "../../src/interfaces/ISignatureTransfer.sol";
@@ -25,8 +26,12 @@ contract PortalWithoutCap is TokenPortal {
     function _requireDeposit(uint256) internal pure override {}
 }
 
+contract PortalWithoutRouterCheck is TokenPortal {
+    function _requireRouter() internal view override {}
+}
+
 contract RouterWithoutZeroCheck is Permit2DepositRouter {
-    constructor(ISignatureTransfer p, ITokenPortal t) Permit2DepositRouter(p, t) {}
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 
     function _checkIntent(uint256 amount, bytes32 aztecRecipient, bool isPrivate) internal pure override {
         if (amount > type(uint128).max) revert AmountExceedsL2Max();
@@ -36,7 +41,7 @@ contract RouterWithoutZeroCheck is Permit2DepositRouter {
 }
 
 contract RouterWithoutCap is Permit2DepositRouter {
-    constructor(ISignatureTransfer p, ITokenPortal t) Permit2DepositRouter(p, t) {}
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 
     function _checkIntent(uint256 amount, bytes32 aztecRecipient, bool isPrivate) internal pure override {
         if (amount == 0) revert ZeroAmount();
@@ -46,7 +51,7 @@ contract RouterWithoutCap is Permit2DepositRouter {
 }
 
 contract RouterWithoutPrivateRule is Permit2DepositRouter {
-    constructor(ISignatureTransfer p, ITokenPortal t) Permit2DepositRouter(p, t) {}
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 
     function _checkIntent(uint256 amount, bytes32 aztecRecipient, bool isPrivate) internal pure override {
         if (amount == 0) revert ZeroAmount();
@@ -56,7 +61,7 @@ contract RouterWithoutPrivateRule is Permit2DepositRouter {
 }
 
 contract RouterWithoutPublicRule is Permit2DepositRouter {
-    constructor(ISignatureTransfer p, ITokenPortal t) Permit2DepositRouter(p, t) {}
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 
     function _checkIntent(uint256 amount, bytes32 aztecRecipient, bool isPrivate) internal pure override {
         if (amount == 0) revert ZeroAmount();
@@ -66,7 +71,15 @@ contract RouterWithoutPublicRule is Permit2DepositRouter {
 }
 
 contract RouterWithoutSettleCheck is Permit2DepositRouter {
-    constructor(ISignatureTransfer p, ITokenPortal t) Permit2DepositRouter(p, t) {}
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 
     function _checkSettled(uint256) internal view override {}
+}
+
+contract RouterNamesItself is Permit2DepositRouter {
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
+
+    function _depositor() internal view override returns (address) {
+        return address(this);
+    }
 }

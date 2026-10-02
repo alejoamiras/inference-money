@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2024 Aztec Labs.
 // Modified 2026 by the inference-money contributors. Derived from the canonical Aztec TokenPortal
-// (aztec-packages l1-contracts/test/portals/TokenPortal.sol). The changes below never touch a content-hash
-// preimage, so the L1<>L2 message hashes stay canonical (pinned by ContentHash.t.sol and the Noir keystone):
-//   - `initialize` is deployer-only and init-once. The L2 bridge address is derived from this contract's
-//     address, so the binding cannot move into the constructor.
+// (aztec-packages l1-contracts/test/portals/TokenPortal.sol), with these changes:
+//   - Deposit messages name their depositor: `mint_to_public(bytes32,uint256,address)` and
+//     `mint_to_private(uint256,address)`. A direct deposit names `msg.sender`; the bound router's `...For` deposits
+//     name the Permit2 signer it pulled from. `withdraw`'s message is the canonical one.
+//   - `initialize` is deployer-only and init-once, and binds the router, which must name this portal and token. The
+//     L2 bridge address is derived from this contract's address, so the binding cannot move into the constructor.
 //   - Deposits cap `amount` at u128 (the L2 amount type) and must raise the portal's balance by exactly `amount`.
 //   - `withdraw` must lower the portal's balance by exactly `amount`.
 //   - Deposits and `withdraw` are nonReentrant.
@@ -22,23 +24,34 @@ import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
 import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
 
+import {IDepositRouter} from "./interfaces/IDepositRouter.sol";
+
 contract TokenPortal is ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     error AlreadyInitialized();
     error NotInitializer();
+    /// @notice The router names another portal or token, so its deposits would mint against the wrong reserve.
+    error RouterMismatch();
+    error NotRouter();
     /// @notice The L2 side holds amounts as u128; a larger deposit could never be claimed.
     error AmountExceedsL2Max();
     /// @notice The token moved a different amount than requested (fee-on-transfer, surcharge, upgrade).
     error InexactTransfer();
 
-    event DepositToAztecPublic(bytes32 to, uint256 amount, bytes32 secretHash, bytes32 key, uint256 index);
+    event DepositToAztecPublic(
+        address indexed depositor, bytes32 to, uint256 amount, bytes32 secretHash, bytes32 key, uint256 index
+    );
 
-    event DepositToAztecPrivate(uint256 amount, bytes32 secretHashForL2MessageConsumption, bytes32 key, uint256 index);
+    event DepositToAztecPrivate(
+        address indexed depositor, uint256 amount, bytes32 secretHashForL2MessageConsumption, bytes32 key, uint256 index
+    );
 
     IRegistry public registry;
     IERC20 public underlying;
     bytes32 public l2Bridge;
+    /// @notice The one contract whose `...For` deposits may name a depositor other than itself.
+    address public router;
 
     IRollup public rollup;
     IOutbox public outbox;
@@ -58,13 +71,18 @@ contract TokenPortal is ReentrancyGuardTransient {
      * @param _registry - The registry address
      * @param _underlying - The underlying token address
      * @param _l2Bridge - The L2 bridge address
+     * @param _router - The deposit router, which must already name this portal and `_underlying`
      */
-    function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
+    function initialize(address _registry, address _underlying, bytes32 _l2Bridge, address _router) external {
         _requireInitializable();
+        if (IDepositRouter(_router).PORTAL() != address(this) || IDepositRouter(_router).TOKEN() != _underlying) {
+            revert RouterMismatch();
+        }
 
         registry = IRegistry(_registry);
         underlying = IERC20(_underlying);
         l2Bridge = _l2Bridge;
+        router = _router;
 
         rollup = IRollup(address(registry.getCanonicalRollup()));
         outbox = rollup.getOutbox();
@@ -85,18 +103,17 @@ contract TokenPortal is ReentrancyGuardTransient {
         nonReentrant
         returns (bytes32, uint256)
     {
-        _requireDeposit(_amount);
+        return _depositPublic(msg.sender, _to, _amount, _secretHash);
+    }
 
-        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
-        // The signature only tags the action so the hash is unique to it; nothing calls it.
-        bytes32 contentHash =
-            Hash.sha256ToField(abi.encodeWithSignature("mint_to_public(bytes32,uint256)", _to, _amount));
-
-        _pullExact(_amount);
-        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
-        emit DepositToAztecPublic(_to, _amount, _secretHash, key, index);
-
-        return (key, index);
+    /// @notice `depositToAztecPublic` for the router, naming the signer it pulled the funds from as the depositor.
+    function depositToAztecPublicFor(address _depositor, bytes32 _to, uint256 _amount, bytes32 _secretHash)
+        external
+        nonReentrant
+        returns (bytes32, uint256)
+    {
+        _requireRouter();
+        return _depositPublic(_depositor, _to, _amount, _secretHash);
     }
 
     /**
@@ -111,17 +128,17 @@ contract TokenPortal is ReentrancyGuardTransient {
         nonReentrant
         returns (bytes32, uint256)
     {
-        _requireDeposit(_amount);
+        return _depositPrivate(msg.sender, _amount, _secretHashForL2MessageConsumption);
+    }
 
-        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
-        // The signature only tags the action; no such function exists.
-        bytes32 contentHash = Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256)", _amount));
-
-        _pullExact(_amount);
-        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHashForL2MessageConsumption);
-        emit DepositToAztecPrivate(_amount, _secretHashForL2MessageConsumption, key, index);
-
-        return (key, index);
+    /// @notice `depositToAztecPrivate` for the router, naming the signer it pulled the funds from as the depositor.
+    function depositToAztecPrivateFor(address _depositor, uint256 _amount, bytes32 _secretHashForL2MessageConsumption)
+        external
+        nonReentrant
+        returns (bytes32, uint256)
+    {
+        _requireRouter();
+        return _depositPrivate(_depositor, _amount, _secretHashForL2MessageConsumption);
     }
 
     /**
@@ -165,13 +182,55 @@ contract TokenPortal is ReentrancyGuardTransient {
         if (before - underlying.balanceOf(address(this)) != _amount) revert InexactTransfer();
     }
 
-    // The two guards below are virtual only so the formal suite's canaries can delete one rule at a time and
-    // watch the matching proof fail.
+    function _depositPublic(address _depositor, bytes32 _to, uint256 _amount, bytes32 _secretHash)
+        private
+        returns (bytes32, uint256)
+    {
+        _requireDeposit(_amount);
+
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        // The signature only tags the action; nothing calls it.
+        bytes32 contentHash = Hash.sha256ToField(
+            abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", _to, _amount, _depositor)
+        );
+
+        _pullExact(_amount);
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
+        emit DepositToAztecPublic(_depositor, _to, _amount, _secretHash, key, index);
+
+        return (key, index);
+    }
+
+    function _depositPrivate(address _depositor, uint256 _amount, bytes32 _secretHash)
+        private
+        returns (bytes32, uint256)
+    {
+        _requireDeposit(_amount);
+
+        DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
+        // The signature only tags the action; nothing calls it.
+        bytes32 contentHash =
+            Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256,address)", _amount, _depositor));
+
+        _pullExact(_amount);
+        (bytes32 key, uint256 index) = inbox.sendL2Message(actor, contentHash, _secretHash);
+        emit DepositToAztecPrivate(_depositor, _amount, _secretHash, key, index);
+
+        return (key, index);
+    }
+
+    // The guards below are virtual only so the formal suite's canaries can delete one rule at a time and watch the
+    // matching proof fail.
 
     function _requireInitializable() internal view virtual {
         if (msg.sender != initializer) revert NotInitializer();
         // `registry` is zero only before the first initialize, so a live portal can never be repointed.
         if (address(registry) != address(0)) revert AlreadyInitialized();
+    }
+
+    /// @dev Runs before any hashing or pull, so a stranger's `...For` call learns nothing and moves nothing.
+    function _requireRouter() internal view virtual {
+        if (msg.sender != router) revert NotRouter();
     }
 
     function _requireDeposit(uint256 _amount) internal pure virtual {

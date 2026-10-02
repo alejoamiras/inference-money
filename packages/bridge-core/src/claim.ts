@@ -1,4 +1,4 @@
-import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { AztecAddress, EthAddress } from "@aztec-labs/aztec.js/addresses"
 import { Contract, NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import { type FeePaymentMethod, SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
 import { Fr } from "@aztec-labs/aztec.js/fields"
@@ -88,9 +88,10 @@ function claimCall(t: ClaimTicket, wallet: Wallet, m: BridgeManifest) {
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
 	const { amount, recipient, kind } = t.draft.intent
 	const leaf = new Fr(t.leafIndex)
+	const depositor = EthAddress.fromString(t.depositor)
 	return kind === "private"
-		? bridge.methods.claim_private!(recipient, amount, t.draft.secretOrSalt, leaf)
-		: bridge.methods.claim_public!(recipient, amount, t.draft.secretOrSalt, leaf)
+		? bridge.methods.claim_private!(recipient, amount, t.draft.secretOrSalt, leaf, depositor)
+		: bridge.methods.claim_public!(recipient, amount, t.draft.secretOrSalt, leaf, depositor)
 }
 
 export interface WaitClaimableOptions {
