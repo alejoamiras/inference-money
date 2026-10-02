@@ -7,7 +7,7 @@ code_review: off
 claude_model: opus
 harden: "/harden security medium on contracts/ (EVM + Noir) once testnet is live (user decision at Phase 0); accepted findings are fixed in arc 6, with a keyed-run redeploy if contract bytes change"
 budget: "recon 3 agents (done); /code-review off; codex high on gpt-6-astra, at most 3 rounds per arc plus one fresh cross-arc pass; Claude leg Opus 5.5. Testnet per deploy + acceptance run: at most 0.1 Sepolia ETH, 100 test USDC, 80 FJ of sponsor top-ups. Demo float: at most 0.02 ETH + 50 USDC on L1, 50 USDC on L2. CI e2e at most 90 min."
-status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); in progress: P1 ✓ P2 ✓ P3 ✓ P4 ✓ P5 ✓ P6 ✓ P7 ✓ P8 ✓"
+status: "approved 2026-09-30 (all asks answered; P9 disposable fallback added at the gate); implemented 2026-10-02: P1–P15 ✓, every arc loop and the cross-arc pass converged; delivery and close-out next"
 ---
 
 # galactica-compliant-usdc
@@ -1156,7 +1156,7 @@ test -s audit/security/<run-id>/report.md && test -s audit/security/<run-id>/fin
 ```
 Pass: the report's Artifact URL is recorded here, and every finding in `verified.md` is triaged, accepted or rejected with its reason, in `lessons/phase-14.md` and in this plan.
 
-**P15. Fix the accepted findings.**
+**P15. Fix the accepted findings.** ✓ 2026-10-02 (C-001 and the two exit lock-ups the arc review found; gate green on `1b52e37`; testnet redeployed from `dc6b2ce`, bridge `0x23d8cce5…f8ca`; `verify --tour` and the live check green on `60f8381`; [lessons](lessons/phase-15.md))
 
 Each fix lands with a test, and a moved literal moves in all three toolchains in the same commit.
 

@@ -1,6 +1,6 @@
 # Phase 15 — Fix the accepted findings
 
-Status: **in progress** 2026-10-01: C-001 fixed and tested; the arc-6 review found two exit lock-ups, also fixed; the gate matrix and the testnet redeploy chain follow.
+Status: **done** 2026-10-02. C-001 and the two exit lock-ups the arc-6 review found are fixed, gated and redeployed to testnet. The arc-6 loop and the final cross-arc pass both converged.
 
 ## C-001: the portal refuses a public recipient above the field
 
@@ -64,3 +64,18 @@ Codex ran in a fresh session (`01a0fc15…`) over the net diff from `e1103f8`. T
 - **Round 3:** a checkpointed revert counted as gone, though a prune can undo it; it now waits for finality too.
 - **After round 4, the e2e gate:** the finality-only retry broke the race the suite pins. Another visitor spends the note first, and the page must retry and settle, but it answered "may still take the first try". A send counts as gone at once only when the node refused it outright with `Invalid tx: …`: `sendTx` throws that before the pool, and an existing nullifier is one already in the chain's state. A lost response still waits for finality. Codex confirmed: "Converged within the explicitly accepted demo-risk boundary (high confidence)."
 - **Accepted residual, demo funds only:** an SDK HTTP retry after a lost response, with the earlier copy mined and the receipt read from a backend that hasn't seen the block, could still send twice. Moved to follow-ups for any non-demo use.
+
+## Redeploy #2
+
+The deploy (`deploy-2ebbd894`) and the admin accept (`admin-accept-bad7b837`) both exited 0 from `dc6b2ce`:
+- portal `0x6148010F…41Dc`, router `0x6F3733F1…7125`, bridge `0x23d8cce5…f8ca`;
+- `demo fund` sent A_demo 40 USDC and B_demo 10 USDC, with 0.01 ETH each, and bridged 1,000 FJ to the sponsor;
+- the admin accepted both roles and listed the two demo merchants in one tx.
+
+Then, keyless:
+- `demo setup` (exit 0) published the users' tag once both bindings had finalized.
+- `smoke --record` (exit 0, 24 minutes) settled every step and refused both cheats. Its withdraw paid out on L1 (`0xda74c9e0…2d41`).
+- `verify --tour` passed every check on `60f8381`, which commits the tag and the tour next to the manifest. The L2 supply is 29 USDC, equal to the portal's balance.
+- The live check against the Workers preview of `60f8381` passed 2 of 2: all four cheats were refused with nothing sent, galactica's refund was proven in the browser, and A_demo's deposit landed.
+
+Arc 6, round 3 (Codex, resumed): "Converged — the deployment finding is closed (high confidence, taking the reported successful runs as evidence). No material findings." Codex couldn't reach the preview from its sandbox, so it took the live check from the run's record.
