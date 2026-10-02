@@ -5,10 +5,10 @@
 		"rollupVersion": 2914217885
 	},
 	"contracts": {
-		"portal": "0xc0750372b623291366836aA83131A40aD90d31A0",
-		"router": "0x255184De4b1ad48aDf41Ee8D900ce03e2914adbe",
-		"token": "0x0eeebb7272ec6fb46e30232bf5ae9828f5f9e0919b301a41ca711576a5929508",
-		"bridge": "0x0c1799672eca49aa1b38b2b15d09b1dd1fb26ed9a0f7f475e4da3f56e87e1924"
+		"portal": "0x6148010F99C02E03537DfA224fFA2a27e1e041Dc",
+		"router": "0x6F3733F1938ddec7D85E976660010d3D26f37125",
+		"token": "0x2fa14df97f3d8a25942c7c0c0f748d01ee89a04720a564d28fa62c6926f0ad79",
+		"bridge": "0x23d8cce58f289e7e1a06805d2ae711833369882144ef78f5f1293676a3c5f8ca"
 	},
 	"steps": [
 		{
@@ -19,14 +19,14 @@
 			"amount": "10000000",
 			"verdict": "settled",
 			"l1": {
-				"txHash": "0xb7d3d50e81ff65444ca37f30dcf9962623740003848cd5680da9e962c3c95e76",
-				"block": 11822998
+				"txHash": "0xc4466b5559a8a4c8620ca2539341c0e235b4e7911f9b3135cfda2d837a3423f3",
+				"block": 11828556
 			},
 			"world": [
 				{
 					"chain": "ethereum",
 					"label": "depositor",
-					"value": "0x491C25BcceA0E8Da68D2CFb24954E8A78564365F",
+					"value": "0xfB959b3A2fD3f40592a1AC0d27D54f5698cf16f9",
 					"visibility": "readable"
 				},
 				{
@@ -44,13 +44,13 @@
 				{
 					"chain": "ethereum",
 					"label": "secret hash",
-					"value": "0x19f38e575ca18637ab02f0baa85a040b7a2464f9d6bb3faa2db9fe47f14cc213",
+					"value": "0x09a23740e08a9c74afeb5460a04dfe2bd8956689ff5ebf59600242dae27bc226",
 					"visibility": "readable"
 				},
 				{
 					"chain": "ethereum",
 					"label": "message index",
-					"value": "13",
+					"value": "53",
 					"visibility": "readable"
 				}
 			]
@@ -63,9 +63,9 @@
 			"amount": "10000000",
 			"verdict": "settled",
 			"l2": {
-				"txHash": "0x15dfffc0c59b33ff52f3da82e87a4dd82672c583db474947b471efce979d7589",
-				"block": 3885,
-				"expiration": 1790954940
+				"txHash": "0x304de9dde5e613126b9d5c6603609110cdb780b422583b4e08f81e72eabf7b82",
+				"block": 4869,
+				"expiration": 1791021756
 			},
 			"world": [
 				{
@@ -77,13 +77,13 @@
 				{
 					"chain": "aztec",
 					"label": "expires at",
-					"value": "1790954940",
+					"value": "1791021756",
 					"visibility": "readable"
 				},
 				{
 					"chain": "aztec",
 					"label": "fee",
-					"value": "1663179389040000000",
+					"value": "1645558299809400000",
 					"visibility": "readable"
 				},
 				{
@@ -137,9 +137,9 @@
 			"amount": "10000000",
 			"verdict": "settled",
 			"l2": {
-				"txHash": "0x13176bae915e25579e0d4eab1352aec400269087d63dccdf79993d15f852485d",
-				"block": 3886,
-				"expiration": 1790954940
+				"txHash": "0x07b5af3d9887311edd43df82976d170b05b6eb66eb7b4decfcb63d8437063644",
+				"block": 4870,
+				"expiration": 1791021756
 			},
 			"world": [
 				{
@@ -151,13 +151,13 @@
 				{
 					"chain": "aztec",
 					"label": "expires at",
-					"value": "1790954940",
+					"value": "1791021756",
 					"visibility": "readable"
 				},
 				{
 					"chain": "aztec",
 					"label": "fee",
-					"value": "1066358036250000000",
+					"value": "1054985695650000000",
 					"visibility": "readable"
 				},
 				{
@@ -204,9 +204,9 @@
 			"amount": "10000000",
 			"verdict": "settled",
 			"l2": {
-				"txHash": "0x087b62a8faf57a45588d46fc8c9503ceb548c673e499523e55defef53b45ff1b",
-				"block": 3887,
-				"expiration": 1790955012
+				"txHash": "0x2594fb20f1aac5982ebb74ec12e5029f7d0784ceb4804350f207b75ef17ba398",
+				"block": 4871,
+				"expiration": 1791021828
 			},
 			"world": [
 				{
@@ -218,13 +218,13 @@
 				{
 					"chain": "aztec",
 					"label": "expires at",
-					"value": "1790955012",
+					"value": "1791021828",
 					"visibility": "readable"
 				},
 				{
 					"chain": "aztec",
 					"label": "fee",
-					"value": "1036646298520000000",
+					"value": "1040360002010000000",
 					"visibility": "readable"
 				},
 				{
@@ -277,9 +277,9 @@
 			"amount": "3000000",
 			"verdict": "settled",
 			"l2": {
-				"txHash": "0x03e8e248ccad2aa6ed9224878540c463ae0dbfa0343f6d8338af23bd83369c16",
-				"block": 3888,
-				"expiration": 1790955084
+				"txHash": "0x060f8823412107f5ae79138c0318a6f2c4b10496c4391b834b95451116db55f6",
+				"block": 4875,
+				"expiration": 1791021972
 			},
 			"world": [
 				{
@@ -291,13 +291,13 @@
 				{
 					"chain": "aztec",
 					"label": "expires at",
-					"value": "1790955084",
+					"value": "1791021972",
 					"visibility": "readable"
 				},
 				{
 					"chain": "aztec",
 					"label": "fee",
-					"value": "1259749212880000000",
+					"value": "1264262164940000000",
 					"visibility": "readable"
 				},
 				{
@@ -369,9 +369,9 @@
 			"amount": "3000000",
 			"verdict": "settled",
 			"l2": {
-				"txHash": "0x152b0d4d403f0a0bee91213a19d6bfa64fe696cd419318b13c4304ffa2c6663f",
-				"block": 3889,
-				"expiration": 1790955156
+				"txHash": "0x24e021e95ab000edf6d4b165a7d7776407803f0ac8effe3b635b859a34d185d7",
+				"block": 4876,
+				"expiration": 1791021972
 			},
 			"world": [
 				{
@@ -383,13 +383,13 @@
 				{
 					"chain": "aztec",
 					"label": "expires at",
-					"value": "1790955156",
+					"value": "1791021972",
 					"visibility": "readable"
 				},
 				{
 					"chain": "aztec",
 					"label": "fee",
-					"value": "1717153050510000000",
+					"value": "1650309661109700000",
 					"visibility": "readable"
 				},
 				{
@@ -449,14 +449,14 @@
 			"amount": "3000000",
 			"verdict": "settled",
 			"l1": {
-				"txHash": "0x86af4a1ffcaa9a67e57120552e5d557d5530708964e7a62ddc9abedc540283e5",
-				"block": 11823120
+				"txHash": "0xda74c9e0b81d2481164c41d337a8935a2756ed2f053b0fa3aa054ed7579c2d41",
+				"block": 11828672
 			},
 			"world": [
 				{
 					"chain": "ethereum",
 					"label": "recipient",
-					"value": "0x491C25BcceA0E8Da68D2CFb24954E8A78564365F",
+					"value": "0xfB959b3A2fD3f40592a1AC0d27D54f5698cf16f9",
 					"visibility": "readable"
 				},
 				{

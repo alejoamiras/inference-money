@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { browserPaymentStore, localKeyValue } from "./store"
+import { browserPaymentStore, localKeyValue, UnsavedRecordError } from "./store"
 import { tickets } from "./tickets"
 
 /** The page's storage, but refusing every write, as a full quota or blocked site data does. */
@@ -26,7 +26,7 @@ describe("browser stores", () => {
 		expect(localKeyValue("im/a/").get("x")).toBe("1")
 		expect(localKeyValue("im/b/").get("x")).toBeUndefined()
 		const full = localKeyValue("im/a/", fullStorage())
-		full.set("y", "2")
+		expect(full.set("y", "2")).toBe(false)
 		expect([full.get("y"), localKeyValue("im/a/").get("y")]).toEqual(["2", undefined])
 		expect(full.keys().sort()).toEqual(["x", "y"])
 	})
@@ -64,6 +64,19 @@ describe("browser stores", () => {
 		t.dropExit("e1")
 		expect(t.exits().map((e) => e.id)).toEqual(["e2"])
 		expect(t.deposits()).toEqual([{ id: "d1", user: "alice", since: 3, draft: "d" }])
+	})
+
+	it("refuse a send's record that a reload would lose, before the send leaves, while releases still go through", async () => {
+		const kv = localKeyValue("im/full/", fullStorage())
+		const t = tickets(kv)
+		expect(() => t.putDeposit({ id: "d", user: "alice", since: 0, draft: "d" })).toThrow(UnsavedRecordError)
+		expect(() => t.putExit({ id: "e", actor: "alice", since: 0 })).toThrow(UnsavedRecordError)
+		const payments = browserPaymentStore(kv, undefined)
+		const sent = { state: "sent", owner: "o", txHash: "0x1", expiresAt: "9" } as const
+		await expect(payments.put("k", sent)).rejects.toThrow(UnsavedRecordError)
+		await payments.put("k", undefined)
+		t.dropExit("e")
+		expect([t.deposits(), t.exits(), await payments.get("k")]).toEqual([[], [], undefined])
 	})
 
 	it("keep working in memory when reading localStorage itself throws, as with site data blocked", () => {

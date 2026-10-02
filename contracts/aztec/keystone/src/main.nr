@@ -10,7 +10,7 @@ use aztec::messages::offchain_messages::OFFCHAIN_MESSAGE_IDENTIFIER;
 use aztec::protocol::address::{AztecAddress, EthAddress};
 use aztec::protocol::constants as protocol;
 use aztec::protocol::hash::poseidon2_hash_bytes;
-use aztec::protocol::traits::FromField;
+use aztec::protocol::traits::{Deserialize, FromField};
 use claim_secret_lib::{derive_claim_secret, DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET};
 use merchant_stamp::{
     DOM_SEP__MERCHANT_STAMP, DOM_SEP__MERCHANT_STAMP_PAD, MERCHANT_SIDE_SLOT, pad,
@@ -56,6 +56,25 @@ fn withdraw_matches_l1() {
     let caller = EthAddress::zero();
     let h = withdraw_content_hash(recipient, 1_000_000, caller);
     assert(h == 0x00ac390e12f1097130e1a7c2e5eea30780cd11d12002b8de22d608cf10a60775);
+}
+
+// An ABI-decoded EthAddress may hold any field; a withdraw takes only what Solidity's `address` can, up to its widest.
+global BEYOND_ADDRESS: EthAddress = EthAddress::deserialize([0x10000000000000000000000000000000000000000]);
+
+#[test(should_fail_with = "A withdraw names only 20-byte Ethereum addresses")]
+fn withdraw_refuses_a_wider_recipient() {
+    let _ = withdraw_content_hash(BEYOND_ADDRESS, 1, EthAddress::zero());
+}
+
+#[test(should_fail_with = "A withdraw names only 20-byte Ethereum addresses")]
+fn withdraw_refuses_a_wider_caller() {
+    let _ = withdraw_content_hash(EthAddress::from_field(0xBEEF), 1, BEYOND_ADDRESS);
+}
+
+#[test]
+fn withdraw_takes_the_widest_address() {
+    let widest = EthAddress::from_field(0xffffffffffffffffffffffffffffffffffffffff);
+    let _ = withdraw_content_hash(widest, 1, widest);
 }
 
 // A deposit's content must commit to every bit of its depositor: flipping any one of the 160 must move both hashes,
