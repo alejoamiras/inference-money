@@ -177,7 +177,7 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 
 **As built.** Attribution lives in `presto/proofs.ts` (no SDK import, so its tests need none); the wallet runs each proof inside its `around`, which runs the consent's check first and credits the proof only when the call settles, because the SDK reports `proved` before it decodes Presto's answer and can still fall back after it. `presto/index.ts` (`pagePresto`) is the one module `start.ts` loads, and "Try it yourself" starts the consent through its `ask()` (`live/useLivePresto.ts`). The ribbon element is created outside React, attributes first: React 19 assigns a prop the element defines as a property, and `variant` is a getter. Presto's faces reach its shadow tree through `--pb-font-*` (`presto/ribbon.css`). No Vite dedupe for the simulator: the page passes its own, so the SDK's lazy import never runs, and the single copy resolves anyway. The browser font check (I5) runs in Phase 4's spec. Details: `lessons/phase-3.md`.
 
-### Phase 4: the Presto spec, CI and docs
+### Phase 4: the Presto spec, CI and docs ✓
 
 `apps/showcase/e2e/specs/presto.spec.ts`, with the egress record running before navigation:
 1. The page loads; the ribbon shows Connect; neither Presto origin has seen any request.
@@ -189,6 +189,8 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 CI: a `presto` job in `_e2e.yml` beside `e2e` (same toolchain setup, `bun run test:e2e:presto`, the same failure-artifact upload). Docs: the `AGENTS.md` command list (`test:e2e:presto` beside `test:e2e`), `docs/ci-pipeline.md`'s `showcase.yml → _e2e.yml` row (the `presto` job), and `docs/architecture.md` if it describes the showcase's prover.
 
 **Validation gate.** `bun run test:e2e` (the main suite, unchanged CSP for fake proofs) and `bun run test:e2e:presto` both exit 0; `bun run lint:actions` exits 0. Layers: e2e (local network), workflow lint.
+
+**As built.** A fresh presto-server home holds no bb, so step 2 reads `downloading` (connected, fetching this Aztec version's prover) or `available`; the connected morph is asserted at step 5's reconnect, once bb is cached. Step 1 also checks I5: the ribbon's text computes to Figtree Variable, which loads from the page's origin. The bundle check follows what the entry can load (static and dynamic imports): rolldown drops the dead `import()` behind `PROVES` on fake-proof builds but still emits its target as an unreferenced chunk. Details: `lessons/phase-4.md`.
 
 ### Manual acceptance (owner, after the PR's preview deploys)
 

@@ -10,10 +10,16 @@
 
 1. First Presto run: 4/4 passed (the spec in 51 s: one native proof including presto-server's first bb download, two browser proofs).
 2. First main-suite run, concurrent with it: stopped at the bundle check. The fake-proof build held both Presto chunks. Rolldown had dropped the dead `import()` calls behind `PROVES` but still emitted their targets as chunks that nothing references. The page can never load them, so the check now follows static and dynamic imports from the entry (what the page can load), and the two comments that claimed a fake bundle carries nothing now say the page never loads it. Verified on the kept fake bundle (Presto unreachable) and the testnet bundle (reachable).
-3. Re-runs, started together: the Presto suite passed 4/4; the main suite died claiming ports with `ports.md.lock is held by pid …, which is no longer running`, while the lock file was already gone. That is a race in `packages/local-network/src/registry.ts` `tryLock`: it reads the holder, the holder releases and exits, then the liveness check calls it dead. Pre-existing and outside this plan: logged as a follow-up, the suite re-run on its own.
+3. Re-runs, started together: the Presto suite passed 4/4; the main suite died claiming ports with `ports.md.lock is held by pid …, which is no longer running`, while the lock file was already gone. That is a race in `packages/local-network/src/registry.ts` `tryLock`: it reads the holder, the holder releases and exits, then the liveness check calls it dead. Pre-existing and outside this plan: logged as a follow-up. The suite re-run on its own passed 7/7.
 
 ## Findings
 
 - A fresh presto-server home holds no bb, so the first check reads `downloading` (connected, fetching this Aztec version's prover) rather than `available`; the spec accepts either at Connect and asserts the connected morph at the reconnect, once bb is cached.
 - The Connect click and the grant race in the test (no prompt to wait on); both orders end connected, through `connect()` or the permission watch.
 - Headless Chromium reports `ERR_CONNECTION_REFUSED` once the proxy stops, and the SDK falls back without any HTTP `/prove`.
+
+## Gate
+
+`bun run test:e2e` exit 0 (7 passed, 2.7 min, fake-proof bundle: Presto unreachable); `bun run test:e2e:presto` exit 0 (4 passed: the three infra specs and the Presto spec in 50 s); `bun run lint:actions` exit 0.
+
+LESSONS_FILE=implementations-plan/presto-showcase/lessons/phase-4.md
