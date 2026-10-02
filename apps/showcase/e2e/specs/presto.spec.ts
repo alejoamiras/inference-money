@@ -15,6 +15,7 @@ test.describe.configure({ timeout: 40 * 60_000 })
 const SEND = { actor: "alice", action: "send", to: "galactica", amount: "0.01" }
 
 const ribbon = (page: Page) => page.getByTestId(TESTIDS.prestoRibbon)
+const hint = (page: Page) => page.getByTestId(TESTIDS.walletStatus)
 const proveChip = (page: Page) => page.getByTestId(TESTIDS.verdict).locator('[data-stage="prove"]')
 
 /** A send that settles, and what the Prove chip then says. */
@@ -70,6 +71,7 @@ test("proves on Presto only once the visitor connects it, and in the page once i
 		const reached = toPresto().length
 		expect(await send(page)).toBe("Prove")
 		expect(toPresto()).toHaveLength(reached)
+		await expect(hint(page)).toContainText("proven in this browser.")
 	})
 
 	await test.step("with Presto gone from HTTPS, a send proves in the page, and HTTP carries no witness", async () => {
@@ -80,7 +82,7 @@ test("proves on Presto only once the visitor connects it, and in the page once i
 		const reached = toPresto().length
 		expect(await send(page)).toBe("Prove")
 		await expect(ribbon(page)).toHaveAttribute("state", "secure-connection-unavailable")
-		await expect(page.getByTestId(TESTIDS.walletStatus)).toContainText("in this browser")
+		await expect(hint(page)).toContainText("proven by Presto when it can, else in this browser.")
 		const overHttp = toPresto()
 			.slice(reached)
 			.filter((r) => r.url.startsWith(http))

@@ -1,8 +1,8 @@
 /**
  * Presto's "Ask before you probe", adapted from the SDK README's `askBeforeConnecting` (MIT, alejoamiras/presto):
  * nothing reaches the visitor's machine until they press Connect or their browser already lets this site reach apps
- * on the device, and once the browser reports a revocation, proofs stay in the page and any check started before it
- * is dropped. Here it also stops: "Try it yourself" holds it while mounted.
+ * on the device, and once the browser reports a revocation, later proofs stay in the page and any check started
+ * before it is dropped. Here it also stops: "Try it yourself" holds it while mounted.
  */
 import { type LoopbackPermissionState, loopbackPermission, type PrestoStatus, watchLoopbackPermission } from "@alejoamiras/presto"
 import { cell, type Observable } from "@/lib/observable"
@@ -15,7 +15,7 @@ export interface PrestoConsent {
 	/** Only from a click that first says the browser may ask to let this site reach apps on this device. */
 	connect(): Promise<void>
 	view: Observable<PrestoView | undefined>
-	/** Every proof that starts from here on stays in the page; one already under way finishes where it started. */
+	/** Every proof that starts from here on stays in the page; stopping does not cancel SDK work already under way. */
 	stop(): void
 }
 
@@ -92,7 +92,7 @@ export function askBeforeConnecting(page: PageProver): PrestoConsent {
 	})()
 	// Catches a reset or a grant in browsers that report no changes.
 	const unguard = page.guard(async () => sync(await loopbackPermission()))
-	// A fallback means Presto stopped answering as it did: check again, so the ribbon shows why.
+	// A fallback may mean Presto went away: check again, so the ribbon shows it.
 	const unfollow = page.proof.listen((p) => {
 		if (p.attempt === "browser" && consented) void check()
 	})
