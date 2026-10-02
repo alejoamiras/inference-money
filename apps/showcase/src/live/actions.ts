@@ -320,12 +320,15 @@ const MAY_STILL_LAND =
 	"The network may still take the first try, so this page won't send it again. Check the balances in a few minutes, and try again if nothing moved."
 
 /**
- * A sent tx's fate, waited for while the node holds it. Only finality proves it gone: a node's "dropped" can hide a tx
- * that still lands (a lost response, another node behind the same URL), and a prune can undo a revert.
+ * A sent tx's fate, waited for while the node holds it. A copy the node refused outright never entered its pool, and
+ * its nullifier is already in the chain's state, which no pending copy gets past: gone. Any other drop proves nothing
+ * (a lost response, another node behind the same URL), and a prune can undo a revert, so those wait for finality.
  */
 async function fateOf(ctx: LiveCtx, tx: SentTx): Promise<"landed" | "gone" | "unsettled"> {
 	const hash = TxHash.fromString(tx.hash)
-	if ((await ctx.demo.node.getTxReceipt(hash)).status === TxStatus.DROPPED) return finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
+	if ((await ctx.demo.node.getTxReceipt(hash)).status === TxStatus.DROPPED) {
+		return tx.refused ? "gone" : finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
+	}
 	const receipt = await waitForTx(ctx.demo.node, hash, { ...L2_DONE, dontThrowOnRevert: true })
 	return receipt.hasExecutionSucceeded() ? "landed" : finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
 }

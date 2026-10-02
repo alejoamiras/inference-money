@@ -10,6 +10,8 @@ export interface SentTx {
 	feePayer: string
 	expiresAt: bigint
 	anchorTs: bigint
+	/** The node refused this copy outright (`Invalid tx: …`), so it never entered the node's pool. */
+	refused?: true
 }
 
 /**
@@ -29,7 +31,10 @@ export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: Sen
 				}
 				onSend?.(record)
 				sent.push(record)
-				return target.sendTx(tx)
+				return target.sendTx(tx).catch((e: unknown) => {
+					if (/Invalid tx: /.test(e instanceof Error ? e.message : String(e))) record.refused = true
+					throw e
+				})
 			}
 		},
 	})

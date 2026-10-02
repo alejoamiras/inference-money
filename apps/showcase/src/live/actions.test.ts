@@ -86,7 +86,8 @@ function ctxWithReceipt(status: TxStatus, succeeded: boolean, finalizedAt = 0n):
 	return { demo, m: MANIFEST, l1RpcUrl: "", tickets: undefined as never, tour: TOUR, explorer: undefined, requests: new Map() }
 }
 
-const send = (ctx: LiveCtx, expiresAt = 0n) => ctx.demo.sent.push({ hash: HASH, feePayer: "0x0", expiresAt, anchorTs: 0n })
+const send = (ctx: LiveCtx, expiresAt = 0n, refused?: true) =>
+	ctx.demo.sent.push({ hash: HASH, feePayer: "0x0", expiresAt, anchorTs: 0n, ...(refused && { refused }) })
 const DONE: Outcome = { kind: "settled", detail: "done", rows: [] }
 
 describe("withConflictRetry", () => {
@@ -106,17 +107,19 @@ describe("withConflictRetry", () => {
 	})
 
 	it("sends a one-send action again only once its first try provably cannot land", async () => {
-		// The node no longer holds the first try, which expires at 10: only a finalized block past that proves it gone.
-		for (const [finalizedAt, retried] of [
-			[10n, false],
-			[11n, true],
+		// The node doesn't hold the first try, which expires at 10: proven gone by its outright refusal, or by a finalized
+		// block past its expiry; a drop alone (a lost response) proves nothing.
+		for (const [refused, finalizedAt, retried] of [
+			[undefined, 10n, false],
+			[undefined, 11n, true],
+			[true, 0n, true],
 		] as const) {
 			const ctx = ctxWith(false, finalizedAt)
 			let attempts = 0
 			const outcome = await withConflictRetry(ctx, async () => {
 				if (attempts++ > 0) return DONE
-				send(ctx, 10n)
-				throw new Error("Existing nullifier")
+				send(ctx, 10n, refused)
+				throw new Error("Invalid tx: Existing nullifier")
 			}, ["transfer"])
 			if (retried) expect([attempts, outcome]).toEqual([2, DONE])
 			else expect([attempts, outcome]).toEqual([1, { kind: "failed", detail: expect.stringMatching(/may still take the first try/) }])
