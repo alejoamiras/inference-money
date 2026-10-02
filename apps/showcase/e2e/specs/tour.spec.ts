@@ -19,10 +19,16 @@ const SCENES: [string, string | undefined][] = [
 /** The recording a local build plays. */
 const RECORDED = JSON.parse(readFileSync(new URL("../fixtures/tour.json", import.meta.url), "utf8")) as { steps: { id: string }[] }
 
-test("the tour plays the recording by itself, shows every scene's recorded outcome, and sends nothing", async ({ page, me }) => {
+test("the page opens on Try it yourself; its recorded run plays by itself, shows every scene's recorded outcome, and sends nothing", async ({
+	page,
+	me,
+}) => {
 	await page.goto("/")
 	expect(await page.evaluate(() => crossOriginIsolated), "the page is cross-origin isolated").toBe(true)
 	await expect(page.getByTestId(TESTIDS.network)).toHaveText("Local network · proofs off")
+	await expect(page.getByTestId(TESTIDS.tryIt)).toBeVisible()
+	await page.locator(`[data-testid="${TESTIDS.mode}"][data-mode="tour"]`).click()
+	await expect(page).toHaveURL(/#recorded$/)
 	// Nobody pressed anything: the first scene lands and its row reaches the feed.
 	await expect(page.getByTestId(TESTIDS.feedRow).first()).toHaveAttribute("data-step", "deposit", { timeout: 30_000 })
 

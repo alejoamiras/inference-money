@@ -13,7 +13,7 @@ A USDC-only bridge between Ethereum (L1) and Aztec (L2), so users can hold USDC 
 | `packages/deployer` | The operator CLI (`bun run bridge`): deploy, admin handover, merchants, pause, verify, export, the demo and the acceptance run; keyed-run plumbing |
 | `packages/demo` | The demo cast (public keys derived from a deployment), its flows (deposit, claim, send), the recorded tour's schema and the world-view decoder; browser-safe, shared by the deployer and the showcase |
 | `packages/integration` | bridge-core flows end to end against a per-run local network with the bridge deployed |
-| `apps/showcase` | The demo showcase (React): the guided tour replays the recorded run, "Try it yourself" (`#live`) drives one embedded Aztec wallet holding the demo cast, proving through Presto once the visitor connects it; a build-embedded manifest, users' tag and tour; `e2e/` holds the browser suite and the proving harness (`#proving`) |
+| `apps/showcase` | The demo showcase (React): "Try it yourself" (the default; `#live` too) drives one embedded Aztec wallet holding the demo cast, proving through Presto once the visitor connects it, and "Watch a recorded run" (`#recorded`) replays the recorded run; a build-embedded manifest, users' tag and recording; `e2e/` holds the browser suite and the proving harness (`#proving`) |
 | `implementations-plan/` | Plans: `index.md` lists the active ones, `lessons.md` and `follow-ups.md` are the curated layer, closed plans live under `archive/` |
 
 ## Commands

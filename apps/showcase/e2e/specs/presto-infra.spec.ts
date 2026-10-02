@@ -46,6 +46,9 @@ const fromAnotherProcess = (p: PrestoRun, origin?: string) =>
 		req.end()
 	})
 
+/** The recording: a page with no Presto consent of its own, so every request to Presto here is the test's. */
+const PAGE = "/#recorded"
+
 test("until the visitor allows it, the page sends nothing to Presto, and the browser holds back what it tries", async ({
 	page,
 	me,
@@ -54,7 +57,7 @@ test("until the visitor allows it, the page sends nothing to Presto, and the bro
 	presto,
 }) => {
 	const [https] = prestoOrigins(run.presto!)
-	await page.goto("/")
+	await page.goto(PAGE)
 	await page.waitForLoadState("networkidle")
 	expect(await loopbackState(page)).toBe("prompt")
 	const toPresto = (url: string) => prestoOrigins(run.presto!).includes(new URL(url).origin)
@@ -74,7 +77,7 @@ test("until the visitor allows it, the page sends nothing to Presto, and the bro
 test("once allowed, the page reaches presto-server over HTTPS through the run's certificate", async ({ page, context, run, presto }) => {
 	const [https] = prestoOrigins(run.presto!)
 	await context.grantPermissions(["local-network-access"], { origin: run.webOrigin })
-	await page.goto("/")
+	await page.goto(PAGE)
 	expect(await loopbackState(page)).toBe("granted")
 
 	const outcome = await fetchFromPage(page, `${https}/health`, 30_000)

@@ -22,7 +22,7 @@ test("[A29] serves the testnet build as built: its manifest, its tour, its heade
 	manifest,
 	tour,
 }) => {
-	const response = await page.goto("/")
+	const response = await page.goto("/#recorded")
 	const headers = response?.headers() ?? {}
 	const built = servedHeaders({ manifest, usersTag: "", l1RpcUrl: TESTNET.defaultL1RpcUrl, proofs: "real", presto: PRESTO_DEFAULT, tour })
 	for (const [name, value] of Object.entries(built)) expect(headers[name.toLowerCase()], name).toBe(value)
