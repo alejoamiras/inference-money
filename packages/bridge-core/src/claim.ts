@@ -51,6 +51,18 @@ export class SponsorUnavailableError extends Error {
  */
 export const L2_DONE = { waitForStatus: TxStatus.CHECKPOINTED, timeout: 600 } as const
 
+/**
+ * A faster answer for a UI: the tx is in a proposed block. A PXE on its default `proposed` sync tip builds on it, and the
+ * node refuses a double spend against it, but a prune undoes it: nothing irreversible may rest on it before finality.
+ */
+export const L2_PROPOSED = { waitForStatus: TxStatus.PROPOSED, timeout: 600 } as const
+
+/** How far a flow waits for its tx before returning; {@link L2_DONE} unless the caller opts into {@link L2_PROPOSED}. */
+export type L2Wait = typeof L2_DONE | typeof L2_PROPOSED
+
+/** The chain tip a read must use to agree with what `wait` returned on. */
+export const tipOf = (wait: L2Wait): "proposed" | "checkpointed" => (wait.waitForStatus === TxStatus.PROPOSED ? "proposed" : "checkpointed")
+
 // aztec-nr's consume asserts (public, private) and the sequencer's duplicate-nullifier rejection.
 const ALREADY_CONSUMED = /already nullified|No non-nullified L1 to L2 message|existing nullifier|duplicate nullifier/i
 // The message is not yet in the tree the wallet's PXE anchors to.
@@ -179,7 +191,7 @@ export async function isClaimConsumed(
 	t: ClaimTicket,
 	node: NullifierNode,
 	m: BridgeManifest,
-	at: "checkpointed" | "finalized" = "checkpointed",
+	at: "proposed" | "checkpointed" | "finalized" = "checkpointed",
 ): Promise<boolean> {
 	const [hit] = await node.findLeavesIndexes(at, MerkleTreeId.NULLIFIER_TREE, [await messageNullifier(t, m)])
 	return hit !== undefined
@@ -194,8 +206,8 @@ export interface WaitClaimFinalizedOptions {
 /**
  * Waits until this ticket's claim is in a finalized block, the first point at which its secret may be forgotten: an
  * epoch that misses its proof window is pruned, and an L1 reorg can remove a proof that landed near its deadline.
- * "dropped" once the nullifier is not even checkpointed any more, so the caller claims again; a failed read counts as
- * not final yet.
+ * "dropped" once the nullifier is not even proposed any more, so the caller claims again; a failed read counts as not
+ * final yet.
  */
 export async function waitClaimFinalized(
 	t: ClaimTicket,
@@ -205,38 +217,41 @@ export async function waitClaimFinalized(
 ): Promise<"finalized" | "dropped"> {
 	const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
 	for (;;) {
-		const state = await claimFinality(t, node, m).catch(() => "checkpointed" as const)
-		if (state !== "checkpointed") return state
+		const state = await claimFinality(t, node, m).catch(() => "pending" as const)
+		if (state !== "pending") return state
 		await sleep(opts.pollMs ?? 15_000)
 	}
 }
 
-async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"finalized" | "checkpointed" | "dropped"> {
+// A claim returned at either tip shows at "proposed", which holds every checkpointed block too.
+async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"finalized" | "pending" | "dropped"> {
 	if (await isClaimConsumed(t, node, m, "finalized")) return "finalized"
-	return (await isClaimConsumed(t, node, m)) ? "checkpointed" : "dropped"
+	return (await isClaimConsumed(t, node, m, "proposed")) ? "pending" : "dropped"
 }
 
 /**
  * Mints the deposit on L2 from `from`: a private claim only from its recipient, a public one from anyone (the mint
- * goes to the merchant the message names), paid per {@link FeeChoice}. Both outcomes hold only at a checkpoint: keep
- * the secret until {@link waitClaimFinalized} says "finalized". "consumed-unknown" needs this ticket's nullifier on L2:
- * a nullifier error can come from any part of the tx.
+ * goes to the merchant the message names), paid per {@link FeeChoice}. Both outcomes hold only at `opts.wait`'s tip, a
+ * checkpoint by default: keep the secret until {@link waitClaimFinalized} says "finalized". "consumed-unknown" needs
+ * this ticket's nullifier on L2 at that tip: a nullifier error can come from any part of the tx.
  */
 export async function claim(
 	t: ClaimTicket,
 	node: ClaimNode,
 	wallet: Wallet,
 	m: BridgeManifest,
-	opts: { from: AztecAddress; fee?: FeeChoice },
+	opts: { from: AztecAddress; fee?: FeeChoice; wait?: L2Wait },
 ): Promise<ClaimResult> {
 	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
 	const sponsored = fee !== undefined
+	const wait = opts.wait ?? L2_DONE
 	try {
 		const { txHash } = await (await claimCall(t, wallet, m)).send({ from: opts.from, fee, wait: NO_WAIT })
-		await waitForTx(node as AztecNode, txHash, L2_DONE)
+		await waitForTx(node as AztecNode, txHash, wait)
 		return "claimed"
 	} catch (e) {
-		if (ALREADY_CONSUMED.test(message(e)) && (await isClaimConsumed(t, node, m).catch(() => false))) return "consumed-unknown"
+		const consumed = () => isClaimConsumed(t, node, m, tipOf(wait)).catch(() => false)
+		if (ALREADY_CONSUMED.test(message(e)) && (await consumed())) return "consumed-unknown"
 		throw (sponsored && sponsorFailure(e, "claim")) || e
 	}
 }

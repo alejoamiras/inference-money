@@ -40,6 +40,7 @@ bridge-core raises typed errors before any signature or proof: `PublicDepositToU
 
 ## Using bridge-core
 
+- **When a flow returns**: once its L2 tx is checkpointed (`L2_DONE`). A UI can pass `wait: L2_PROPOSED`, as the showcase does, to answer about a minute earlier on testnet, at a proposed block the next tx can already build on. A prune can still undo that block, so read claims at the same tip (`isClaimConsumed(…, tipOf(wait))`), and forget nothing before finality.
 - **Before a first private claim**, `claimBinding(wallet, manifest, recipient, depositor)` answers `"binds"`: show "this binds the account to 0x… for good" and get consent. `fundingAddress(wallet, manifest, account)` reads the binding; only a wallet holding the account's keys can.
 - **A claim that reports `consumed-unknown`** found its message already consumed, by an earlier claim or by a return. It is never a mint: `depositFate(ticket, node, manifest)` finds the consuming tx and whether it emitted a withdrawal to the depositor.
 - **Returns**: `waitReturnable`, then `returnDeposit(ticket, …)` gives an exit ticket for the depositor; `finishWithdrawal` pays it out on Ethereum, from any account. A depositor whose deposit someone else returned needs only the deposit ticket: `depositFate` names the return's tx, and `exitTicketFromTx(tx, depositor, amount, …)` builds the withdrawal. A tx that batches a claim with another return or exit of the same amount to the same address also reads as a withdrawal; finishing it pays the depositor either way.

@@ -5,7 +5,7 @@ import { Fr } from "@aztec-labs/aztec.js/fields"
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { getAddress, zeroAddress } from "viem"
 import { ExitDestinationError } from "./binding"
-import { SponsorUnavailableError } from "./claim"
+import { L2_PROPOSED, SponsorUnavailableError } from "./claim"
 import {
 	type ExitIntent,
 	type ExitNode,
@@ -142,6 +142,20 @@ describe("exitToL1", () => {
 		const noEffect = { getTxEffect: async () => undefined, getTxReceipt: async () => REVERTED } as unknown as ExitNode
 		const unread = await exitToL1(intent(), boundWallet().wallet, noEffect, M).catch((e: unknown) => e)
 		expect(unread, "a revert without a readable effect proves nothing").toBeInstanceOf(ExitUnconfirmedError)
+	})
+
+	it("with L2_PROPOSED, locates a burn at the proposed block, and reports a revert only once a checkpoint shows it", async () => {
+		const PROPOSED_REVERT = { ...REVERTED, status: TxStatus.PROPOSED }
+		const receipts =
+			(...queue: unknown[]) =>
+			async () =>
+				queue.shift()
+		const exit = (node: ExitNode) => exitToL1(intent(), boundWallet().wallet, node, M, { wait: L2_PROPOSED })
+		expect((await exit(effectNode([message], receipts(receiptAt(TxStatus.PROPOSED))))).messageIndexInTx).toBe(0)
+		// A prune can re-include a burn its proposed block reverted, so forgetting it waits for a checkpointed revert.
+		expect((await exit(effectNode([message], receipts(PROPOSED_REVERT, CHECKPOINTED)))).messageIndexInTx).toBe(0)
+		const reverted = await exit(effectNode([], receipts(PROPOSED_REVERT, REVERTED))).catch((err: unknown) => err)
+		expect(reverted).toBeInstanceOf(ExitRevertedError)
 	})
 })
 

@@ -26,7 +26,7 @@ import { SiloedTag, Tag } from "@aztec-labs/stdlib/logs"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import type { OffchainEffect, Tx } from "@aztec-labs/stdlib/tx"
 import { tokenArtifact } from "./artifacts"
-import { L2_DONE } from "./claim"
+import { L2_DONE, type L2Wait } from "./claim"
 import { type MerchantList, merchantSide, paymentSide, Side, sideCapsule, withFreshList } from "./merchants"
 import { TOKEN_REFUSALS } from "./rules"
 import { REQUEST_OPENED_EFFECT, siloedRequestMarks } from "./stamp"
@@ -140,6 +140,8 @@ export interface ListOptions {
 	/** Re-syncs the list; a call refused on a merchant rule is retried once on the fresh one. */
 	resync?: () => Promise<MerchantList>
 	fee?: SendFee
+	/** How far {@link openRequest} and {@link payRequest} wait for their tx; default {@link L2_DONE}. */
+	wait?: L2Wait
 }
 
 export interface RequestIntent {
@@ -152,8 +154,9 @@ export interface RequestIntent {
 }
 
 /**
- * Opens a request and returns once it is checkpointed, when a private payment can prove its stamp. Refused before
- * proving unless the recipient or the creator is a merchant; a merchant recipient's request is stamped.
+ * Opens a request and returns once it reaches `opts.wait` (a checkpoint by default), when a payer's PXE, anchored at
+ * the proposed tip, can prove its stamp. Refused before proving unless the recipient or the creator is a merchant; a
+ * merchant recipient's request is stamped.
  */
 export async function openRequest(
 	wallet: Wallet,
@@ -169,7 +172,7 @@ export async function openRequest(
 		return open.with({ capsules: [sideCapsule(token, side)] }).send({ from: r.from, fee: opts.fee, wait: NO_WAIT })
 	})
 	const commitment = openedCommitment(sent.offchainEffects, token)
-	await waitForTx(node as AztecNode, sent.txHash, L2_DONE)
+	await waitForTx(node as AztecNode, sent.txHash, opts.wait ?? L2_DONE)
 	return { commitment, txHash: sent.txHash }
 }
 
@@ -402,7 +405,8 @@ function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side
 /**
  * Pays `amount` into a request with a wallet built by `gate.bindWallet`. Refused before anything is proven when the
  * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), or neither stamped nor
- * paid by a merchant. Returns once the payment is checkpointed; its record turns `paid` when finalized
+ * paid by a merchant. Returns once the payment reaches `opts.wait` (a checkpoint by default); its record turns `paid`
+ * when finalized
  * ({@link PaymentGate.status}).
  */
 export async function payRequest(
@@ -430,7 +434,7 @@ export async function payRequest(
 				async () => (await call.send({ from: p.from, fee: opts.fee, wait: NO_WAIT })).txHash,
 			)
 		})
-		const receipt = await waitForTx(gate.node, txHash, { ...L2_DONE, dontThrowOnRevert: true })
+		const receipt = await waitForTx(gate.node, txHash, { ...(opts.wait ?? L2_DONE), dontThrowOnRevert: true })
 		if (receipt.hasExecutionReverted()) {
 			throw new Error(
 				`The payment ${txHash} was rejected on Aztec, so nothing was paid; the request takes a new payment once that is final.`,

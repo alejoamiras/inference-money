@@ -13,12 +13,13 @@ import {
 	exitToL1,
 	finalFate,
 	isClaimConsumed,
-	L2_DONE,
+	L2_PROPOSED,
 	type ListOptions,
 	openRequest,
 	payRequest,
 	reconcileDeposit,
 	syncMerchantList,
+	TOKEN_REFUSALS,
 } from "@inference-money/bridge-core"
 import {
 	aztecWorld,
@@ -70,13 +71,16 @@ const MIN_GAS_WEI = 10n ** 15n
 const DUPLICATE_NULLIFIER = /Existing nullifier|Duplicate nullifier/i
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-const session = (ctx: LiveCtx): DemoSession => ({ wallet: ctx.demo.wallet, node: ctx.demo.node, m: ctx.m })
+// The page answers at a proposed block, seconds after the send: its PXE anchors there and the node refuses a double
+// spend against it. A claim or payment a prune would undo is never forgotten before finality; an exit's revert is
+// believed at a checkpoint.
+const session = (ctx: LiveCtx): DemoSession => ({ wallet: ctx.demo.wallet, node: ctx.demo.node, m: ctx.m, wait: L2_PROPOSED })
 const token = (ctx: LiveCtx) => AztecAddress.fromStringUnsafe(ctx.m.l2.token.address)
 const address = (ctx: LiveCtx, who: ValidDraft["to"]) => ctx.demo.cast[who as User | Merchant].address
 const isMerchant = (who: string): boolean => (MERCHANTS as readonly string[]).includes(who)
 
 async function listOptions(ctx: LiveCtx): Promise<ListOptions> {
-	return { list: await syncMerchantList(ctx.demo.node, token(ctx)), fee: sponsoredFee(ctx.m) }
+	return { list: await syncMerchantList(ctx.demo.node, token(ctx)), fee: sponsoredFee(ctx.m), wait: L2_PROPOSED }
 }
 
 /** The public rows of the txs this page sent since `since` and the node holds, decoded as the recording was. */
@@ -141,15 +145,15 @@ const NOTHING_TO_CLAIM = "There is nothing to claim: deposit first."
 const ALREADY_CONSUMED = "That deposit was already taken on Aztec, by an earlier claim or a return, so nothing was minted now."
 
 /**
- * Whether `p`'s claim still holds at a checkpoint; its record goes once the claim is final. One no longer checkpointed
- * was pruned with its epoch, which makes the deposit claimable again.
+ * Whether `p`'s claim still holds at the proposed tip, where this page claims; its record goes once the claim is final.
+ * One no longer there was pruned, which makes the deposit claimable again.
  */
 async function stillClaimed(ctx: LiveCtx, p: PendingDeposit, t: ClaimTicket): Promise<boolean> {
 	if (await isClaimConsumed(t, ctx.demo.node, ctx.m, "finalized")) {
 		ctx.tickets.dropDeposit(p.id)
 		return true
 	}
-	return isClaimConsumed(t, ctx.demo.node, ctx.m)
+	return isClaimConsumed(t, ctx.demo.node, ctx.m, "proposed")
 }
 
 type Claimable = { p: PendingDeposit; ticket: ClaimTicket } | string
@@ -272,7 +276,13 @@ async function pay(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 		amount: d.amount as bigint,
 		kind: "private",
 	} as const
-	await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
+	try {
+		await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
+	} catch (e) {
+		// Refused before any send: a request opened at a proposed block that a prune removed holds no stamp any more.
+		if (message(e) === TOKEN_REFUSALS.payment) ctx.requests.delete(key)
+		throw e
+	}
 	ctx.requests.delete(key)
 	const kinds: TxKind[] = ctx.demo.sent.length - since > 1 ? ["request", "pay"] : ["pay"]
 	const detail = `${HOLDER_NAME[d.actor]} paid ${usdc2(payment.amount)} USDC into ${HOLDER_NAME[d.to]}'s request.`
@@ -304,7 +314,7 @@ async function withdraw(ctx: LiveCtx, d: ValidDraft, wallets: Record<"A_demo" | 
 	}
 	ctx.demo.onNextSend.fn = journal
 	try {
-		const ticket = await exitToL1(exit, ctx.demo.wallet, ctx.demo.node, ctx.m)
+		const ticket = await exitToL1(exit, ctx.demo.wallet, ctx.demo.node, ctx.m, { wait: L2_PROPOSED })
 		ctx.tickets.putExit({ ...entry, ticket: encodeTicket("exit", ticket) })
 	} catch (e) {
 		if (e instanceof ExitRevertedError) ctx.tickets.dropExit(entry.id)
@@ -329,7 +339,7 @@ async function fateOf(ctx: LiveCtx, tx: SentTx): Promise<"landed" | "gone" | "un
 	if ((await ctx.demo.node.getTxReceipt(hash)).status === TxStatus.DROPPED) {
 		return tx.refused ? "gone" : finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
 	}
-	const receipt = await waitForTx(ctx.demo.node, hash, { ...L2_DONE, dontThrowOnRevert: true })
+	const receipt = await waitForTx(ctx.demo.node, hash, { ...L2_PROPOSED, dontThrowOnRevert: true })
 	return receipt.hasExecutionSucceeded() ? "landed" : finalFate(ctx.demo.node, tx.hash, tx.expiresAt)
 }
 

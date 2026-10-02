@@ -17,11 +17,13 @@ import {
 	isClaimConsumed,
 	type L1Ctx,
 	L2_DONE,
+	type L2Wait,
 	prepareDeposit,
 	reconcileDeposit,
 	sponsoredPayment,
 	submitDeposit,
 	syncMerchantList,
+	tipOf,
 	transferPrivate,
 	waitClaimable,
 } from "@inference-money/bridge-core"
@@ -48,6 +50,8 @@ export interface DemoSession {
 	wallet: Wallet
 	node: AztecNode
 	m: BridgeManifest
+	/** How far each L2 send waits before its flow returns; {@link L2_DONE} unless set. */
+	wait?: L2Wait
 }
 
 /** One signing Ethereum account: each send awaits its receipt before the next. */
@@ -153,10 +157,11 @@ const CLAIMABLE = { pollMs: 5_000, attempts: 720 }
  * sponsor). "already" when its message was consumed before, by this claim or anyone's.
  */
 export async function castClaim(s: DemoSession, t: ClaimTicket, onWait?: (w: ClaimWait) => void): Promise<"claimed" | "already"> {
-	if (await isClaimConsumed(t, s.node, s.m)) return "already"
+	const wait = s.wait ?? L2_DONE
+	if (await isClaimConsumed(t, s.node, s.m, tipOf(wait))) return "already"
 	const from = t.draft.intent.recipient
 	await waitClaimable(t, s.node, s.wallet, s.m, from, onWait, CLAIMABLE)
-	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored" })
+	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored", wait })
 	return result === "claimed" ? "claimed" : "already"
 }
 
@@ -168,7 +173,7 @@ export async function sendPrivate(s: DemoSession, from: AztecAddress, to: AztecA
 	const token = tokenOf(s.m)
 	const list = await syncMerchantList(s.node, token)
 	const txHash = await transferPrivate(s.wallet, token, { from, to, amount }, { list, fee: sponsoredFee(s.m) })
-	await waitForTx(s.node, txHash, L2_DONE)
+	await waitForTx(s.node, txHash, s.wait ?? L2_DONE)
 	return txHash
 }
 

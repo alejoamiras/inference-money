@@ -6,6 +6,7 @@ import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import type { ExecutionPayload, Tx } from "@aztec-labs/stdlib/tx"
+import { L2_PROPOSED } from "./claim"
 import type { MerchantList } from "./merchants"
 import {
 	memoryPaymentStore,
@@ -40,13 +41,14 @@ const receipt = ({ status, reverted }: { status: TxStatus; reverted: boolean }) 
 	hasExecutionReverted: () => reverted,
 })
 
-/** One chain: a tx sent through any node lands checkpointed unless `lose` drops it; a landed private payment completes. */
+/** One chain: a tx sent through any node lands at `landAt` unless `lose` drops it; a landed private payment completes. */
 function fakeChain() {
 	const chain = {
 		ts: 1_000n,
 		finalizedTs: 1_000n,
 		lose: false,
 		revert: false,
+		landAt: TxStatus.CHECKPOINTED as TxStatus,
 		included: [] as Tx[],
 		receipts: new Map<string, { status: TxStatus; reverted: boolean }>(),
 		stamps: new Set<string>(),
@@ -56,7 +58,7 @@ function fakeChain() {
 		sendTx: async (tx: Tx) => {
 			if (chain.lose) return
 			chain.included.push(tx)
-			chain.receipts.set(tx.getTxHash().toString(), { status: TxStatus.CHECKPOINTED, reverted: chain.revert })
+			chain.receipts.set(tx.getTxHash().toString(), { status: chain.landAt, reverted: chain.revert })
 			if (!chain.revert) for (const log of tx.data.getNonEmptyPrivateLogs()) chain.completions.add(log.fields[0].toString())
 		},
 		getTxReceipt: async (h: TxHash) => receipt(chain.receipts.get(h.toString()) ?? { status: TxStatus.DROPPED, reverted: false }),
@@ -140,6 +142,19 @@ describe("payRequest", () => {
 		await expect(t.pay(c)).rejects.toEqual(refusal("in-flight"))
 		w.finalize(w.chain.included[0]!)
 		await expect(t.pay(c)).rejects.toEqual(refusal("paid"))
+		expect(w.chain.included).toHaveLength(1)
+	})
+
+	it("with L2_PROPOSED, returns at the proposed block and keeps the request blocked until the payment is final", async () => {
+		const w = fakeChain()
+		w.chain.landAt = TxStatus.PROPOSED
+		const c = await stampedRequest(w)
+		const gate = new PaymentGate(w.node, memoryPaymentStore())
+		const wallet = await gate.bindWallet(async (node) => fakePayer(node, w))
+		const pay = () =>
+			payRequest(gate, wallet, token, { from: alice, commitment: c, amount: 5n, kind: "private" }, { list: LIST, wait: L2_PROPOSED })
+		await pay()
+		await expect(pay()).rejects.toEqual(refusal("in-flight"))
 		expect(w.chain.included).toHaveLength(1)
 	})
 
