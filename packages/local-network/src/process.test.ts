@@ -38,6 +38,22 @@ describe("owned process groups", () => {
 		expect(groupState(p)).toBe("ours")
 	})
 
+	it("still owns its group from a shell in another time zone, whichever zone the record was written in", async () => {
+		const p = await spawnDetached("zoned", "sleep", ["60"], { env: process.env, logFile: join(dir, "zoned.log") })
+		spawned.push(p)
+		const tz = process.env.TZ
+		try {
+			process.env.TZ = "Asia/Tokyo"
+			const local = execFileSync("ps", ["-o", "lstart=", "-p", String(p.pgid)], { encoding: "utf8" }).trim()
+			expect(local).not.toBe(p.started)
+			expect(groupState(p)).toBe("ours")
+			expect(groupState({ ...p, started: local })).toBe("ours")
+		} finally {
+			if (tz === undefined) delete process.env.TZ
+			else process.env.TZ = tz
+		}
+	})
+
 	it("once the leader exits, owns the group only through a member carrying its marker", async () => {
 		const p = await spawnDetached("orphans", "sh", ["-c", "sleep 60 & exit 0"], { env: process.env, logFile: join(dir, "orphans.log") })
 		spawned.push(p)
