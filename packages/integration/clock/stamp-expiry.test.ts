@@ -103,7 +103,7 @@ describe.skipIf(!INTEGRATION)("request stamps over a day", () => {
 			await warpTo((late.bucket + 1n) * STAMP_BUCKET)
 			await pay(alice, late.commitment)
 		})
-		expect(stampBucket(payment!.anchorTs)).toBe(late.bucket + 1n)
+		expect(stampBucket(payment!.anchorTs), `anchored at ${payment!.anchorTs}`).toBe(late.bucket + 1n)
 		expect(lifetime(payment!)).toBe(STANDARD_TX_LIFETIME)
 	})
 

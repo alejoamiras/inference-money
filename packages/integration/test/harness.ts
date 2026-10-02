@@ -119,10 +119,16 @@ export async function latestTimestamp(): Promise<bigint> {
 	return data.header.globalVariables.timestamp
 }
 
-/** Moves the network's clock to at least `timestamp` (never back), and returns the latest block's timestamp after. */
+/** Moves the network's clock (never back) until the latest block is at `timestamp` or later, and returns its time. */
 export async function warpTo(timestamp: bigint): Promise<bigint> {
 	if (timestamp > (await latestTimestamp())) await harness().debug.warpL2TimeAtLeastTo(Number(timestamp))
-	return latestTimestamp()
+	// The block a warp builds can carry its slot's start, short of the second asked for; the next blocks pass it.
+	for (let tries = 0; tries < 300; tries++) {
+		const at = await latestTimestamp()
+		if (at >= timestamp) return at
+		await Bun.sleep(1_000)
+	}
+	throw new Error(`the network's clock did not reach ${timestamp} after the warp`)
 }
 
 async function openWallet(node: AztecNode, m: BridgeManifest): Promise<EmbeddedWallet> {
