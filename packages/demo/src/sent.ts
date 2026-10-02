@@ -16,7 +16,7 @@ export interface SentTx {
 
 /**
  * Wraps `node` so every `sendTx` through it records the tx's hash and kernel commitments before forwarding; `onSend`
- * runs then too, so a journal it writes survives a crash during the send.
+ * runs first, so a journal it writes survives a crash during the send, and a journal that throws stops the send.
  */
 export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: SentTx) => void): AztecNode {
 	return new Proxy(node, {
@@ -29,8 +29,8 @@ export function recordingNode(node: AztecNode, sent: SentTx[], onSend?: (tx: Sen
 					expiresAt: tx.data.expirationTimestamp,
 					anchorTs: tx.data.constants.anchorBlockHeader.globalVariables.timestamp,
 				}
-				sent.push(record)
 				onSend?.(record)
+				sent.push(record)
 				return target.sendTx(tx).catch((e: unknown) => {
 					record.refused = true
 					throw e
