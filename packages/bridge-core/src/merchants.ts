@@ -18,7 +18,7 @@ import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
 import { Capsule } from "@aztec-labs/stdlib/tx"
 import { tokenArtifact } from "./artifacts"
 import { type TokenRule, tokenRefusalOf } from "./rules"
-import { MERCHANT_SIDE_SLOT } from "./stamp"
+import { MERCHANT_SIDE_SLOT, type RequestStamp } from "./stamp"
 
 /** The switch-off delay's bounds: the token's MERCHANT_MIN_DELAY (DelayedPublicMutable's floor) and MERCHANT_MAX_DELAY. */
 export const MERCHANT_MIN_DELAY = 3600n
@@ -126,10 +126,17 @@ export function merchantSide(list: MerchantList, first: AztecAddress, second: Az
 	return a.merchant ? Side.First : Side.Neither
 }
 
-/** The side a payment into a request proves: its stamp, which reads no entry, before the payer. */
-export function paymentSide(list: MerchantList, stamped: boolean, from: AztecAddress): Side {
-	if (stamped) return Side.First
-	return merchantStatus(list, from).merchant ? Side.Second : Side.Neither
+/** A request's stamp as a payment sees it: still unmarked, live but no longer fresh, or none live. */
+export type StampState = RequestStamp["state"] | "none"
+
+/**
+ * The side a payment into a request proves, by the token hint's order: a fresh stamp, which caps no expiry; else a
+ * merchant payer; else a live stamp, whose proof shortens the tx's expiry; else neither.
+ */
+export function paymentSide(list: MerchantList, stamp: StampState, from: AztecAddress): Side {
+	if (stamp === "fresh") return Side.First
+	if (merchantStatus(list, from).merchant) return Side.Second
+	return stamp === "live" ? Side.First : Side.Neither
 }
 
 /** The capsule that tells the token which side to prove; one serves every restricted call in its tx. */
