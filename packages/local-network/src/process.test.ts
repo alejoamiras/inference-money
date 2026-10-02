@@ -38,17 +38,18 @@ describe("owned process groups", () => {
 		expect(groupState(p)).toBe("ours")
 	})
 
-	it("still owns its group from a shell in another time zone, and proves a record from another zone by its marker alone", async () => {
+	it("still owns its group from a shell in another time zone, and an untagged record only by its marker", async () => {
 		const p = await spawnDetached("zoned", "sleep", ["60"], { env: process.env, logFile: join(dir, "zoned.log") })
 		spawned.push(p)
 		const tz = process.env.TZ
 		try {
 			process.env.TZ = "Asia/Tokyo"
-			const local = execFileSync("ps", ["-o", "lstart=", "-p", String(p.pgid)], { encoding: "utf8" }).trim()
-			expect(local).not.toBe(p.started)
 			expect(groupState(p)).toBe("ours")
-			expect(groupState({ ...p, started: local })).toBe("ours")
-			expect(groupState({ ...p, started: local, marker: "another-run" })).toBe("reused")
+			// An untagged record is in a zone no reader knows: even text equal to the leader's start time proves nothing.
+			const untagged = p.started.replace(/^utc /, "")
+			expect(untagged).not.toBe(p.started)
+			expect(groupState({ ...p, started: untagged })).toBe("ours")
+			expect(groupState({ ...p, started: untagged, marker: "another-run" })).toBe("reused")
 		} finally {
 			if (tz === undefined) delete process.env.TZ
 			else process.env.TZ = tz
