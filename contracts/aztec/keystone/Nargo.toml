@@ -8,3 +8,4 @@ authors = [""]
 aztec = { git = "https://github.com/aztec-labs-eng/aztec-nr", tag = "v6.0.0-rc.1", directory = "aztec" }
 token_portal_content_hash_lib = { git = "https://github.com/aztec-labs-eng/aztec-node", tag = "v6.0.0-rc.1", directory = "noir-projects/noir-contracts/contracts/libs/token_portal_content_hash_lib" }
 claim_secret_lib = { path = "../claim_secret" }
+merchant_stamp = { path = "../merchant_stamp" }

@@ -5,8 +5,10 @@ import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	type BridgeManifest,
+	memoryPaymentStore,
 	type OutboxReader,
 	outboxReader,
+	PaymentGate,
 	registerBridgeContracts,
 	registerSponsor,
 } from "@inference-money/bridge-core"
@@ -34,6 +36,8 @@ export interface Harness {
 	/** Holds every actor account; each tx it submits lands in `sent`. */
 	wallet: EmbeddedWallet
 	sent: SentTx[]
+	/** The payment records; `wallet` sends through its node, so `payRequest` works with it. */
+	gate: PaymentGate
 	/** The bridge's L2 owner (the deploy account), registered in `wallet`. */
 	owner: AztecAddress
 	outbox: OutboxReader
@@ -78,7 +82,8 @@ async function open(log: (m: string) => void): Promise<Harness> {
 	const net = resolveEndpoints(runId)
 	const node = createAztecNodeClient(net.nodeUrl)
 	const sent: SentTx[] = []
-	const wallet = await openWallet(recordingNode(node, sent), manifest)
+	const gate = new PaymentGate(recordingNode(node, sent), memoryPaymentStore())
+	const wallet = await gate.bindWallet((gated) => openWallet(gated, manifest))
 	const owner = (await wallet.createSchnorrAccount(LOCAL_DEPLOYER_SECRET, Fr.ZERO, signingKeyFor(LOCAL_DEPLOYER_SECRET))).address
 	await startHeartbeat(node, manifest)
 	const chain = l1Chain(net.anvilUrl, L1_CHAIN_ID)
@@ -90,6 +95,7 @@ async function open(log: (m: string) => void): Promise<Harness> {
 		node,
 		wallet,
 		sent,
+		gate,
 		owner,
 		outbox: outboxReader(publicClient, manifest.l1.outbox),
 		l1: { rpcUrl: net.anvilUrl, chain, publicClient, test },

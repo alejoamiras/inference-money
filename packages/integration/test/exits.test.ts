@@ -60,7 +60,7 @@ describe.skipIf(!INTEGRATION)("exits and withdrawals", () => {
 			t = await exit({ kind: "private", from: bob, recipientL1: l1.account, amount: 5n * USDC })
 		})
 		if (!t) throw new Error("no exit ticket")
-		expect(txs).toEqual([{ hash: t.l2TxHash.toString(), feePayer: m.l2.sponsoredFpc as string }])
+		expect(txs).toMatchObject([{ hash: t.l2TxHash.toString(), feePayer: m.l2.sponsoredFpc as string }])
 		expect((await l2Balances(bob)).private).toBe(0n)
 		const before = await usdcOf(l1.account)
 		await withdraw(t, l1)

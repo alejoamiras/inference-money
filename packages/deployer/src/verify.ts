@@ -2,14 +2,20 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
+import { DelayedPublicMutableValues } from "@aztec-labs/stdlib/delayed-public-mutable"
 import {
 	assertNetworkIdentity,
 	BRIDGE_CONTRACTS,
 	type BridgeManifest,
+	delayAt,
 	instanceFromRecord,
 	isBridgePaused,
 	sponsorInstance,
+	tokenArtifact,
+	tokenBridgeArtifact,
+	tokenMinterProxyArtifact,
 } from "@inference-money/bridge-core"
 import type { Abi, Address, Hex, PublicClient } from "viem"
 
@@ -84,22 +90,32 @@ async function verifyInstances(node: AztecNode, m: BridgeManifest): Promise<Chec
 	return out
 }
 
+/** A storage field's slot in `artifact`'s layout, `offset` fields into its packed value. */
+function layoutSlot(artifact: ContractArtifact, field: string, offset = 0): Fr {
+	const layout = artifact.storageLayout[field]
+	if (!layout) throw new Error(`${artifact.name} has no ${field} storage`)
+	return layout.slot.add(new Fr(offset))
+}
+
+const reader = (node: AztecNode, contract: string) => (slot: Fr) =>
+	node.getPublicStorageAt("latest", AztecAddress.fromStringUnsafe(contract), slot)
+
 async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
-	const slot = (contract: string, s: number) => node.getPublicStorageAt("latest", AztecAddress.fromStringUnsafe(contract), new Fr(s))
 	const { proxy, token, bridge } = m.l2
 	const deployer = bridge.deployer
-	// Slots from each artifact's storage layout; a PublicImmutable's packed value starts at its slot.
+	const [b, p, t] = [reader(node, bridge.address), reader(node, proxy.address), reader(node, token.address)]
+	// A PublicImmutable's packed value starts at its slot: the bridge config is (token_minter_proxy, portal).
 	const [bOwner, bProxy, bPortal, bPaused, pOwner, pToken, pBridge, tDecimals, tMinter, tAuth] = await Promise.all([
-		slot(bridge.address, 1),
-		slot(bridge.address, 3),
-		slot(bridge.address, 4),
+		b(layoutSlot(tokenBridgeArtifact, "owner")),
+		b(layoutSlot(tokenBridgeArtifact, "config")),
+		b(layoutSlot(tokenBridgeArtifact, "config", 1)),
 		isBridgePaused(node, m),
-		slot(proxy.address, 1),
-		slot(proxy.address, 3),
-		slot(proxy.address, 5),
-		slot(token.address, 5),
-		slot(token.address, 0xa),
-		slot(token.address, 0xc),
+		p(layoutSlot(tokenMinterProxyArtifact, "owner")),
+		p(layoutSlot(tokenMinterProxyArtifact, "token")),
+		p(layoutSlot(tokenMinterProxyArtifact, "bridge")),
+		t(layoutSlot(tokenArtifact, "decimals")),
+		t(layoutSlot(tokenArtifact, "minter")),
+		t(layoutSlot(tokenArtifact, "auth_contract")),
 	])
 	return [
 		pin("bridge owner == deployer", bOwner, deployer),
@@ -112,6 +128,27 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 		check("token decimals == 6", tDecimals.toBigInt() === 6n, tDecimals.toString()),
 		pin("token minter == proxy", tMinter, proxy.address),
 		check("token auth_contract == 0", tAuth.isZero(), tAuth.toString()),
+	]
+}
+
+/** The merchant roles: the admin, no handover pending, and the guardian slot's delay settled at the setting. */
+async function verifyMerchantRoles(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
+	const t = reader(node, m.l2.token.address)
+	const [admin, pending, setting, guardian, latest] = await Promise.all([
+		t(layoutSlot(tokenArtifact, "merchant_admin")),
+		t(layoutSlot(tokenArtifact, "pending_merchant_admin")),
+		t(layoutSlot(tokenArtifact, "merchant_delay")),
+		DelayedPublicMutableValues.readFromTree(layoutSlot(tokenArtifact, "merchant_guardian"), t),
+		node.getBlockData("latest"),
+	])
+	if (!latest) throw new Error("the node returned no latest block")
+	const now = latest.header.globalVariables.timestamp
+	const delay = delayAt(guardian.sdc, now)
+	return [
+		pin("token merchant admin == deployer", admin, m.l2.token.deployer),
+		check("token merchant admin: no handover pending", pending.isZero(), pending.toString()),
+		pin("token guardian slot delay == merchant delay", delay, setting.toBigInt()),
+		check("token guardian slot delay: no change pending", guardian.sdc.timestampOfChange <= now, `${delay}s`),
 	]
 }
 
@@ -155,6 +192,7 @@ export async function verifyDeployment(
 		...(await attempt("L1", () => verifyL1(l1, evm, m, l1Deployer))),
 		...(await attempt("L2 instances", () => verifyInstances(node, m))),
 		...(await attempt("L2 wiring", () => verifyL2Wiring(node, m))),
+		...(await attempt("merchant roles", () => verifyMerchantRoles(node, m))),
 		...(await attempt("environment", () => verifyEnvironment(node, m))),
 	]
 }

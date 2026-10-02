@@ -24,8 +24,8 @@ for arg in "$@"; do
     *) crates+=("$arg") ;;
   esac
 done
-# Dependency order: token_bridge imports token_minter_proxy's interface.
-[ ${#crates[@]} -gt 0 ] || crates=(token_minter_proxy token_bridge)
+# Dependency order: token_minter_proxy imports token's interface, and token_bridge both of theirs.
+[ ${#crates[@]} -gt 0 ] || crates=(token token_minter_proxy token_bridge)
 
 compare_tracked() {
   local c="$1" baseline="$2" tracked="$3" name

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Runs a crate's Noir tests against a TXE oracle server this script starts and owns.
 #
-#   run-txe-tests.sh [--crate token_bridge|keystone] [nargo flags...] [-- test names...]
+#   run-txe-tests.sh [--crate token|token_bridge|keystone] [nargo flags...] [-- test names...]
 #
 #   - aztec-nargo's test runner does not resolve TXE oracles; @aztec-labs/txe serves them over JSON-RPC.
 #   - The server resolves dependency contracts from the crate's target/ as "<dep_package>-<Contract>.json", and
-#     they must be transpiled artifacts (the committed proxy; aztec-standards' published Token).
+#     they must be transpiled artifacts (the committed token and proxy; aztec-standards' published test contracts).
 #   - The server's dependency set is the committed ../toolchain lockfile (frozen), never an ad-hoc install.
 #   - Pass criterion: the crate's committed txe-manifest.txt names every test that must pass (at least the crate's
 #     floor), so a dropped `mod test;` or a silently skipped file cannot read as green. nargo alone exits 0 on zero
@@ -20,10 +20,11 @@ if [ "${1:-}" = "--crate" ]; then
   shift 2
 fi
 case "$crate" in
+  token) floor=153 ;;
   token_bridge) floor=48 ;;
-  keystone) floor=8 ;;
+  keystone) floor=13 ;;
   *)
-    echo "usage: $0 [--crate token_bridge|keystone] [nargo flags...] [-- test names...]" >&2
+    echo "usage: $0 [--crate token|token_bridge|keystone] [nargo flags...] [-- test names...]" >&2
     exit 2
     ;;
 esac
@@ -44,15 +45,24 @@ done
 tb="$aztec_root/$crate"
 mkdir -p "$tb/target"
 
-if [ "$crate" = token_bridge ]; then
-  token="$aztec_root/node_modules/@aztec-foundation/aztec-standards/artifacts/target/token_contract-Token.json"
-  [ -f "$token" ] || {
-    echo "Token artifact missing at $token — run bun install" >&2
+standards="$aztec_root/node_modules/@aztec-foundation/aztec-standards/artifacts/target"
+stage_standard() {
+  [ -f "$standards/$1" ] || {
+    echo "$1 missing from $standards — run bun install" >&2
     exit 1
   }
-  cp "$token" "$tb/target/token_contract-Token.json"
-  cp "$aztec_root/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json" "$tb/target/"
-fi
+  cp "$standards/$1" "$tb/target/"
+}
+case "$crate" in
+  token)
+    stage_standard generic_proxy-GenericProxy.json
+    stage_standard test_authorization_contract-AuthorizationContract.json
+    ;;
+  token_bridge)
+    cp "$aztec_root/token/target/merchant_token-Token.json" "$tb/target/"
+    cp "$aztec_root/token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json" "$tb/target/"
+    ;;
+esac
 
 # A per-run port: a fixed one collides with another agent's run or, worse, silently reuses ITS server. The kernel's
 # free port can be taken before the server binds it, so the whole claim-and-bind retries.

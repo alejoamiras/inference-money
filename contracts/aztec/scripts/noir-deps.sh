@@ -10,7 +10,7 @@
 #                                   after a build from a clean cache proves nargo fetched nothing outside the table
 #   noir-deps.sh --self-test        prove fetch + verify against a local fixture repo in a scratch cache
 #
-# The table is the exact set a clean-cache `nargo check` of token_bridge + keystone fetches. Re-derive it when a
+# The table is the exact set a clean-cache `nargo check` of token, token_bridge and keystone fetches. Re-derive it when a
 # Nargo.toml tag changes: resolve into an empty cache (HOME=<tmp> nargo check), then list <tmp>/nargo/**/.git.
 set -euo pipefail
 
