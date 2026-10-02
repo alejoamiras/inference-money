@@ -10,7 +10,9 @@
  *   node receiving the tx, with the tx's hash and expiry. Only finalized chain state moves it on: to `paid` with the
  *   tx, or released once the tx's revert, or the chain passing its expiry without it, is final. So an uncertain send
  *   never allows a second one;
- * - `paid`.
+ * - `paid`;
+ * - `replaced`, by the request opened in place of a stale one ({@link payReplacingStale}), which every later attempt
+ *   on the stale one shares.
  * Clients that share no store (two devices) can still both prove a payment; the token lands one.
  *
  * A private payment through a stamp caps the tx's expiry at the stamp's deadline. While the stamp is fresh that cap is
@@ -21,7 +23,7 @@
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Contract, NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
-import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { type AztecNode, waitForTx } from "@aztec-labs/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
@@ -53,6 +55,7 @@ export type PaymentRecord =
 	| { state: "reserved"; owner: string; since: number }
 	| { state: "sent"; owner: string; txHash: string; expiresAt: string }
 	| { state: "paid"; txHash: string }
+	| { state: "replaced"; by: string }
 
 /** One record per request, shared by every tab or process that pays from this client. */
 export interface PaymentStore {
@@ -296,6 +299,7 @@ async function refreshed(r: PaymentRecord | undefined, node: PaymentNode, now: n
 
 function refusalFor(r: PaymentRecord | undefined): PaymentRefusedError {
 	if (r?.state === "paid") return new PaymentRefusedError("paid", r.txHash)
+	if (r?.state === "replaced") return new PaymentRefusedError("stale")
 	return new PaymentRefusedError("in-flight", r?.state === "sent" ? r.txHash : undefined)
 }
 
@@ -373,6 +377,22 @@ export class PaymentGate {
 		return this.store.locked(key, async () => {
 			const r = await this.store.get(key)
 			throw r?.state === "reserved" && r.owner === owner ? new PaymentRefusedError("stale") : refusalFor(r)
+		})
+	}
+
+	/**
+	 * The request that replaces `key`'s stale one: the one already recorded, else the one `reopen` opens now, recorded
+	 * under the lock it held throughout, so attempts that meet the same stale request pay one replacement. Refused, as
+	 * {@link PaymentGate.reserve} would, while another attempt holds the stale request.
+	 */
+	replacing(key: string, reopen: () => Promise<Fr>): Promise<Fr> {
+		return this.store.locked(key, async () => {
+			const r = await refreshed(await this.store.get(key), this.node, this.now())
+			if (r?.state === "replaced") return Fr.fromHexString(r.by)
+			if (r) throw refusalFor(r)
+			const by = await reopen()
+			await this.store.put(key, { state: "replaced", by: by.toString() })
+			return by
 		})
 	}
 
@@ -496,15 +516,22 @@ export async function payRequest(
 }
 
 /**
- * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale`, into the request `reopen`
- * opens. `stale` is told only to the attempt holding the stored request's reservation, so nothing is in flight or paid
- * for it from this client and the new request is not a second payment; any other refusal is thrown as is.
+ * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale`, into its replacement: the one
+ * another attempt already opened, else the one `reopen` opens ({@link PaymentGate.replacing}). `stale` means nothing
+ * is in flight or paid for `stored` from this client, and every attempt shares one replacement, so it is not a second
+ * payment; any other refusal is thrown as is.
  */
-export async function payReplacingStale<T>(stored: Fr, pay: (commitment: Fr) => Promise<T>, reopen: () => Promise<Fr>): Promise<T> {
+export async function payReplacingStale<T>(
+	gate: PaymentGate,
+	token: AztecAddress,
+	stored: Fr,
+	pay: (commitment: Fr) => Promise<T>,
+	reopen: () => Promise<Fr>,
+): Promise<T> {
 	try {
 		return await pay(stored)
 	} catch (e) {
 		if (!(e instanceof PaymentRefusedError && e.reason === "stale")) throw e
-		return pay(await reopen())
+		return pay(await gate.replacing(paymentKey(token, stored), reopen))
 	}
 }

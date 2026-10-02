@@ -287,7 +287,7 @@ async function pay(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 	}
 	const reopen = () => openFor(ctx, d, key, opts)
 	const stored = ctx.requests.get(key)
-	await (stored ? payReplacingStale(stored, payInto, reopen) : payInto(await reopen()))
+	await (stored ? payReplacingStale(ctx.demo.gate, token(ctx), stored, payInto, reopen) : payInto(await reopen()))
 	ctx.requests.delete(key)
 	const kinds: TxKind[] = ctx.demo.sent.length - since > 1 ? ["request", "pay"] : ["pay"]
 	const detail = `${HOLDER_NAME[d.actor]} paid ${usdc2(amount)} USDC into ${HOLDER_NAME[d.to]}'s request.`

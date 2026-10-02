@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
+import { memoryPaymentStore, PaymentGate } from "@inference-money/bridge-core"
 import type { SentTx } from "@inference-money/demo"
 import { describe, expect, it, vi } from "vitest"
 import { MANIFEST, TOUR, WALLETS } from "@/config/network"
@@ -312,7 +313,8 @@ describe("runDraft", () => {
 	] as const)("a stored request refused as %s: %s", async (reason, _, opens, into, kind) => {
 		const base = ctxWith(false)
 		const cast = { galactica: { address: "0xg" }, alice: { address: "0xa" } }
-		const ctx: LiveCtx = { ...base, demo: { ...base.demo, cast } as unknown as DemoWallet }
+		const gate = new PaymentGate(base.demo.node, memoryPaymentStore())
+		const ctx: LiveCtx = { ...base, demo: { ...base.demo, cast, gate } as unknown as DemoWallet }
 		ctx.requests.set("galactica>alice", 2 as never)
 		const pay = { actor: "alice", action: "pay", to: "galactica", amount: 10_000n } as const
 		payments.refusals.push(reason)

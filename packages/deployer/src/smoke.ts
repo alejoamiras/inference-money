@@ -207,7 +207,8 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 			if ((await completionCount(r.s.node, tokenAddress(r), commitment)) !== 1)
 				throw new Error("the request is not completed exactly once")
 		}
-		await payReplacingStale(Fr.fromHexString(r.state.commitment), payInto, () => reopenRequest(r))
+		const stored = Fr.fromHexString(r.state.commitment)
+		await payReplacingStale(r.s.gate, tokenAddress(r), stored, payInto, () => reopenRequest(r))
 		return aztecEntry(r, "pay")
 	},
 	refund: async (r) => {

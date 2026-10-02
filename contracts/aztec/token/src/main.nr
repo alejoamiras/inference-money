@@ -1136,7 +1136,8 @@ pub contract Token {
 
     /// @notice Records who a request was opened for: its stamp if the recipient was proven a merchant, else its pad
     /// @dev The stamp carries the hour of the anchor block, which the opener cannot choose later than the present, and
-    ///      expires a day after it. Also hands the commitment to the opener's client as an offchain effect.
+    ///      expires at `stamp_deadline` of that hour. Also hands the commitment to the opener's client as an offchain
+    ///      effect.
     /// @param commitment The request just opened
     /// @param side The side `_prove_merchant_side` proved, recipient first
     #[internal("private")]
@@ -1152,7 +1153,6 @@ pub contract Token {
     }
 
     /// @notice Marks `commitment` paid: a request takes one payment, whichever path it comes by
-    /// @dev The kernel refuses a repeated nullifier; the check before it only fails earlier and readably
     /// @param commitment The request paid into
     #[internal("private")]
     fn _push_paid(commitment: Field) {

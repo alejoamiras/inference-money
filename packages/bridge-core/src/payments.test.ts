@@ -409,7 +409,29 @@ describe("payReplacingStale", () => {
 		const stored = await stampedRequest(w)
 		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
 		const { opened, reopen } = opener(w)
-		await payReplacingStale(stored, (c) => t.pay(c), reopen)
+		await payReplacingStale(t.gate, token, stored, (c) => t.pay(c), reopen)
+		expect([opened.length, w.chain.included.length]).toEqual([1, 1])
+	})
+
+	it("lets two tabs that meet one stale request share its replacement, which is paid once", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const [a, b] = await Promise.all([tab(store, w), tab(store, w)])
+		const stored = await stampedRequest(w)
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const { opened, reopen } = opener(w)
+		const [entered, opening] = [gated(), gated()]
+		const slow = async () => {
+			entered.open()
+			await opening.shut
+			return reopen()
+		}
+		const first = payReplacingStale(a.gate, token, stored, (c) => a.pay(c), slow)
+		await entered.shut
+		const second = payReplacingStale(b.gate, token, stored, (c) => b.pay(c), reopen)
+		opening.open()
+		const results = await Promise.allSettled([first, second])
+		expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"])
 		expect([opened.length, w.chain.included.length]).toEqual([1, 1])
 	})
 
@@ -420,7 +442,7 @@ describe("payReplacingStale", () => {
 		await t.pay(stored)
 		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
 		const { opened, reopen } = opener(w)
-		await expect(payReplacingStale(stored, (c) => t.pay(c), reopen)).rejects.toEqual(refusal("in-flight"))
+		await expect(payReplacingStale(t.gate, token, stored, (c) => t.pay(c), reopen)).rejects.toEqual(refusal("in-flight"))
 		expect([opened.length, w.chain.included.length]).toEqual([0, 1])
 	})
 })
