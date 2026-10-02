@@ -102,7 +102,7 @@ function Fields({ v, locked }: { v: LiveView; locked: boolean }) {
 
 const OPENING = "Opening the demo wallet: it syncs the demo accounts first."
 
-/** Proofs run on Presto while the last check found it connected; the ribbon says when that changes. */
+/** Presto proves while the last check found it connected; a proof that falls back checks again. */
 function readyHint(view: PrestoView | undefined): string {
 	if (!PROVES) return "Runs live on this local network, with proofs off."
 	const where = typeof view === "object" && view.available ? "on this computer, by Presto" : "in this browser"

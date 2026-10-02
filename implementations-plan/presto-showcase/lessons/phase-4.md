@@ -18,6 +18,17 @@
 - The Connect click and the grant race in the test (no prompt to wait on); both orders end connected, through `connect()` or the permission watch.
 - Headless Chromium reports `ERR_CONNECTION_REFUSED` once the proxy stops, and the SDK falls back without any HTTP `/prove`.
 
+## Codex fix loop
+
+### Round 1 (GPT-6 Astra, high; session `01a0fd76-b632-7362-a938-4a78aba3b885`): request changes, 6 findings
+
+1. Medium, a grant queued behind an in-flight check probes after `stop()` (`stop` left `consented` true). **Accepted**: `stop()` clears the choice, `check()` starts nothing once stopped; regression test (fails on the old code).
+2. Medium, force-local cannot cancel an SDK operation already under way (a proof in detection can still POST after `stop()`). **Rejected as out of scope**: cancelling needs a change and a release of the SDK. The browser's permission still gates every request, and the guard decides at each proof's start; `stop()`'s contract and `docs/architecture.md` now say a proof already under way finishes where it started.
+3. Low, overlapping consents erase each other's guard. **Accepted, minimal**: `guard()` returns a remover that clears only its own check; `stop()` is idempotent. Unreachable from the app today (StrictMode cleans up before it sets up).
+4. Medium, after a fallback the hint keeps "by Presto" and the ribbon its connected state. **Accepted**: a proof that falls back runs one status check, so the ribbon shows why and the hint, which follows the last check, says "in this browser"; the spec's step 5 asserts both.
+5. Medium, `stop_group` dropped the sidecar's final ownership check before SIGKILL. **Accepted**: restored.
+6. Low, comments. **Accepted**: three narrating comments removed, the historical "Design F" label dropped, the ribbon's doc condensed, and `around()` documents that calls must not overlap.
+
 ## Gate
 
 `bun run test:e2e` exit 0 (7 passed, 2.7 min, fake-proof bundle: Presto unreachable); `bun run test:e2e:presto` exit 0 (4 passed: the three infra specs and the Presto spec in 50 s); `bun run lint:actions` exit 0.

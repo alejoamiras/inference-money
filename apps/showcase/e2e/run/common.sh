@@ -45,7 +45,7 @@ stop_group() {
   owns_group "$pgid" "$start" "$marker" || return 0
   kill -TERM -- "-$pgid" 2>/dev/null || true
   for _ in $(seq 1 20); do owns_group "$pgid" "$start" "$marker" || return 0; sleep 1; done
-  kill -KILL -- "-$pgid" 2>/dev/null || true
+  owns_group "$pgid" "$start" "$marker" && kill -KILL -- "-$pgid" 2>/dev/null || true
 }
 
 # claim_ports <service>...: also resolves the tag namespaced by this checkout, which net:up, deploy:local and the port

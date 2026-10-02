@@ -33,7 +33,9 @@ describe("proof attribution", () => {
 	it("runs the guard first, says where the proof is going, and credits nothing to a proof that failed", async () => {
 		const t = proofTracker()
 		const order: string[] = []
+		const unguardStale = t.guard(async () => void order.push("stale guard"))
 		t.guard(async () => void order.push("guard"))
+		unguardStale()
 		const failing = t.around(async () => {
 			order.push("prove")
 			t.onPhase("transmit")

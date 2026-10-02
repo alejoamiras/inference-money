@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 
-/** Design F: the wallets' side on the left (a notice, composer, stage, verdict), the public chains' side on the right. */
+/** The wallets' side on the left (a notice, composer, stage, verdict), the public chains' side on the right. */
 export function Layout(p: {
 	header: ReactNode
 	notice?: ReactNode

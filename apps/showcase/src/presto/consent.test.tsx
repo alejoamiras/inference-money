@@ -5,6 +5,7 @@ import { cell } from "@/lib/observable"
 import { useLivePresto } from "@/live/useLivePresto"
 import { askBeforeConnecting, type PrestoView } from "./consent"
 import type { PagePresto } from "./index"
+import type { ProofState } from "./proofs"
 import type { PageProver } from "./prover"
 
 const CONNECTED: PrestoStatus = { available: true, needsDownload: false, protocol: "https" }
@@ -36,13 +37,18 @@ function fakePage(answer: () => Promise<PrestoStatus> = async () => CONNECTED) {
 	const forced: boolean[] = []
 	let guard: (() => Promise<void>) | undefined
 	const checks = vi.fn(answer)
+	const proof = cell<ProofState>({})
 	const page = {
 		prover: { setForceLocal: (local: boolean) => void forced.push(local), checkPrestoStatus: checks },
-		guard: (fn: typeof guard) => {
+		proof,
+		guard: (fn: () => Promise<void>) => {
 			guard = fn
+			return () => {
+				if (guard === fn) guard = undefined
+			}
 		},
 	} as unknown as PageProver
-	return { page, checks, local: () => forced.at(-1), beforeProving: () => guard?.(), guarded: () => guard !== undefined }
+	return { page, checks, proof, local: () => forced.at(-1), beforeProving: () => guard?.(), guarded: () => guard !== undefined }
 }
 
 afterEach(() => {
@@ -90,6 +96,34 @@ describe("asking before connecting Presto", () => {
 		await p.beforeProving()
 		expect(p.local()).toBe(true)
 		expect(consent.view.get()).toBe("ask")
+	})
+
+	it("starts no check once stopped, not even for a grant that waited on a check in flight", async () => {
+		const browser = browserDecision("prompt")
+		let answer: (status: PrestoStatus) => void = () => {}
+		const p = fakePage(() => new Promise((resolve) => (answer = resolve)))
+		const consent = askBeforeConnecting(p.page)
+		await vi.waitFor(() => expect(consent.view.get()).toBe("ask"))
+		void consent.connect()
+		await vi.waitFor(() => expect(p.checks).toHaveBeenCalledTimes(1))
+		browser.set("granted")
+		await settled()
+		consent.stop()
+		answer(CONNECTED)
+		await settled()
+		expect(p.checks).toHaveBeenCalledTimes(1)
+		expect(p.local()).toBe(true)
+	})
+
+	it("checks Presto again when a proof falls back, so the ribbon shows why", async () => {
+		browserDecision("granted")
+		const p = fakePage()
+		const consent = askBeforeConnecting(p.page)
+		await vi.waitFor(() => expect(consent.view.get()).toEqual(CONNECTED))
+		const gone: PrestoStatus = { available: false, reason: "offline" }
+		p.checks.mockResolvedValue(gone)
+		p.proof.set({ attempt: "browser" })
+		await vi.waitFor(() => expect(consent.view.get()).toEqual(gone))
 	})
 
 	it('stops when "Try it yourself" closes: later proofs stay in the page, and the browser goes unheard', async () => {

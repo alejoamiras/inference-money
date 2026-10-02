@@ -47,7 +47,6 @@ function title(v: VerdictState, proof: ProofState): string {
 	return { idle: "Ready", settled: "Allowed", refused: "Refused", failed: "It did not go through" }[v.kind]
 }
 
-/** The Prove chip names Presto only for a proof that finished there. */
 const label = (stage: Stage, state: ChipState, proof: ProofState): string =>
 	stage === "prove" && state === "done" && proof.ran === "presto" ? "Prove · Presto" : LABEL[stage]
 

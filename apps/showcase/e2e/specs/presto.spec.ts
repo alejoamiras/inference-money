@@ -79,6 +79,8 @@ test("proves on Presto only once the visitor connects it, and in the page once i
 		await presto.stop()
 		const reached = toPresto().length
 		expect(await send(page)).toBe("Prove")
+		await expect(ribbon(page)).toHaveAttribute("state", "secure-connection-unavailable")
+		await expect(page.getByTestId(TESTIDS.walletStatus)).toContainText("in this browser")
 		const overHttp = toPresto()
 			.slice(reached)
 			.filter((r) => r.url.startsWith(http))

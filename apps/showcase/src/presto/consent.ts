@@ -15,7 +15,7 @@ export interface PrestoConsent {
 	/** Only from a click that first says the browser may ask to let this site reach apps on this device. */
 	connect(): Promise<void>
 	view: Observable<PrestoView | undefined>
-	/** Proofs stay in the page from here on, and nothing more reaches Presto. */
+	/** Every proof that starts from here on stays in the page; one already under way finishes where it started. */
 	stop(): void
 }
 
@@ -55,6 +55,7 @@ export function askBeforeConnecting(page: PageProver): PrestoConsent {
 
 	let lastCheck: Promise<void> = Promise.resolve()
 	function check(): Promise<void> {
+		if (stopped) return Promise.resolve()
 		lastCheck = (async () => {
 			const started = epoch
 			const status = await prover.checkPrestoStatus({ forceRefresh: true }) // the browser may ask now
@@ -90,16 +91,23 @@ export function askBeforeConnecting(page: PageProver): PrestoConsent {
 		await sync(await loopbackPermission())
 	})()
 	// Catches a reset or a grant in browsers that report no changes.
-	page.guard(async () => sync(await loopbackPermission()))
+	const unguard = page.guard(async () => sync(await loopbackPermission()))
+	// A fallback means Presto stopped answering as it did: check again, so the ribbon shows why.
+	const unfollow = page.proof.listen((p) => {
+		if (p.attempt === "browser" && consented) void check()
+	})
 
 	return {
 		connect,
 		view,
 		stop: () => {
+			if (stopped) return
 			stopped = true
+			consented = granted = false
 			epoch++
 			prover.setForceLocal(true)
-			page.guard(undefined)
+			unguard()
+			unfollow()
 			unwatch?.()
 		},
 	}

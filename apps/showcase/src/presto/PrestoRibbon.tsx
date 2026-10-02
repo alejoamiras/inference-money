@@ -5,7 +5,6 @@ import { useEffect, useRef } from "react"
 import { TESTIDS } from "@/lib/testids"
 import type { PrestoConsent, PrestoView } from "./consent"
 
-/** The ask and the block are the page's own states; a status check the element maps itself. */
 function show(banner: PrestoBanner, view: PrestoView | undefined) {
 	if (view === undefined) return
 	if (view === "ask") banner.state = "connect"
@@ -14,9 +13,9 @@ function show(banner: PrestoBanner, view: PrestoView | undefined) {
 }
 
 /**
- * Presto's own ribbon, above "Inside the wallets". Built outside React with its attributes set before it connects:
- * React would assign `variant` to the element's read-only property, and the element links Google Fonts on connect
- * unless `fonts="none"` is already there. Every view reaches it, a repeated one included, which ends "Connecting…".
+ * Built outside React, attributes before it connects: React would assign `variant` to the element's getter-only
+ * property, and a connected element without `fonts="none"` links Google Fonts. Every view reaches it, a repeated one
+ * included: that is what ends "Connecting…".
  */
 export function PrestoRibbon({ consent }: { consent: PrestoConsent }) {
 	const slot = useRef<HTMLDivElement>(null)

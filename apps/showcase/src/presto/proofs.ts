@@ -16,12 +16,14 @@ export interface ProofState {
 
 export interface ProofTracker {
 	proof: Observable<ProofState>
-	/** The prover's phase callback. */
 	onPhase(phase: PrestoPhase): void
-	/** `prove` as one proof: after the guard, then attributed once it settles. */
+	/**
+	 * `prove` as one proof: after the guard, then attributed once it settles. Calls must not overlap, since one cell holds
+	 * the proof in flight; the page's sends run one at a time (`DemoWallet.exclusive`).
+	 */
 	around<T>(prove: () => Promise<T>): Promise<T>
-	/** Runs before each proof while set: the visitor's consent re-reading the browser's decision. */
-	guard(check: (() => Promise<void>) | undefined): void
+	/** Runs `check` before each proof until the returned function removes it, unless another check replaced it since. */
+	guard(check: () => Promise<void>): () => void
 }
 
 export function proofTracker(): ProofTracker {
@@ -35,6 +37,9 @@ export function proofTracker(): ProofTracker {
 		},
 		guard: (fn) => {
 			check = fn
+			return () => {
+				if (check === fn) check = undefined
+			}
 		},
 		async around(prove) {
 			proof.set({})
