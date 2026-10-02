@@ -7,7 +7,7 @@ code_review: off
 claude_model: n/a (light tier has no Claude leg)
 harden: not scheduled (owner's Phase 0 answer)
 budget: recon 2 agents; one Codex plan audit; Codex fix loop after implementation
-status: draft, awaiting approval
+status: approved by the owner 2026-10-02 (approve; A1 accept, A2 keep, A3 Presto's own fonts)
 ---
 
 # Presto in the showcase
@@ -26,7 +26,7 @@ The live showcase ("Try it yourself", `#live`) proves every transaction in the v
 3. Every Presto failure (not installed, blocked, HTTPS needs fixing, version mismatch, error) leaves browser proving working exactly as today, with the ribbon's own state for it.
 4. A maintainer can read the integration against Presto's README section "Ask before you probe" and find each of its six steps.
 
-**Good enough.** The ribbon keeps Presto's colours and the showcase's fonts (no Google Fonts); no timing readout beyond the Prove label; no HTTP-proving consent UI; the proving harness stays browser-only and is not extended to compare Presto with the browser.
+**Good enough.** The ribbon keeps Presto's colours and fonts, self-hosted (no Google Fonts); no timing readout beyond the Prove label; no HTTP-proving consent UI; the proving harness stays browser-only and is not extended to compare Presto with the browser.
 
 ## Architecture & Implementation
 
@@ -35,13 +35,13 @@ The live showcase ("Try it yourself", `#live`) proves every transaction in the v
 - **`apps/showcase/src/presto/`** (new; real-proof builds only, since `PROVES` is a build-time constant and fake-proof bundles drop every import of it):
   - `prover.ts`: one `PrestoProver` per page, built with the page's shared `WASMSimulator`, its config from the build (`__SHOWCASE_PRESTO__`: the default ports in production, claimed ports in local test builds), and `setForceLocal(true)` before any `await`. Its `onPhase` drives **per-proof attribution**: each proof starts unattributed (reset when the wallet's `proveTx` begins); `transmit` marks it *on its way to Presto*; `fallback` marks it *browser*; `proved` after `transmit` with no `fallback` commits it as *Presto*, and any other completion commits *browser*. The UI reads two values: the in-flight attempt (for the working copy) and the last committed result (for the chip).
   - `consent.ts`: an adapted copy of the SDK's documented `askBeforeConnecting` (MIT; the package does not export it). It sets force-local first, reads `loopbackPermission()` on start (`granted` connects without a click), connects only from a click otherwise, follows `watchLoopbackPermission()`, and keeps the example's **epoch**: a revocation (`denied`, or `prompt` after a grant) bumps it and forces local, so a status check that started earlier can never turn native proving back on. Before each proof, `beforeProving()` re-reads the permission and, if it is no longer granted, forces local before the proof starts. It reports a view: `"ask" | "blocked" | PrestoStatus`, and `stop()` unsubscribes and forces local.
-  - `PrestoRibbon.tsx`: a React wrapper around `<presto-banner variant="ribbon" theme="light" fonts="none">`, with the showcase's faces set through the element's font custom properties. It maps the view: `ask` → `state="connect"`, `blocked` → `state="permission-blocked"`, a status → `banner.status`. `presto-banner:connect` and `presto-banner:retry` call `connect()`. `@alejoamiras/presto-banners/register` loads lazily with the component.
+  - `PrestoRibbon.tsx`: a React wrapper around `<presto-banner variant="ribbon" theme="light" fonts="none">`, with Presto's own faces (Bricolage Grotesque, Figtree) self-hosted from `@fontsource-variable` packages and loaded with the component; the element's font custom properties name them if its default stacks use other family names. It maps the view: `ask` → `state="connect"`, `blocked` → `state="permission-blocked"`, a status → `banner.status`. `presto-banner:connect` and `presto-banner:retry` call `connect()`. `@alejoamiras/presto-banners/register` loads lazily with the component.
 - **Lifecycle.** `demo/start.ts` creates the simulator and the prover (forced local) before opening the wallet, for every route, because the wallet is opened once per page. The consent controller belongs to `live/LiveRoot.tsx`: created when "Try it yourself" mounts and stopped on unmount, which forces local again. The tour and the `#proving` harness never start it, so they always prove in the browser, even for a visitor whose browser already granted the permission.
 - **`demo/wallet.ts`**: `DemoWalletOptions` gains optional `prover` (passed to the PXE as `proverOrOptions`), `simulator`, and `beforeProving`. The `proveTx` interception resets the proof's attribution and awaits `beforeProving()` before emitting `"prove"` and proving.
 - **`ui/Layout.tsx`**: an optional `notice` slot above `composer`; `live/LiveMode.tsx` passes the ribbon there.
 - **Copy and chip**: `LiveMode.tsx:95` ("proven in this browser") says Presto while connected; `useLive.ts:17` and `Verdict.tsx:20` ("Proving in this browser") follow the in-flight attempt; the Prove chip reads "Prove · Presto" only from a committed native result.
 - **`build/target.ts`**: `BuildTarget` gains `presto: { port, httpsPort }`. Local builds read `PRESTO_PORT` / `PRESTO_HTTPS_PORT` (integers 1–65535, distinct; default 59833 / 59834); a testnet build refuses either variable, like every other override. `cspFor` adds `https://127.0.0.1:<httpsPort>` and `http://127.0.0.1:<port>` to `connect-src` only when `proofs === "real"`. `vite.config.ts` defines `__SHOWCASE_PRESTO__`.
-- **Dependencies** (`apps/showcase/package.json`, exact pins): `@alejoamiras/presto@6.0.0-rc.1`, `@alejoamiras/presto-banners@1.2.0`, `@aztec-labs/simulator@6.0.0-rc.1` (already in the lockfile through the PXE). `bunfig.toml` `minimumReleaseAgeExcludes`: `@alejoamiras/presto`, `@alejoamiras/presto-core`.
+- **Dependencies** (`apps/showcase/package.json`, exact pins): `@alejoamiras/presto@6.0.0-rc.1`, `@alejoamiras/presto-banners@1.2.0`, `@aztec-labs/simulator@6.0.0-rc.1` (already in the lockfile through the PXE), `@fontsource-variable/bricolage-grotesque` and `@fontsource-variable/figtree` (versions that pass the 7-day gate). `bunfig.toml` `minimumReleaseAgeExcludes`: `@alejoamiras/presto`, `@alejoamiras/presto-core`.
 
 ### Key interfaces
 
@@ -116,12 +116,12 @@ export interface BuildTarget { /* … */ presto: { port: number; httpsPort: numb
 - I2: `--ip-address-space-overrides=127.0.0.1:<web port>=public` plus `grantPermissions` exercises the permission states (`prompt`, granted, revoked) in headless Chromium (moderate; Presto's own suite does it). It does not exercise the native prompt UI, or Firefox.
 - I3: Sharing one `WASMSimulator` between the PXE and `PrestoProver` matches the default path, which shares it with the default prover (high).
 - I4: `bb` 6.0.0-rc.1, downloaded by presto-server, produces proofs the testnet node accepts (high: same Aztec release). Local settlement does not prove it; the owner's preview run confirms it.
-- I5: presto-banners reads font custom properties from the host element, so the showcase's faces apply with `fonts="none"` (moderate; if not, it falls back to `system-ui` and we accept that).
+- I5: with `fonts="none"`, the ribbon picks up Presto's faces from the document's self-hosted `@font-face` rules, directly or through its font custom properties (moderate; Phase 3 checks it in the built page).
 
-**Asks (for the approval gate).**
-- A1: The `bb` presto-server downloads in tests is trusted through GitHub's release digests, not a pin of ours. Recommended: accept; it is Aztec's own release channel, the same upstream every Aztec package here comes from, and it runs only in tests. The alternative (seeding presto-server's cache with a `bb` we pin) means re-creating its cache layout.
-- A2: Keep the "Prove · Presto" chip and the copy changes (recommended), or drop them.
-- A3: The ribbon in the showcase's fonts (recommended), or Presto's own fonts self-hosted (two more packages).
+**Asks (resolved by the owner at approval, 2026-10-02).**
+- A1, the `bb` presto-server downloads in tests, trusted through GitHub's release digests rather than a pin of ours: **accepted** (Aztec's own release channel, test-only).
+- A2, the "Prove · Presto" chip and the copy changes: **kept**.
+- A3, the ribbon's fonts: **Presto's own** (Bricolage Grotesque and Figtree), self-hosted from two `@fontsource-variable` packages.
 
 ## Plan audit
 
@@ -143,7 +143,7 @@ export interface BuildTarget { /* … */ presto: { port: number; httpsPort: numb
 
 ### Phase 1: build target, CSP and dependencies
 
-Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults), the two origins in `cspFor` for real proofs, the `__SHOWCASE_PRESTO__` define, the three dependencies and the two `minimumReleaseAgeExcludes`. Extend `build/target.test.ts`: a real-proof CSP lists both origins at the given ports; a fake-proof CSP is unchanged; a testnet build refuses `PRESTO_PORT` and `PRESTO_HTTPS_PORT`; a non-integer, out-of-range or duplicate port is refused.
+Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults), the two origins in `cspFor` for real proofs, the `__SHOWCASE_PRESTO__` define, the five dependencies and the two `minimumReleaseAgeExcludes`. Extend `build/target.test.ts`: a real-proof CSP lists both origins at the given ports; a fake-proof CSP is unchanged; a testnet build refuses `PRESTO_PORT` and `PRESTO_HTTPS_PORT`; a non-integer, out-of-range or duplicate port is refused.
 
 **Validation gate.** `bun install --frozen-lockfile` after committing the lockfile; `bun run lint && bun run typecheck && bun run --cwd apps/showcase test:components`. Pass: exit 0 each, the new target tests green. Layers: lint, typecheck, unit.
 
@@ -169,7 +169,7 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 - unmounting "Try it yourself" stops the consent and forces local;
 - the ribbon receives each view.
 
-`bundle.test.ts`: on a fake-proof build, no chunk contains a Presto module; on a real-proof build, the Aztec SDK and Presto stay out of the eager chunk.
+`bundle.test.ts`: on a fake-proof build, no chunk contains a Presto module; on a real-proof build, the Aztec SDK and Presto stay out of the eager chunk. The built ribbon renders in Presto's faces (checked once in the browser).
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run test` (every workspace, showcase components included); `bun run --cwd apps/showcase build:testnet` exits 0 (bundle and manifest-identity checks included). Layers: lint, typecheck, unit/component, build.
 
