@@ -154,8 +154,8 @@ describe("claim", () => {
 })
 
 describe("waitClaimFinalized", () => {
-	/** Answers each read from the next state; a state names which block tags hold the nullifier. */
-	const scripted = (states: ("checkpointed" | "finalized" | "none" | "error")[]) => {
+	/** Answers each read from the next state, the latest tip holding the nullifier; each tip holds those after it. */
+	const scripted = (states: ("proposed" | "checkpointed" | "finalized" | "none" | "error")[]) => {
 		const tags: string[] = []
 		let round = -1
 		const node: NullifierNode = {
@@ -164,21 +164,22 @@ describe("waitClaimFinalized", () => {
 				if (block === "finalized") round++
 				const state = states[Math.min(round, states.length - 1)]
 				if (state === "error") throw new Error("503")
-				const hit = state === "finalized" || (state === "checkpointed" && block === "checkpointed")
+				const tips = ["proposed", "checkpointed", "finalized"]
+				const hit = tips.indexOf(state ?? "none") >= tips.indexOf(String(block)) && state !== "none"
 				return leaves.map(() => (hit ? ({ data: 1n } as never) : undefined))
 			},
 		}
 		return { node, tags }
 	}
 
-	it("keeps the secret until the claim is finalized, through failed reads, and reports a pruned claim as dropped", async () => {
+	it("keeps the secret until the claim is finalized, through proposed and failed reads, and reports a pruned claim as dropped", async () => {
 		const t = await ticket("private")
 		let sleeps = 0
 		const opts = { sleep: async () => void sleeps++ }
-		const settling = scripted(["checkpointed", "error", "checkpointed", "finalized"])
+		const settling = scripted(["proposed", "checkpointed", "error", "checkpointed", "finalized"])
 		expect(await waitClaimFinalized(t, settling.node, M, opts)).toBe("finalized")
-		expect(settling.tags.filter((b) => b === "finalized").length, "one finalized read per round").toBe(4)
-		expect(sleeps).toBe(3)
+		expect(settling.tags.filter((b) => b === "finalized").length, "one finalized read per round").toBe(5)
+		expect(sleeps).toBe(4)
 
 		expect(await waitClaimFinalized(t, scripted(["checkpointed", "none"]).node, M, opts)).toBe("dropped")
 	})

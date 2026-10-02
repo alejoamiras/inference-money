@@ -12,6 +12,8 @@ import type { Outcome } from "./outcome"
 
 /** Requests the page opened, in order, each held open until `hold` settles. */
 const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as Promise<void> | undefined }))
+/** Whether a payment is refused before sending, as one into a request whose stamp a prune removed. */
+const payments = vi.hoisted(() => ({ refuse: false }))
 
 /** Where a claim this page made stands on L2, and how many claims it sent. */
 const claims = vi.hoisted(() => ({
@@ -23,12 +25,13 @@ const claims = vi.hoisted(() => ({
 // A deposit this page sent is still unconfirmed on Ethereum (a "broken" one cannot even be read back); a claim
 // ticket's nullifier is wherever `claims` says.
 vi.mock("@inference-money/bridge-core", async (original) => {
+	const real = await original<typeof import("@inference-money/bridge-core")>()
 	const { Fr } = await import("@aztec-labs/aztec.js/fields")
 	const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
 	const intent = { recipient: AztecAddress.ZERO, amount: 10_000n }
 	const ticket = { messageHash: "0x01", leafIndex: 1n, depositor: "0xd", draft: { secretOrSalt: Fr.ZERO, intent } }
 	return {
-		...(await original<typeof import("@inference-money/bridge-core")>()),
+		...real,
 		decodeDepositDraft: (s: string) => ({ marker: s }),
 		reconcileDeposit: async (d: { marker: string }) => {
 			if (d.marker === "broken") throw new Error("Cannot read properties of undefined (reading 'message')")
@@ -45,6 +48,9 @@ vi.mock("@inference-money/bridge-core", async (original) => {
 			await requests.hold
 			requests.order.push("opened")
 			return { commitment: 1 }
+		},
+		payRequest: async () => {
+			if (payments.refuse) throw new Error(real.TOKEN_REFUSALS.payment)
 		},
 		// Each tip holds the blocks of the tips after it: a proposed claim shows only at "proposed", a pruned one nowhere.
 		isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") => {
@@ -275,5 +281,22 @@ describe("runDraft", () => {
 		requests.hold = undefined
 		await Promise.all(runs)
 		expect(requests.order).toEqual(["open", "opened", "open", "opened"])
+	})
+
+	it("forgets a request a refused payment proves stale, so the next payment opens a fresh one", async () => {
+		const base = ctxWith(false)
+		const cast = { galactica: { address: "0xg" }, alice: { address: "0xa" } }
+		const ctx: LiveCtx = { ...base, demo: { ...base.demo, cast } as unknown as DemoWallet }
+		ctx.requests.set("galactica>alice", 1 as never)
+		const pay = { actor: "alice", action: "pay", to: "galactica", amount: 10_000n } as const
+		payments.refuse = true
+		try {
+			expect([(await runDraft(ctx, pay, WALLETS, () => {})).kind, ctx.requests.size]).toEqual(["refused", 0])
+		} finally {
+			payments.refuse = false
+		}
+		const opened = requests.order.length
+		expect((await runDraft(ctx, pay, WALLETS, () => {})).kind).toBe("settled")
+		expect(requests.order.slice(opened)).toEqual(["open", "opened"])
 	})
 })

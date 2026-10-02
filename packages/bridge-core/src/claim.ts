@@ -52,9 +52,8 @@ export class SponsorUnavailableError extends Error {
 export const L2_DONE = { waitForStatus: TxStatus.CHECKPOINTED, timeout: 600 } as const
 
 /**
- * A faster answer for a UI: the tx is in a proposed block, which the node's world state and a PXE's anchor already
- * include, so the next tx builds on it and a double spend of its notes is refused. A prune undoes it if its checkpoint
- * never reaches L1, so nothing irreversible may rest on it.
+ * A faster answer for a UI: the tx is in a proposed block. A PXE on its default `proposed` sync tip builds on it, and the
+ * node refuses a double spend against it, but a prune undoes it: nothing irreversible may rest on it before finality.
  */
 export const L2_PROPOSED = { waitForStatus: TxStatus.PROPOSED, timeout: 600 } as const
 
@@ -207,8 +206,8 @@ export interface WaitClaimFinalizedOptions {
 /**
  * Waits until this ticket's claim is in a finalized block, the first point at which its secret may be forgotten: an
  * epoch that misses its proof window is pruned, and an L1 reorg can remove a proof that landed near its deadline.
- * "dropped" once the nullifier is not even checkpointed any more, so the caller claims again; a failed read counts as
- * not final yet.
+ * "dropped" once the nullifier is not even proposed any more, so the caller claims again; a failed read counts as not
+ * final yet.
  */
 export async function waitClaimFinalized(
 	t: ClaimTicket,
@@ -218,15 +217,16 @@ export async function waitClaimFinalized(
 ): Promise<"finalized" | "dropped"> {
 	const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
 	for (;;) {
-		const state = await claimFinality(t, node, m).catch(() => "checkpointed" as const)
-		if (state !== "checkpointed") return state
+		const state = await claimFinality(t, node, m).catch(() => "pending" as const)
+		if (state !== "pending") return state
 		await sleep(opts.pollMs ?? 15_000)
 	}
 }
 
-async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"finalized" | "checkpointed" | "dropped"> {
+// A claim returned at either tip shows at "proposed", which holds every checkpointed block too.
+async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManifest): Promise<"finalized" | "pending" | "dropped"> {
 	if (await isClaimConsumed(t, node, m, "finalized")) return "finalized"
-	return (await isClaimConsumed(t, node, m)) ? "checkpointed" : "dropped"
+	return (await isClaimConsumed(t, node, m, "proposed")) ? "pending" : "dropped"
 }
 
 /**

@@ -19,6 +19,7 @@ import {
 	payRequest,
 	reconcileDeposit,
 	syncMerchantList,
+	TOKEN_REFUSALS,
 } from "@inference-money/bridge-core"
 import {
 	aztecWorld,
@@ -274,7 +275,13 @@ async function pay(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 		amount: d.amount as bigint,
 		kind: "private",
 	} as const
-	await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
+	try {
+		await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
+	} catch (e) {
+		// Refused before any send: a request opened at a proposed block that a prune removed holds no stamp any more.
+		if (message(e) === TOKEN_REFUSALS.payment) ctx.requests.delete(key)
+		throw e
+	}
 	ctx.requests.delete(key)
 	const kinds: TxKind[] = ctx.demo.sent.length - since > 1 ? ["request", "pay"] : ["pay"]
 	const detail = `${HOLDER_NAME[d.actor]} paid ${usdc2(payment.amount)} USDC into ${HOLDER_NAME[d.to]}'s request.`
