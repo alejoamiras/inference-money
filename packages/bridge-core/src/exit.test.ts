@@ -129,15 +129,20 @@ describe("exitToL1", () => {
 		expect(((err as Error).cause as Error).message).toMatch(cause)
 	})
 
-	it("reads a revert whose effect carries no withdraw message as nothing burned", async () => {
-		const err = await exitToL1(
-			intent(),
-			boundWallet().wallet,
-			effectNode([], async () => REVERTED),
-			M,
-		).catch((e: unknown) => e)
+	it("reads a revert whose effect carries no withdraw message as nothing burned, final only in a finalized block", async () => {
+		const revertedAt = (receipt: unknown) =>
+			exitToL1(
+				intent(),
+				boundWallet().wallet,
+				effectNode([], async () => receipt),
+				M,
+			)
+		const err = await revertedAt(REVERTED).catch((e: unknown) => e)
 		expect(err).toBeInstanceOf(ExitRevertedError)
-		expect((err as ExitRevertedError).message).toMatch(/nothing was burned/)
+		expect(err).toMatchObject({ final: false, message: expect.stringMatching(/nothing was burned/) })
+		// A prune can re-include a tx its checkpoint reverted, which may then burn.
+		const settled = await revertedAt({ ...REVERTED, status: TxStatus.FINALIZED }).catch((e: unknown) => e)
+		expect(settled).toMatchObject({ name: "ExitRevertedError", final: true })
 
 		const noEffect = { getTxEffect: async () => undefined, getTxReceipt: async () => REVERTED } as unknown as ExitNode
 		const unread = await exitToL1(intent(), boundWallet().wallet, noEffect, M).catch((e: unknown) => e)

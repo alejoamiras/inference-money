@@ -30,7 +30,10 @@ export interface Payout {
 const ONE_POLL = { timeoutMs: 0 }
 const NOT_PROVEN = /not proven on Ethereum yet/
 const CHECKPOINTED: readonly TxStatus[] = [TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED]
-const UNKNOWN = "Aztec does not hold this burn right now; it stays listed until it can no longer land."
+const NOTE = {
+	unknown: "Aztec does not hold this burn right now; it stays listed until it can no longer land.",
+	rejected: "Aztec rejected this burn, so nothing left the account; it stays listed until that is final.",
+}
 
 /** The codec revives whatever JSON it holds, so a tampered ticket decodes too: it must hold what the page reads. */
 function decoded(ticket: string | undefined): ExitTicket | undefined {
@@ -44,8 +47,9 @@ function decoded(ticket: string | undefined): ExitTicket | undefined {
 }
 
 /**
- * Where `p`'s burn stands, read again on every pass: a pruned checkpoint can undo a burn located before. One the node
- * does not hold is retired only once `finalFate` proves it gone (a finalized block past its expiry, read first).
+ * Where `p`'s burn stands, read again on every pass: a pruned checkpoint can undo a burn located before, or a revert.
+ * One the node does not hold is retired only once `finalFate` proves it gone (a finalized block past its expiry, read
+ * first), and a reverted one only once its block is finalized.
  */
 async function locate(ctx: LiveCtx, p: PendingExit, sent: NonNullable<PendingExit["sent"]>) {
 	const hash = TxHash.fromString(sent.l2TxHash)
@@ -57,6 +61,7 @@ async function locate(ctx: LiveCtx, p: PendingExit, sent: NonNullable<PendingExi
 	if (cached) return cached
 	const found = await locateWithdrawal(sent.recipient as Address, BigInt(sent.amount), hash, ctx.demo.node, ctx.m)
 	if (found === "reverted") return "none"
+	if (found === "reverted-unfinalized") return "rejected"
 	ctx.tickets.putExit({ ...p, ticket: encodeTicket("exit", found) })
 	return found
 }
@@ -88,7 +93,7 @@ async function payOne(
 	try {
 		const where = p.sent ? await locate(ctx, p, p.sent) : (legacy as ExitTicket)
 		if (where === "waiting") return { ...shown, state: "proving" }
-		if (where === "unknown") return { ...shown, state: "stuck", note: UNKNOWN }
+		if (where === "unknown" || where === "rejected") return { ...shown, state: "stuck", note: NOTE[where] }
 		if (where !== "none") await pay(ctx, wallets, where, onRow)
 		ctx.tickets.dropExit(p.id)
 		return undefined
