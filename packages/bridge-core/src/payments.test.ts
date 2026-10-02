@@ -411,6 +411,7 @@ describe("payReplacingStale", () => {
 		const { opened, reopen } = opener(w)
 		await payReplacingStale(t.gate, token, stored, (c) => t.pay(c), reopen)
 		expect([opened.length, w.chain.included.length]).toEqual([1, 1])
+		await expect(t.pay(stored), "a replaced request is never stale again").rejects.toEqual(refusal("replaced"))
 	})
 
 	it("reaches a new request through a replacement that went stale unpaid", async () => {

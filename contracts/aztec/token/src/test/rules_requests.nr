@@ -221,7 +221,7 @@ unconstrained fn a_user_cannot_pay_a_stamped_request_publicly_once_its_stamp_exp
     w.env.call_public(w.alice, token.transfer_public_to_commitment(w.alice, c, AMOUNT, 0));
 }
 
-// A merchant never relied on the stamp: with none live, the token proves the payer.
+// A merchant needs no stamp: with none live, the token proves the payer.
 #[test]
 unconstrained fn a_merchant_pays_a_request_whose_stamp_expired() {
     let w = utils::setup_merchant_world(false);

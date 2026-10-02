@@ -1153,7 +1153,6 @@ pub contract Token {
     }
 
     /// @notice Marks `commitment` paid: a request takes one payment, whichever path it comes by
-    /// @param commitment The request paid into
     #[internal("private")]
     fn _push_paid(commitment: Field) {
         let paid_nullifier = paid(commitment);
@@ -1166,7 +1165,6 @@ pub contract Token {
     /// @notice Whether `commitment` holds a stamp still payable at this block's timestamp
     /// @dev Public, so it reads the chain's tip: a request stamped earlier in this same tx counts. Every bucket
     ///      searched is live by construction, newest first.
-    /// @param commitment The request paid into
     #[internal("public")]
     fn _has_live_stamp(commitment: Field) -> bool {
         let newest = stamp_bucket(self.context.timestamp());

@@ -11,8 +11,8 @@
  *   tx, or released once the tx's revert, or the chain passing its expiry without it, is final. So an uncertain send
  *   never allows a second one;
  * - `paid`;
- * - `replaced`, by the request opened in place of a stale one ({@link payReplacingStale}), which every later attempt
- *   on the stale one shares.
+ * - `replaced`, by the request opened in place of a stale one ({@link payReplacingStale}); every later attempt on
+ *   the stale one is refused as `replaced`, and only {@link payReplacingStale} follows it.
  * Clients that share no store (two devices) can still both prove a payment; the token lands one.
  *
  * A private payment through a stamp caps the tx's expiry at the stamp's deadline. While the stamp is fresh that cap is
@@ -86,13 +86,14 @@ export function memoryPaymentStore(): PaymentStore {
 	}
 }
 
-export type PaymentRefusal = "paid" | "in-flight" | "completed-on-chain" | "stale"
+export type PaymentRefusal = "paid" | "in-flight" | "completed-on-chain" | "stale" | "replaced"
 
 const REFUSAL_TEXT: Record<PaymentRefusal, string> = {
 	paid: "This request is already paid.",
-	"in-flight": "This request is already being paid; wait for that payment, or open a new request.",
+	"in-flight": "This request is already being paid; wait for that payment to settle.",
 	"completed-on-chain": "This request was already paid on chain; it takes no second payment.",
 	stale: "This request is too old to pay without marking the payment; ask for a new one.",
+	replaced: "This request was replaced by a newer one; pay that one instead.",
 }
 
 /** `payRequest` refused before anything was sent. */
@@ -299,7 +300,7 @@ async function refreshed(r: PaymentRecord | undefined, node: PaymentNode, now: n
 
 function refusalFor(r: PaymentRecord | undefined): PaymentRefusedError {
 	if (r?.state === "paid") return new PaymentRefusedError("paid", r.txHash)
-	if (r?.state === "replaced") return new PaymentRefusedError("stale")
+	if (r?.state === "replaced") return new PaymentRefusedError("replaced")
 	return new PaymentRefusedError("in-flight", r?.state === "sent" ? r.txHash : undefined)
 }
 
@@ -516,9 +517,9 @@ export async function payRequest(
 }
 
 /**
- * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale`, into its replacement: the one
- * another attempt already opened, else the one `reopen` opens ({@link PaymentGate.replacing}), following replacements
- * that went stale in turn and opening at most one. `stale` means nothing is in flight or paid for a request from this
+ * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale` or `replaced`, into its
+ * replacement: the one another attempt already opened, else the one `reopen` opens ({@link PaymentGate.replacing}),
+ * following replacements that went stale in turn and opening at most one. `stale` means nothing is in flight or paid for a request from this
  * client, and every attempt shares one replacement, so it is not a second payment; any other refusal is thrown as is.
  */
 export async function payReplacingStale<T>(
@@ -538,7 +539,8 @@ export async function payReplacingStale<T>(
 		try {
 			return await pay(commitment)
 		} catch (e) {
-			if (!(e instanceof PaymentRefusedError && e.reason === "stale") || opened) throw e
+			const replaceable = e instanceof PaymentRefusedError && (e.reason === "stale" || e.reason === "replaced")
+			if (!replaceable || opened) throw e
 			commitment = await gate.replacing(paymentKey(token, commitment), open)
 		}
 	}
