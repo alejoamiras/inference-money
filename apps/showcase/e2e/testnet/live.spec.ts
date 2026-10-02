@@ -4,7 +4,7 @@ import { parseTour } from "@inference-money/demo/tour"
 import { TESTNET } from "@inference-money/deployer/networks"
 import { createPublicClient, erc20Abi, type Hex, http, isAddressEqual } from "viem"
 import { privateKeyToAddress } from "viem/accounts"
-import { servedHeaders } from "../../build/target"
+import { PRESTO_DEFAULT, servedHeaders } from "../../build/target"
 import { TESTIDS } from "../../src/lib/testids"
 import { l2Receipt } from "../fixtures/chain"
 import { L2_SEND } from "../fixtures/rpc"
@@ -24,7 +24,7 @@ test("[A29] serves the testnet build as built: its manifest, its tour, its heade
 }) => {
 	const response = await page.goto("/")
 	const headers = response?.headers() ?? {}
-	const built = servedHeaders({ manifest, usersTag: "", l1RpcUrl: TESTNET.defaultL1RpcUrl, proofs: "real", tour })
+	const built = servedHeaders({ manifest, usersTag: "", l1RpcUrl: TESTNET.defaultL1RpcUrl, proofs: "real", presto: PRESTO_DEFAULT, tour })
 	for (const [name, value] of Object.entries(built)) expect(headers[name.toLowerCase()], name).toBe(value)
 	expect(await page.evaluate(() => crossOriginIsolated), "the page is cross-origin isolated").toBe(true)
 	await expect(page.getByTestId(TESTIDS.network)).toHaveText("Aztec testnet · real proofs")

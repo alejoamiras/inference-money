@@ -31,6 +31,9 @@ describe("resolveTarget", () => {
 			/keyless: unset SEPOLIA_RPC_URL/,
 		)
 		expect(() => resolveTarget({ BRIDGE_MANIFEST: testnet, SHOWCASE_PROOFS: "fake" }, root)).toThrow(/proves for real/)
+		expect(() => resolveTarget({ BRIDGE_MANIFEST: testnet, PRESTO_HTTPS_PORT: "40002" }, root)).toThrow(
+			/finds Presto on its own ports: unset PRESTO_HTTPS_PORT/,
+		)
 		expect(() => resolveTarget({}, join(root, "nowhere"))).toThrow(/No bridge manifest at .*deployments\/testnet\.json/)
 	})
 
@@ -55,16 +58,33 @@ describe("resolveTarget", () => {
 	})
 })
 
+describe("Presto's ports", () => {
+	it("stay the app's own unless a local build moves them, to two distinct valid ports", () => {
+		expect(resolveTarget({ BRIDGE_MANIFEST: testnet }, root).presto).toEqual({ port: 59833, httpsPort: 59834 })
+		const moved = { BRIDGE_MANIFEST: local, ...ANVIL, PRESTO_PORT: "40001", PRESTO_HTTPS_PORT: "40002" }
+		expect(resolveTarget(moved, root).presto).toEqual({ port: 40001, httpsPort: 40002 })
+		for (const bad of ["", "abc", "0", "65536", "1.5", "-1"]) {
+			expect(() => resolveTarget({ ...moved, PRESTO_PORT: bad }, root)).toThrow(/PRESTO_PORT is a port/)
+		}
+		expect(() => resolveTarget({ ...moved, PRESTO_HTTPS_PORT: "40001" }, root)).toThrow(/must differ/)
+	})
+})
+
 describe("served headers", () => {
-	it("isolate the page, frame nothing, and reach only the node and the L1 RPC, plus the CRS hosts when proving", () => {
+	it("isolate the page, frame nothing, and reach only the node and the L1 RPC, plus the CRS hosts and Presto when proving", () => {
 		const node = new URL(fixture.l2.nodeUrl).origin
 		const faked = resolveTarget({ BRIDGE_MANIFEST: local, ...ANVIL }, root)
 		expect(cspFor(faked)).toContain(`connect-src 'self' data: blob: ${node} http://127.0.0.1:8545;`)
+		const proving = resolveTarget(
+			{ BRIDGE_MANIFEST: local, ...ANVIL, SHOWCASE_PROOFS: "real", PRESTO_PORT: "40001", PRESTO_HTTPS_PORT: "40002" },
+			root,
+		)
+		expect(cspFor(proving)).toContain("https://crs.aztec-labs.com https://127.0.0.1:40002 http://127.0.0.1:40001;")
 		expect(cspFor(faked)).toContain("frame-src 'none'")
 		expect(cspFor(faked)).toContain("frame-ancestors 'none'")
 		const shipped = resolveTarget({ BRIDGE_MANIFEST: testnet }, root)
 		expect(cspFor(shipped)).toContain(
-			`connect-src 'self' data: blob: ${node} https://ethereum-sepolia-rpc.publicnode.com https://crs.aztec-cdn.foundation https://crs.aztec-labs.com;`,
+			`connect-src 'self' data: blob: ${node} https://ethereum-sepolia-rpc.publicnode.com https://crs.aztec-cdn.foundation https://crs.aztec-labs.com https://127.0.0.1:59834 http://127.0.0.1:59833;`,
 		)
 		expect(headersFile(shipped)).toMatch(
 			/^\/\*\n {2}Cross-Origin-Opener-Policy: same-origin\n {2}Cross-Origin-Embedder-Policy: require-corp\n/,

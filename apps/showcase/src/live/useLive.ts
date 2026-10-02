@@ -1,4 +1,6 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
+import type { Observable } from "@/lib/observable"
+import type { ProofState } from "@/presto"
 import { CHECKING } from "@/tour/frame"
 import type { FeedRow, Holder } from "@/tour/player"
 import type { SceneId } from "@/tour/scenes"
@@ -18,6 +20,7 @@ const WORKING: Record<Stage, string> = {
 	send: "Sending it to the network.",
 	settle: "Sent. Waiting for the network to include it.",
 }
+const ON_PRESTO = "The rules allow it. Presto proves it on this computer."
 
 const IDLE: VerdictState = { kind: "idle", detail: "Pick a step, or set your own, then press Try it." }
 
@@ -51,12 +54,21 @@ function useChains(engine: LiveEngine | undefined, running: RefObject<boolean>) 
 	return { rows, addRow, balances, payouts, refresh }
 }
 
-/** One run at a time: the verdict and the coin follow its stages, from the runner and from the wallet. */
-function useRun(engine: LiveEngine | undefined, running: RefObject<boolean>, chains: ReturnType<typeof useChains>) {
+/**
+ * One run at a time: the verdict and the coin follow its stages, from the runner and from the wallet, and `proof`
+ * follows the run's own proofs only, so a run that proves nothing never shows an earlier run's.
+ */
+function useRun(
+	engine: LiveEngine | undefined,
+	running: RefObject<boolean>,
+	chains: ReturnType<typeof useChains>,
+	proofs: Observable<ProofState> | undefined,
+) {
 	const [busy, setBusy] = useState(false)
 	const [verdict, setVerdict] = useState<VerdictState>(IDLE)
 	const [flight, setFlight] = useState<Flight>()
 	const [stages, setStages] = useState<readonly Stage[]>(STAGES)
+	const [proof, setProof] = useState<ProofState>({})
 	const { addRow, refresh } = chains
 	const execute = useCallback(
 		async (d: ValidDraft) => {
@@ -64,6 +76,7 @@ function useRun(engine: LiveEngine | undefined, running: RefObject<boolean>, cha
 			running.current = true
 			setBusy(true)
 			setStages(stagesFor(d))
+			setProof({})
 			const coin = { ...tripOf(d), label: coinLabel(d) }
 			let at: Stage = "simulate"
 			const report = (stage: Stage, detail?: string) => {
@@ -72,6 +85,7 @@ function useRun(engine: LiveEngine | undefined, running: RefObject<boolean>, cha
 				setFlight({ ...coin, ok: true, phase: stage === "simulate" ? "checking" : "moving" })
 			}
 			const unlisten = engine.stages.listen(report)
+			const unlistenProof = proofs?.listen(setProof)
 			try {
 				const outcome = await engine.run(d, report)
 				setVerdict(verdictOf(outcome, at))
@@ -79,30 +93,36 @@ function useRun(engine: LiveEngine | undefined, running: RefObject<boolean>, cha
 				if (outcome.kind === "settled") for (const row of [...outcome.rows].reverse()) addRow(row)
 			} finally {
 				unlisten()
+				unlistenProof?.()
 				running.current = false
 				setBusy(false)
 				void refresh()
 			}
 		},
-		[engine, running, addRow, refresh],
+		[engine, running, addRow, refresh, proofs],
 	)
-	return { busy, verdict, setVerdict, flight, stages, execute }
+	return { busy, verdict, setVerdict, flight, stages, execute, proof }
 }
 
 export type LiveView = ReturnType<typeof useLive>
 
-/** Live mode's state: the composer's draft, the run in flight, and what the chains showed. */
-export function useLive(engine: LiveEngine | undefined) {
+/**
+ * Live mode's state: the composer's draft, the run in flight, and what the chains showed. `proofs` is where the page's
+ * proofs run, on a page that can prove through Presto.
+ */
+export function useLive(engine: LiveEngine | undefined, proofs?: Observable<ProofState>) {
 	const [draft, setDraft] = useState<Draft>(PRESETS.deposit)
 	const [scene, setScene] = useState<SceneId | undefined>("deposit")
 	const [error, setError] = useState<string>()
 	const running = useRef(false)
 	const chains = useChains(engine, running)
-	const runner = useRun(engine, running, chains)
-	const { execute, setVerdict } = runner
+	const runner = useRun(engine, running, chains, proofs)
+	const { execute, setVerdict, verdict, proof } = runner
+	const onPresto = verdict.kind === "working" && verdict.stage === "prove" && proof.attempt === "presto"
 	return {
 		...chains,
 		...runner,
+		verdict: onPresto ? { ...verdict, detail: ON_PRESTO } : verdict,
 		draft,
 		scene,
 		error,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared by the showcase's browser runs (e2e/agent.sh, e2e/proving.sh): sourced after `set -euo pipefail` with
+# Shared by the showcase's browser runs (e2e/agent.sh, e2e/proving.sh, e2e/presto.sh): sourced after `set -euo pipefail` with
 # RUN_PREFIX set. One run owns one local network, deployment and demo cast; `reap_run` removes exactly those.
 # shellcheck disable=SC2034  # APP_DIR, ANVIL_URL and NODE_URL are read by the scripts that source this
 
@@ -23,6 +23,30 @@ step() {
   local name=$1
   shift
   "$@" >"$STATE_DIR/$name.log" 2>&1 || { tail -40 "$STATE_DIR/$name.log" >&2; fatal "$name failed (log: $STATE_DIR/$name.log)"; }
+}
+
+# owns_group <pgid> <start> <marker>: a pid alone is not ownership, since the kernel recycles pids. The group leader's
+# start time must still be the one recorded at spawn; once the leader is gone, a member carrying the marker in its
+# environment proves it (Linux /proc only).
+owns_group() {
+  local pgid=$1 start=$2 marker=$3 pid
+  [ -n "$pgid" ] || return 1
+  [ "$(ps -o lstart= -p "$pgid" 2>/dev/null)" = "$start" ] && return 0
+  for pid in $(pgrep -g "$pgid" 2>/dev/null); do
+    tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -qx "INFERENCE_MONEY_OWNER=$marker" && return 0
+  done
+  return 1
+}
+
+# stop_group <pgid> <start> <marker>: TERM, then KILL after 20 s, each only while this run still owns the group.
+stop_group() {
+  local pgid=$1 start=$2 marker=$3
+  [ -n "$pgid" ] || return 0
+  owns_group "$pgid" "$start" "$marker" || return 0
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+  for _ in $(seq 1 20); do owns_group "$pgid" "$start" "$marker" || return 0; sleep 1; done
+  owns_group "$pgid" "$start" "$marker" || return 0
+  kill -KILL -- "-$pgid" 2>/dev/null || true
 }
 
 # claim_ports <service>...: also resolves the tag namespaced by this checkout, which net:up, deploy:local and the port

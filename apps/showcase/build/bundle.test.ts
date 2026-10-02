@@ -53,18 +53,27 @@ describe("banned packages", () => {
 
 /** Static imports only: `import(` loads later, which is the point. */
 const STATIC_IMPORT = /\bimport\s*(?:[^"'()]*?from\s*)?["']\.\/([^"']+\.js)["']/g
+/**
+ * What `import()` can load later. Rolldown still emits the target of an `import()` it dropped as dead code, as a chunk
+ * nothing references, so what a page can run is what its entry reaches, not what `assets/` holds.
+ */
+const DYNAMIC_IMPORT = /\bimport\(\s*[`"']\.\/([^`"']+\.js)[`"']\s*\)/g
 
-/** The chunks the page loads before anything else runs: the entry and its static imports, transitively. */
-function eagerChunks(assets: string, entry: string): string[] {
+/** The entry and every chunk it reaches through `imports`, transitively. */
+function reached(assets: string, entry: string, imports: readonly RegExp[]): string[] {
 	const seen = new Set<string>()
 	const visit = (chunk: string) => {
 		if (seen.has(chunk)) return
 		seen.add(chunk)
-		for (const m of readFileSync(join(assets, chunk), "utf8").matchAll(STATIC_IMPORT)) if (m[1]) visit(m[1])
+		const code = readFileSync(join(assets, chunk), "utf8")
+		for (const re of imports) for (const m of code.matchAll(re)) if (m[1]) visit(m[1])
 	}
 	visit(entry)
 	return [...seen]
 }
+
+/** Presto's SDK, its banner, and this app's own Presto code. */
+const PRESTO = /node_modules\/@alejoamiras\/|(^|\/)src\/presto\//
 
 /** A chunk's sources; Vite's own helpers ship without a map, and hold none. */
 function sourcesOf(assets: string, chunk: string): string[] {
@@ -76,6 +85,11 @@ function sourcesOf(assets: string, chunk: string): string[] {
 describe.skipIf(!process.env.BUILT_DIST)("the built bundle", () => {
 	const dist = resolve(appRoot, process.env.BUILT_DIST ?? "")
 	const assets = join(dist, "assets")
+	const entry = () => {
+		const script = readFileSync(join(dist, "index.html"), "utf8").match(/<script type="module"[^>]*src="\/assets\/([^"]+\.js)"/)?.[1]
+		expect(script).toBeDefined()
+		return script as string
+	}
 
 	it("holds no banned module", () => {
 		const maps = readdirSync(assets).filter((f) => f.endsWith(".js.map"))
@@ -83,11 +97,15 @@ describe.skipIf(!process.env.BUILT_DIST)("the built bundle", () => {
 		expect(bannedModules(maps.flatMap((f) => sourcesOf(assets, f.replace(/\.map$/, ""))))).toEqual([])
 	})
 
-	it("plays the tour before the Aztec SDK loads: nothing the page loads first comes from it", () => {
-		const entry = readFileSync(join(dist, "index.html"), "utf8").match(/<script type="module"[^>]*src="\/assets\/([^"]+\.js)"/)?.[1]
-		expect(entry).toBeDefined()
-		const eager = eagerChunks(assets, entry as string).flatMap((c) => sourcesOf(assets, c))
+	it("plays the tour before the Aztec SDK or Presto loads: nothing the page loads first comes from them", () => {
+		const eager = reached(assets, entry(), [STATIC_IMPORT]).flatMap((c) => sourcesOf(assets, c))
 		expect(eager.length).toBeGreaterThan(0)
-		expect(eager.filter((s) => s.includes("node_modules/@aztec-labs/"))).toEqual([])
+		expect(eager.filter((s) => s.includes("node_modules/@aztec-labs/") || PRESTO.test(s))).toEqual([])
+	})
+
+	it("can load Presto only when its CSP lets the page reach Presto", () => {
+		const reaches = readFileSync(join(dist, "_headers"), "utf8").includes("https://127.0.0.1:")
+		const loadable = reached(assets, entry(), [STATIC_IMPORT, DYNAMIC_IMPORT]).flatMap((c) => sourcesOf(assets, c))
+		expect(loadable.some((s) => PRESTO.test(s))).toBe(reaches)
 	})
 })
