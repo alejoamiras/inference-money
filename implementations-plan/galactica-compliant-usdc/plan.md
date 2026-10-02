@@ -1237,6 +1237,8 @@ If deployed bytes changed, run the redeploy chain:
 3. Label the showcase and hardening PRs `e2e`, then `gh pr checks --watch`.
 4. `gh stack add galactica-compliant-usdc-close-out`, the close-out commits, then `gh stack submit --auto --open`.
 
+**As delivered:** P9 ran after arc 4's loop had closed its branch, so its commits sit on the showcase branch, interleaved with P10–P13: the keyed-run fixes, the deployment, the admin, and the demo tag and tour. Moving them would rewrite pushed history for no reviewer gain. So the operator PR carries P8, and the showcase PR carries P9–P13; each says so.
+
 Merging (`gh stack merge --squash` on the close-out lands the whole stack) is the user's call. Workers Builds already points at `apps/showcase` (Ask 8), so production redeploys from `main` at merge. Then run `SHOWCASE_URL=<production URL> bun run --cwd apps/showcase test:testnet`.
 
 ## Decision ledger
