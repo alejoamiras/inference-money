@@ -49,6 +49,9 @@ jobs:
       - name: Chromium (the pinned Playwright's build)
         run: apps/showcase/node_modules/.bin/playwright install --with-deps chromium
       - run: bun run test:e2e:presto
+        env:
+          # presto.sh hands it to presto-server alone, for the GitHub API calls that check the bb it downloads.
+          PRESTO_GITHUB_TOKEN: ${{ github.token }}
       # The run's certificate key and presto-server's home live outside the state dir, so neither is uploaded.
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

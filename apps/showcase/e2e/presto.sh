@@ -8,6 +8,8 @@
 # presto-server speaks HTTP only and the browser SDK proves over HTTPS only, so each spec runs an HTTPS proxy in front
 # of it, with a certificate made for this run that only this run's browser trusts.
 set -euo pipefail
+# CI's job token is presto-server's alone (see its launch): un-exported, so nothing else this run starts inherits it.
+export -n PRESTO_GITHUB_TOKEN
 RUN_PREFIX=showcase-presto
 # shellcheck source=run/common.sh
 source "$(dirname "$0")/run/common.sh"
@@ -46,9 +48,14 @@ step tls openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nod
   -addext "subjectAltName=IP:127.0.0.1" -keyout "$TLS_DIR/key.pem" -out "$TLS_DIR/cert.pem"
 
 # It ignores an unknown flag and serves on its default port, so it gets no flags at all: only this run's home and port.
+# It checks the bb it downloads through the GitHub API, whose anonymous quota CI's shared addresses exhaust: CI passes
+# its job token, exported in this subshell only, so it never appears on a command line.
 log "starting presto-server on :$PRESTO_PORT"
-INFERENCE_MONEY_OWNER="$PRESTO_MARKER" PRESTO_HOME="$PRESTO_HOME_DIR" ALLOWED_ORIGINS="http://127.0.0.1:$WEB_PORT" \
-  setsid "$PRESTO_BIN" >"$STATE_DIR/presto-server.log" 2>&1 &
+(
+  export INFERENCE_MONEY_OWNER="$PRESTO_MARKER" PRESTO_HOME="$PRESTO_HOME_DIR" ALLOWED_ORIGINS="http://127.0.0.1:$WEB_PORT"
+  [ -z "${PRESTO_GITHUB_TOKEN:-}" ] || export GITHUB_TOKEN="$PRESTO_GITHUB_TOKEN"
+  exec setsid "$PRESTO_BIN"
+) >"$STATE_DIR/presto-server.log" 2>&1 &
 PRESTO_PGID=$!
 PRESTO_START=$(ps -o lstart= -p "$PRESTO_PGID")
 log "presto-server: pgid $PRESTO_PGID"
