@@ -517,9 +517,9 @@ export async function payRequest(
 
 /**
  * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale`, into its replacement: the one
- * another attempt already opened, else the one `reopen` opens ({@link PaymentGate.replacing}). `stale` means nothing
- * is in flight or paid for `stored` from this client, and every attempt shares one replacement, so it is not a second
- * payment; any other refusal is thrown as is.
+ * another attempt already opened, else the one `reopen` opens ({@link PaymentGate.replacing}), following replacements
+ * that went stale in turn and opening at most one. `stale` means nothing is in flight or paid for a request from this
+ * client, and every attempt shares one replacement, so it is not a second payment; any other refusal is thrown as is.
  */
 export async function payReplacingStale<T>(
 	gate: PaymentGate,
@@ -528,10 +528,18 @@ export async function payReplacingStale<T>(
 	pay: (commitment: Fr) => Promise<T>,
 	reopen: () => Promise<Fr>,
 ): Promise<T> {
-	try {
-		return await pay(stored)
-	} catch (e) {
-		if (!(e instanceof PaymentRefusedError && e.reason === "stale")) throw e
-		return pay(await gate.replacing(paymentKey(token, stored), reopen))
+	let commitment = stored
+	let opened = false
+	const open = () => {
+		opened = true
+		return reopen()
+	}
+	for (;;) {
+		try {
+			return await pay(commitment)
+		} catch (e) {
+			if (!(e instanceof PaymentRefusedError && e.reason === "stale") || opened) throw e
+			commitment = await gate.replacing(paymentKey(token, commitment), open)
+		}
 	}
 }

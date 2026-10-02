@@ -413,6 +413,24 @@ describe("payReplacingStale", () => {
 		expect([opened.length, w.chain.included.length]).toEqual([1, 1])
 	})
 
+	it("reaches a new request through a replacement that went stale unpaid", async () => {
+		const w = fakeChain()
+		const store = memoryPaymentStore()
+		const stored = await stampedRequest(w)
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const { opened, reopen } = opener(w)
+		const broke = await tab(store, w, {
+			beforeSend: () => {
+				throw new Error("Simulation error: Balance too low")
+			},
+		})
+		await expect(payReplacingStale(broke.gate, token, stored, (c) => broke.pay(c), reopen)).rejects.toThrow("Balance too low")
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const t = await tab(store, w)
+		await payReplacingStale(t.gate, token, stored, (c) => t.pay(c), reopen)
+		expect([opened.length, w.chain.included.length]).toEqual([2, 1])
+	})
+
 	it("lets two tabs that meet one stale request share its replacement, which is paid once", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
