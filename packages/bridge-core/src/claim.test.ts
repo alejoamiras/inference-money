@@ -7,6 +7,7 @@ import { NotFundingAddressError } from "./binding"
 import {
 	type ClaimNode,
 	claim,
+	L2_PROPOSED,
 	type NullifierNode,
 	registerSponsor,
 	SponsorUnavailableError,
@@ -91,6 +92,25 @@ describe("claim", () => {
 		const w = fakeWallet()
 		expect(await claim(await ticket("public"), node, w.wallet, M, { from: recipient })).toBe("claimed")
 		expect(statuses).toEqual([])
+	})
+
+	it("with L2_PROPOSED, returns at the proposed block and reads a nullifier error at that same tip", async () => {
+		const statuses = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED]
+		const node: ClaimNode = { ...NO_NULLIFIER, getTxReceipt: async () => receiptAt(statuses.shift() ?? TxStatus.CHECKPOINTED) as never }
+		const opts = { from: recipient, wait: L2_PROPOSED }
+		expect(await claim(await ticket("public"), node, fakeWallet().wallet, M, opts)).toBe("claimed")
+		expect(statuses).toEqual([TxStatus.CHECKPOINTED])
+		const tips: unknown[] = []
+		const claimedEarlier: ClaimNode = {
+			getTxReceipt: CHECKPOINTED,
+			findLeavesIndexes: async (block, _tree, leaves) => {
+				tips.push(block)
+				return leaves.map(() => ({ data: 7n }) as never)
+			},
+		}
+		const { wallet } = fakeWallet({ send: fail("Invalid tx: Existing nullifier") })
+		expect(await claim(await ticket("public"), claimedEarlier, wallet, M, opts)).toBe("consumed-unknown")
+		expect(tips).toEqual(["proposed"])
 	})
 
 	it("reports consumed-unknown only when this ticket's nullifier is on L2; any other nullifier error stays retryable", async () => {

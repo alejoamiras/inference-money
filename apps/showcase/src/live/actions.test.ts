@@ -15,7 +15,7 @@ const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as P
 
 /** Where a claim this page made stands on L2, and how many claims it sent. */
 const claims = vi.hoisted(() => ({
-	state: "checkpointed" as "checkpointed" | "finalized" | "pruned",
+	state: "checkpointed" as "proposed" | "checkpointed" | "finalized" | "pruned",
 	sent: 0,
 	result: "claimed" as "claimed" | "already",
 }))
@@ -46,8 +46,11 @@ vi.mock("@inference-money/bridge-core", async (original) => {
 			requests.order.push("opened")
 			return { commitment: 1 }
 		},
-		isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") =>
-			claims.state === "finalized" || (claims.state === "checkpointed" && at === "checkpointed"),
+		// Each tip holds the blocks of the tips after it: a proposed claim shows only at "proposed", a pruned one nowhere.
+		isClaimConsumed: async (_t: unknown, _node: unknown, _m: unknown, at = "checkpointed") => {
+			const tips = ["proposed", "checkpointed", "finalized"]
+			return tips.indexOf(claims.state) >= tips.indexOf(at)
+		},
 	}
 })
 vi.mock("@inference-money/demo", async (original) => ({
@@ -60,9 +63,9 @@ vi.mock("@inference-money/demo", async (original) => ({
 
 const HASH = `0x${"12".repeat(32)}`
 
-/** A context whose node knows one tx, landed (checkpointed, succeeded) or dropped, and finalizes at `finalizedAt`. */
+/** A context whose node knows one tx, landed (proposed, succeeded) or dropped, and finalizes at `finalizedAt`. */
 function ctxWith(landed: boolean, finalizedAt = 0n): LiveCtx {
-	return ctxWithReceipt(landed ? TxStatus.CHECKPOINTED : TxStatus.DROPPED, landed, finalizedAt)
+	return ctxWithReceipt(landed ? TxStatus.PROPOSED : TxStatus.DROPPED, landed, finalizedAt)
 }
 
 /** The node's one tx has `status`, and executed or reverted; blocks finalize at `finalizedAt`. */
@@ -128,6 +131,7 @@ describe("withConflictRetry", () => {
 
 	it("sends again after a reverted first try only once the revert is final, since a prune can undo it", async () => {
 		for (const [status, retried] of [
+			[TxStatus.PROPOSED, false],
 			[TxStatus.CHECKPOINTED, false],
 			[TxStatus.FINALIZED, true],
 		] as const) {
@@ -187,7 +191,7 @@ describe("claim", () => {
 		expect(outcome.kind === "settled" && outcome.rows.map((r) => [r.key, r.source])).toEqual([["claim", "recorded"]])
 	})
 
-	it("keeps a claim's secret until the claim is final, and claims again once its epoch is pruned", async () => {
+	it("never offers a claim already proposed, keeps its secret until it is final, and claims again once pruned", async () => {
 		const store = new Map<string, PendingDeposit>([["d1", { id: "d1", user: "bob", since: 0, claim: "ticket", claimed: true }]])
 		const tickets = {
 			deposits: () => [...store.values()],
@@ -197,8 +201,10 @@ describe("claim", () => {
 		const ctx: LiveCtx = { ...ctxWith(false), tickets }
 		const claim = () => runDraft(ctx, { actor: "bob", action: "claim", to: "bob" }, WALLETS, () => {})
 		const nothing = { kind: "failed", detail: "There is nothing to claim: deposit first." }
-		claims.state = "checkpointed"
-		expect([await claim(), store.has("d1")]).toEqual([nothing, true])
+		for (const state of ["proposed", "checkpointed"] as const) {
+			claims.state = state
+			expect([await claim(), store.has("d1")]).toEqual([nothing, true])
+		}
 		claims.state = "pruned"
 		expect((await claim()).kind).toBe("settled")
 		expect([claims.sent, store.get("d1")?.claimed]).toEqual([1, true])
