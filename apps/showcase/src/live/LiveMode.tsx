@@ -26,7 +26,7 @@ export interface LivePresto {
 	proof: Observable<ProofState>
 }
 
-// Real-proof builds only: a fake-proof bundle carries nothing of Presto.
+// Real-proof builds only: a fake-proof page never loads Presto.
 const PrestoRibbon = PROVES ? lazy(() => import("@/presto/PrestoRibbon").then((m) => ({ default: m.PrestoRibbon }))) : undefined
 
 const control =

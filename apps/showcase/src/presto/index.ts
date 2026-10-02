@@ -1,4 +1,4 @@
-/** Presto on a page that proves for real; the page loads it on its own, so a fake-proof bundle carries none of it. */
+/** Presto on a page that proves for real, loaded on its own: a fake-proof page never loads it. */
 import { askBeforeConnecting, type PrestoConsent } from "./consent"
 import { type PageProver, pageProver } from "./prover"
 
