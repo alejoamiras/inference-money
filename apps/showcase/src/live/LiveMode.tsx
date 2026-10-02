@@ -1,7 +1,9 @@
-import type { ReactNode } from "react"
+import { lazy, type ReactNode, Suspense } from "react"
 import { Button } from "@/components/ui/button"
 import { MANIFEST, PROVES, WALLETS } from "@/config/network"
+import { type Observable, useObservable } from "@/lib/observable"
 import { TESTIDS } from "@/lib/testids"
+import type { PrestoConsent, PrestoView, ProofState } from "@/presto"
 import type { Holder } from "@/tour/player"
 import { SCENES } from "@/tour/scenes"
 import { Composer, Field, SceneChips } from "@/ui/Composer"
@@ -17,6 +19,15 @@ import { type LiveView, useLive } from "./useLive"
 
 /** The page's wallet as live mode sees it. */
 export type WalletStatus = { status: "opening" } | { status: "ready" } | { status: "failed"; message: string }
+
+/** Presto in "Try it yourself": the visitor's consent, and where the page's proofs run. */
+export interface LivePresto {
+	consent: PrestoConsent
+	proof: Observable<ProofState>
+}
+
+// Real-proof builds only: a fake-proof bundle carries nothing of Presto.
+const PrestoRibbon = PROVES ? lazy(() => import("@/presto/PrestoRibbon").then((m) => ({ default: m.PrestoRibbon }))) : undefined
 
 const control =
 	"h-11 w-full min-w-0 rounded-lg border border-field bg-white px-2.5 text-sm font-semibold text-ink disabled:bg-idle-soft disabled:text-muted"
@@ -89,12 +100,14 @@ function Fields({ v, locked }: { v: LiveView; locked: boolean }) {
 	)
 }
 
-const STATUS_HINT = {
-	opening: "Opening the demo wallet: it syncs the demo accounts first.",
-	ready: PROVES
-		? `Runs live on ${MANIFEST.network === "testnet" ? "testnet" : "this local network"}, proven in this browser.`
-		: "Runs live on this local network, with proofs off.",
-} as const
+const OPENING = "Opening the demo wallet: it syncs the demo accounts first."
+
+/** Proofs run on Presto while the last check found it connected; the ribbon says when that changes. */
+function readyHint(view: PrestoView | undefined): string {
+	if (!PROVES) return "Runs live on this local network, with proofs off."
+	const where = typeof view === "object" && view.available ? "on this computer, by Presto" : "in this browser"
+	return `Runs live on ${MANIFEST.network === "testnet" ? "testnet" : "this local network"}, proven ${where}.`
+}
 
 function Payouts({ payouts }: { payouts: readonly Payout[] }) {
 	if (payouts.length === 0) return null
@@ -116,15 +129,17 @@ function Payouts({ payouts }: { payouts: readonly Payout[] }) {
 }
 
 /** "Try it yourself": the composer drives the page's own wallet, live, and the stage shows the chains' balances. */
-export function LiveMode({ header, engine, wallet }: { header: ReactNode; engine: LiveEngine | undefined; wallet: WalletStatus }) {
-	const v = useLive(engine)
+export function LiveMode(p: { header: ReactNode; engine: LiveEngine | undefined; wallet: WalletStatus; presto?: LivePresto }) {
+	const { header, engine, wallet, presto } = p
+	const v = useLive(engine, presto?.proof)
+	const view = useObservable(presto?.consent.view)
 	const ready = engine !== undefined && wallet.status === "ready"
 	const figure = (h: Holder) => {
 		const b = v.balances?.[h]
 		return b === undefined ? "…" : usdc2(b)
 	}
 	const { ethereum, aztec } = stageCards(WALLETS, figure, "Private balance")
-	const hint = wallet.status === "failed" ? wallet.message : STATUS_HINT[wallet.status]
+	const hint = wallet.status === "failed" ? wallet.message : wallet.status === "opening" ? OPENING : readyHint(view)
 	const composer = (
 		<Composer
 			hint={hint}
@@ -159,11 +174,19 @@ export function LiveMode({ header, engine, wallet }: { header: ReactNode; engine
 	return (
 		<Layout
 			header={header}
+			notice={
+				presto &&
+				PrestoRibbon && (
+					<Suspense>
+						<PrestoRibbon consent={presto.consent} />
+					</Suspense>
+				)
+			}
 			composer={composer}
 			stage={<Stage ethereum={ethereum} aztec={aztec} flight={v.flight} />}
 			verdict={
 				<>
-					<Verdict state={v.verdict} stages={v.stages} />
+					<Verdict state={v.verdict} stages={v.stages} proof={v.proof} />
 					<Payouts payouts={v.payouts} />
 				</>
 			}

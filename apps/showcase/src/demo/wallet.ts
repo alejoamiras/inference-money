@@ -7,6 +7,7 @@ import { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import { type BridgeManifest, PaymentGate, type PaymentStore, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
 import { ACTORS, type Actor, type CastMember, castMember, recordingNode, type SentTx } from "@inference-money/demo"
 import { oneAtATime } from "@/lib/one-at-a-time"
+import type { PagePresto } from "@/presto"
 
 /** A cast member whose account the page's wallet holds, so the page can sign as it. */
 export interface Player extends CastMember {
@@ -37,6 +38,8 @@ export interface DemoWallet {
 	/** Runs `fn` alone among everything that sends through this wallet, whose next-send journal they would share. */
 	exclusive: <T>(fn: () => Promise<T>) => Promise<T>
 	stages: StageFeed
+	/** Presto's side of the page's proofs, on a build that proves for real. */
+	presto?: PagePresto
 }
 
 export interface DemoWalletOptions {
@@ -44,7 +47,11 @@ export interface DemoWalletOptions {
 	/** Real proofs, or the fake ones a local network accepts. */
 	proves: boolean
 	payments: PaymentStore
+	/** The prover the PXE proves through instead of its own, and the simulator they share. */
+	presto?: PagePresto
 }
+
+type Around = <T>(prove: () => Promise<T>) => Promise<T>
 
 /** Opening a store another tab holds fails outright; say what to do about it. */
 const POOL_BUSY = "SqlitePoolBusyError"
@@ -85,16 +92,23 @@ function stamping(node: AztecNode, sentAt: number[], stages: StageFeed): AztecNo
 }
 
 /**
- * The embedded wallet, reporting when it starts proving: the one step of a send its API does not surface. Its `create`
- * constructs `new this(…)`, so the subclass is what it builds.
+ * The embedded wallet, reporting when it starts proving: the one step of a send its API does not surface. Each proof
+ * runs inside `around`, which may hold it first. Its `create` constructs `new this(…)`, so the subclass is what it
+ * builds.
  */
-function stagedWallet(stages: StageFeed): typeof EmbeddedWallet {
+function stagedWallet(stages: StageFeed, around: Around): typeof EmbeddedWallet {
 	return class StagedWallet extends EmbeddedWallet {
 		constructor(...[pxe, ...rest]: ConstructorParameters<typeof EmbeddedWallet>) {
-			const proving = intercept(pxe, "proveTx", (prove) => (...args: never[]) => {
-				stages.emit("prove")
-				return prove(...args)
-			})
+			const proving = intercept(
+				pxe,
+				"proveTx",
+				(prove) =>
+					(...args: never[]) =>
+						around(async () => {
+							stages.emit("prove")
+							return prove(...args)
+						}),
+			)
 			super(proving, ...rest)
 		}
 	}
@@ -131,8 +145,10 @@ export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: D
 	const stages = stageFeed()
 	const store = await openPxeStore(node, m)
 	const gate = new PaymentGate(recordingNode(stamping(node, sentAt, stages), sent, journal), opts.payments)
-	const Staged = stagedWallet(stages)
-	const wallet = await gate.bindWallet((gated) => Staged.create(gated, { pxe: { proverEnabled: opts.proves, store } }))
+	const proofs = opts.presto?.proofs
+	const Staged = stagedWallet(stages, proofs?.around ?? ((prove) => prove()))
+	const pxe = { proverEnabled: opts.proves, store, proverOrOptions: proofs?.prover, simulator: proofs?.simulator }
+	const wallet = await gate.bindWallet((gated) => Staged.create(gated, { pxe }))
 	await registerSponsor(wallet, m)
 	await registerBridgeContracts(wallet, m)
 	const cast = {} as Record<Actor, Player>
@@ -142,5 +158,5 @@ export async function openDemoWallet(node: AztecNode, m: BridgeManifest, opts: D
 		const account = await wallet.createSchnorrAccount(member.secret, Fr.ZERO, member.signingKey, actor)
 		cast[actor] = { ...member, address: account.address }
 	}
-	return { wallet, node, gate, cast, sentAt, sent, onNextSend, exclusive: oneAtATime(), stages }
+	return { wallet, node, gate, cast, sentAt, sent, onNextSend, exclusive: oneAtATime(), stages, presto: opts.presto }
 }

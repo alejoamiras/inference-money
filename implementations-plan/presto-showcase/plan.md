@@ -161,7 +161,7 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 
 **As built.** The installer is `apps/showcase/e2e/run/install-presto.sh`, its digest beside it (its only consumers are the showcase's browser runs). presto-server's `PRESTO_HOME` and the certificate live under `~/.cache/inference-money/presto-{home,tls}/<run>`, outside the state dir CI uploads. The browser marks the page, its node and anvil public (production's address spaces), so Presto is the only loopback target; Playwright's Chromium refuses an ungranted loopback request at once (the permission still reads `prompt`) rather than prompting. Details: `lessons/phase-2.md`.
 
-### Phase 3: the product
+### Phase 3: the product ✓
 
 `presto/prover.ts`, `presto/consent.ts`, `presto/PrestoRibbon.tsx`; the `wallet.ts`, `start.ts`, `LiveRoot.tsx`, `Layout.tsx`, `LiveMode.tsx`, `useLive.ts` and `Verdict.tsx` changes; `testids` entries; the JSX type for `presto-banner`. Component tests (vitest, jsdom, a faked permission API and a fake prover):
 - no status check before Connect while the permission reads `prompt`; `granted` connects without a click; `denied` shows `permission-blocked`;
@@ -174,6 +174,8 @@ Add `presto` to `BuildTarget` (local env, validation, testnet refusal, defaults)
 `bundle.test.ts`: on a fake-proof build, no chunk contains a Presto module; on a real-proof build, the Aztec SDK and Presto stay out of the eager chunk. The built ribbon renders in Presto's faces (checked once in the browser).
 
 **Validation gate.** `bun run lint && bun run typecheck && bun run test` (every workspace, showcase components included); `bun run --cwd apps/showcase build:testnet` exits 0 (bundle and manifest-identity checks included). Layers: lint, typecheck, unit/component, build.
+
+**As built.** Attribution lives in `presto/proofs.ts` (no SDK import, so its tests need none); the wallet runs each proof inside its `around`, which runs the consent's check first and credits the proof only when the call settles, because the SDK reports `proved` before it decodes Presto's answer and can still fall back after it. `presto/index.ts` (`pagePresto`) is the one module `start.ts` loads, and "Try it yourself" starts the consent through its `ask()` (`live/useLivePresto.ts`). The ribbon element is created outside React, attributes first: React 19 assigns a prop the element defines as a property, and `variant` is a getter. Presto's faces reach its shadow tree through `--pb-font-*` (`presto/ribbon.css`). No Vite dedupe for the simulator: the page passes its own, so the SDK's lazy import never runs, and the single copy resolves anyway. The browser font check (I5) runs in Phase 4's spec. Details: `lessons/phase-3.md`.
 
 ### Phase 4: the Presto spec, CI and docs
 

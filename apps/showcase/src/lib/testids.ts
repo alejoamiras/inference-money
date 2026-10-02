@@ -20,4 +20,5 @@ export const TESTIDS = {
 	feedRow: "feed-row",
 	feedSource: "feed-source",
 	payout: "payout",
+	prestoRibbon: "presto-ribbon",
 } as const

@@ -5,6 +5,7 @@ import { tickets } from "@/demo/tickets"
 import type { Opening } from "@/demo/useOpening"
 import { liveEngine } from "./engine"
 import { LiveMode } from "./LiveMode"
+import { useLivePresto } from "./useLivePresto"
 
 /** Live mode with the page's wallet behind it, once open: loaded on demand, since it carries the Aztec SDK. */
 export function LiveRoot({ header, opening }: { header: ReactNode; opening: Opening }) {
@@ -21,6 +22,7 @@ export function LiveRoot({ header, opening }: { header: ReactNode; opening: Open
 		}
 		return liveEngine(ctx, WALLETS)
 	}, [opening])
+	const presto = useLivePresto(opening.status === "ready" ? opening.demo.presto : undefined)
 	const wallet = opening.status === "ready" ? { status: "ready" as const } : opening
-	return <LiveMode header={header} engine={engine} wallet={wallet} />
+	return <LiveMode header={header} engine={engine} wallet={wallet} presto={presto} />
 }

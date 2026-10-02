@@ -1,8 +1,10 @@
 import { BRIDGE_REFUSALS, TOKEN_REFUSALS } from "@inference-money/bridge-core/rules"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { SendStage } from "@/demo/wallet"
+import { cell } from "@/lib/observable"
 import { TESTIDS } from "@/lib/testids"
+import type { ProofSource, ProofState } from "@/presto"
 import type { FeedRow } from "@/tour/player"
 import type { Draft, ValidDraft } from "./draft"
 import type { LiveEngine } from "./engine"
@@ -116,6 +118,31 @@ describe("LiveMode", () => {
 		rerender(<LiveMode header={null} engine={undefined} wallet={{ status: "opening" }} />)
 		expect(screen.getByTestId(TESTIDS.tryIt)).toBeDisabled()
 		expect(screen.getByTestId(TESTIDS.walletStatus)).toHaveAttribute("data-status", "opening")
+	})
+
+	it("names Presto on the Prove chip for a run whose proof finished there, and for no later run", async () => {
+		const { engine } = fakeEngine()
+		const proof = cell<ProofState>({})
+		const run = engine.run
+		let next: ProofSource | undefined
+		engine.run = async (d, report) => {
+			if (next) proof.set({ ran: next })
+			return run(d, report)
+		}
+		const presto = { consent: { view: cell(undefined), connect: vi.fn(), stop: vi.fn() }, proof }
+		render(<LiveMode header={null} engine={engine} wallet={ready} presto={presto} />)
+		await act(async () => fireEvent.click(chip("refund")))
+		const proveChip = () =>
+			within(verdict())
+				.getAllByRole("listitem")
+				.find((li) => li.dataset.stage === "prove")
+		const labels: (string | null | undefined)[] = []
+		for (const source of ["presto", "browser", "presto", undefined] as const) {
+			next = source
+			await tryIt()
+			labels.push(proveChip()?.textContent)
+		}
+		expect(labels).toEqual(["Prove · Presto", "Prove", "Prove · Presto", "Prove"])
 	})
 
 	it("resets the balances with galactica's refund to alice, or says why there is none", async () => {

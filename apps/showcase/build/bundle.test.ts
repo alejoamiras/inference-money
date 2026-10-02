@@ -66,6 +66,9 @@ function eagerChunks(assets: string, entry: string): string[] {
 	return [...seen]
 }
 
+/** Presto's SDK, its banner, and this app's own Presto code. */
+const PRESTO = /node_modules\/@alejoamiras\/|(^|\/)src\/presto\//
+
 /** A chunk's sources; Vite's own helpers ship without a map, and hold none. */
 function sourcesOf(assets: string, chunk: string): string[] {
 	const map = join(assets, `${chunk}.map`)
@@ -83,11 +86,18 @@ describe.skipIf(!process.env.BUILT_DIST)("the built bundle", () => {
 		expect(bannedModules(maps.flatMap((f) => sourcesOf(assets, f.replace(/\.map$/, ""))))).toEqual([])
 	})
 
-	it("plays the tour before the Aztec SDK loads: nothing the page loads first comes from it", () => {
+	it("plays the tour before the Aztec SDK or Presto loads: nothing the page loads first comes from them", () => {
 		const entry = readFileSync(join(dist, "index.html"), "utf8").match(/<script type="module"[^>]*src="\/assets\/([^"]+\.js)"/)?.[1]
 		expect(entry).toBeDefined()
 		const eager = eagerChunks(assets, entry as string).flatMap((c) => sourcesOf(assets, c))
 		expect(eager.length).toBeGreaterThan(0)
-		expect(eager.filter((s) => s.includes("node_modules/@aztec-labs/"))).toEqual([])
+		expect(eager.filter((s) => s.includes("node_modules/@aztec-labs/") || PRESTO.test(s))).toEqual([])
+	})
+
+	it("carries Presto only when its CSP lets the page reach Presto", () => {
+		const reaches = readFileSync(join(dist, "_headers"), "utf8").includes("https://127.0.0.1:")
+		const maps = readdirSync(assets).filter((f) => f.endsWith(".js.map"))
+		const presto = maps.flatMap((f) => sourcesOf(assets, f.replace(/\.map$/, ""))).filter((s) => PRESTO.test(s))
+		expect(presto.length > 0).toBe(reaches)
 	})
 })
