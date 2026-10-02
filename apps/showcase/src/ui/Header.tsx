@@ -4,7 +4,7 @@ import { TESTIDS } from "@/lib/testids"
 
 export type Mode = "tour" | "live"
 
-/** The mode lives in the URL, so a reload keeps it and a link can open either: the recording at `#recorded`, "Try it yourself" anywhere else, old `#live` links included. */
+/** In the URL, so a reload keeps the mode: `#recorded` is the recording, anything else "Try it yourself" (old `#live` links too); App takes `#proving` first. */
 export const modeOf = (hash: string): Mode => (hash === "#recorded" ? "tour" : "live")
 
 const PLAY = (
@@ -30,7 +30,6 @@ const link = tv({
 	variants: { after: { true: "flex-row-reverse" } },
 })
 
-/** The brand, the one link to the other mode, and the network the page acts on. */
 export function Header({ network, mode }: { network: string; mode: Mode }) {
 	const other = OTHER[mode]
 	return (

@@ -29,7 +29,7 @@ test("the page opens on Try it yourself; its recorded run plays by itself, shows
 	await expect(page.getByTestId(TESTIDS.tryIt)).toBeVisible()
 	await page.locator(`[data-testid="${TESTIDS.mode}"][data-mode="tour"]`).click()
 	await expect(page).toHaveURL(/#recorded$/)
-	// Nobody pressed anything: the first scene lands and its row reaches the feed.
+	// The replay starts without Play: the first scene lands and its row reaches the feed.
 	await expect(page.getByTestId(TESTIDS.feedRow).first()).toHaveAttribute("data-step", "deposit", { timeout: 30_000 })
 
 	await page.getByRole("button", { name: "Pause" }).click()

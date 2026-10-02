@@ -27,7 +27,7 @@ export interface Scene {
 	to: Holder
 }
 
-/** In the recording's order, which is also the order its replay plays them in. */
+/** In the recording's order. */
 export const SCENES: readonly Scene[] = [
 	{
 		id: "deposit",
