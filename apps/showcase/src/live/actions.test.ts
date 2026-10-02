@@ -62,13 +62,20 @@ const HASH = `0x${"12".repeat(32)}`
 
 /** A context whose node knows one tx, landed (checkpointed, succeeded) or dropped, and finalizes at `finalizedAt`. */
 function ctxWith(landed: boolean, finalizedAt = 0n): LiveCtx {
+	return ctxWithReceipt(landed ? TxStatus.CHECKPOINTED : TxStatus.DROPPED, landed, finalizedAt)
+}
+
+/** The node's one tx has `status`, and executed or reverted; blocks finalize at `finalizedAt`. */
+function ctxWithReceipt(status: TxStatus, succeeded: boolean, finalizedAt = 0n): LiveCtx {
 	const sent: SentTx[] = []
+	const mined = status !== TxStatus.DROPPED
 	const receipt = {
-		status: landed ? TxStatus.CHECKPOINTED : TxStatus.DROPPED,
+		status,
 		isPending: () => false,
-		isDropped: () => !landed,
-		isMined: () => landed,
-		hasExecutionSucceeded: () => landed,
+		isDropped: () => !mined,
+		isMined: () => mined,
+		hasExecutionSucceeded: () => mined && succeeded,
+		hasExecutionReverted: () => mined && !succeeded,
 	}
 	const node = {
 		getTxReceipt: async () => receipt,
@@ -105,6 +112,23 @@ describe("withConflictRetry", () => {
 			[11n, true],
 		] as const) {
 			const ctx = ctxWith(false, finalizedAt)
+			let attempts = 0
+			const outcome = await withConflictRetry(ctx, async () => {
+				if (attempts++ > 0) return DONE
+				send(ctx, 10n)
+				throw new Error("Existing nullifier")
+			}, ["transfer"])
+			if (retried) expect([attempts, outcome]).toEqual([2, DONE])
+			else expect([attempts, outcome]).toEqual([1, { kind: "failed", detail: expect.stringMatching(/may still take the first try/) }])
+		}
+	})
+
+	it("sends again after a reverted first try only once the revert is final, since a prune can undo it", async () => {
+		for (const [status, retried] of [
+			[TxStatus.CHECKPOINTED, false],
+			[TxStatus.FINALIZED, true],
+		] as const) {
+			const ctx = ctxWithReceipt(status, false)
 			let attempts = 0
 			const outcome = await withConflictRetry(ctx, async () => {
 				if (attempts++ > 0) return DONE
