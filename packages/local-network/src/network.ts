@@ -95,6 +95,9 @@ function nodeEnv(t: Toolchain, anvilUrl: string, tmpDir: string): NodeJS.Process
 		// One tx makes a block. It does not make the chain tick on its own: see withBlockHeartbeat.
 		SEQ_MIN_TX_PER_BLOCK: "0",
 		ETHEREUM_HOSTS: anvilUrl,
+		// The launcher starts an anvil of its own on ANVIL_PORT (8545 unless set) and never uses it: aimed at the port
+		// ours already listens on, it cannot bind and exits, so no run holds a port the registry does not list.
+		ANVIL_PORT: new URL(anvilUrl).port,
 		// `aztec start` binds every interface: the admin API stays authenticated behind a hash no key matches.
 		AZTEC_ADMIN_API_KEY_HASH: randomBytes(32).toString("hex"),
 		FORGE_BIN: join(t.internalBin, "forge"),
