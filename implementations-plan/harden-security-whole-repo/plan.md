@@ -36,7 +36,7 @@ The 2026-10-02 whole-repo security audit (17 findings: 0 Critical, 0 High, 3 Med
 
 ### Arc 1: `harden-fixes` (branch `worktree-harden-security-whole-repo`)
 
-#### Phase 1: the fixes already in the working tree
+#### Phase 1: the fixes already in the working tree ✓
 
 C-001 (`packages/deployer/src/deploy.ts`, `testnet.ts`), C-002 (`packages/bridge-core/src/random.ts`, `deposit.ts`, `packages/deployer/src/disposable.ts`, `cli.ts`, two tests), C-004 (`admin.ts`, `commands.ts`), C-015 (`verify-cli.ts`), C-013 guardian check (`verify.ts`, `verify-cli.ts`, `cli-args.ts`, `commands.ts`, `packages/integration/test/operator.test.ts`), C-006 and C-016 (`.github/workflows/`), C-009 (`.github/actions/setup-toolchains/`, `apps/showcase/package.json`, `bun.lock`), docs for C-005, C-012, C-014, C-017 (`docs/`, `packages/deployer/src/export.ts`, `packages/bridge-core/src/payments.ts`). Review the diff once as a whole, then commit it in focused conventional commits.
 
