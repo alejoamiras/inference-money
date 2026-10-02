@@ -4,7 +4,8 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./networks": "./src/networks.ts"
 	},
 	"scripts": {
 		"test": "bun test --preload ../../test-preload.ts src",

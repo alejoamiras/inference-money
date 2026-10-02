@@ -322,7 +322,7 @@ Two planners computed these independently with viem during planning, and the sam
 
 **Local admin.** `deploy local` hands over to a fixed public `LOCAL_ADMIN_SECRET` and accepts in the same command, so the local handover path runs every time. The integration harness and `demo setup local` sign as that admin.
 
-**Keyed-run templates** (committed; refs are `op://Keyed-Runs/InferenceMoney-Testnet/<VAR>`):
+**Keyed-run templates** (committed; refs are `op://Keyed-Runs/InferenceMoney-Testnet/<VAR>`, the admin secret's `op://Keyed-Runs/InferenceMoney-Testnet-Admin/<VAR>`, since `op-remote create` refuses an item that exists):
 
 | Template | Variables |
 |---|---|
@@ -652,7 +652,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
 - **I5 (P2):** the fork's public bytecode stays at or under about 2,700 fields; upstream is about 705.
 - **I6:** a merchant check's two reads (about 8k gates) are small next to the kernels. Nothing measures the check alone; P10 times whole actions.
 - **I7 (P2):** TXE `OracleMock` can mock the capsule oracle (`aztec_utl_getCapsule`) and the probes, so tests drive both hint paths and make each lie.
-- **I8 (P9):** `op-remote create` on a later template adds its fields to the existing item. Otherwise the owner adds them by hand.
+- **I8 (P9):** `op-remote create` on a later template adds its fields to the existing item. Otherwise the owner adds them by hand. **Wrong (P9):** it refuses an existing item, and the admin run must precede the deploy request; the admin secret moved to its own item, `InferenceMoney-Testnet-Admin`.
 - **I9 (P9):** the testnet SponsoredFPC can be topped up through the FeeAssetHandler faucet (lessons.md).
 - **I10 (P10):** in-browser proving meets P10's thresholds. If not, live mode simulates and shows the recorded proof.
 - **I11 (P13):** Workers Builds deploys only after a successful build. While `main` still has `apps/web`, its builds fail once the root directory points at `apps/showcase`, and the last good deployment stays live.
@@ -671,7 +671,7 @@ Expected deltas on a run: Alice 0, galactica +7, A's USDC −7, portal reserve +
    - The demo accounts keep nothing private: anyone can rebuild them from the page and read their notes. The feed is labelled as the public chains' view of equivalent production accounts.
    - `verify` refuses those merchants on any network other than local and testnet.
 7. **You, during P9:**
-   - Create the 1Password item `Keyed-Runs/InferenceMoney-Testnet`.
+   - Create the 1Password items `Keyed-Runs/InferenceMoney-Testnet-Admin` and `Keyed-Runs/InferenceMoney-Testnet` with `op-remote create` on the first admin and deploy requests.
    - Import a funded Sepolia key holding test USDC, or fund a generated one.
    - Import `SEPOLIA_RPC_URL`.
    - Approve each keyed run with `op-remote`.
@@ -983,7 +983,7 @@ Pass:
 
 Layers: unit, integration, local end to end.
 
-**P9. Testnet, through keyed runs the owner approves one by one.**
+**P9. Testnet, through keyed runs the owner approves one by one.** ✓ 2026-10-01 (bridge `0x0c179967…1924`, deployed by the owner's imported Sepolia key; every keyed run exit 0 after two scan/harness fixes; demo setup resumed after an out-of-gas deposit, now sent with headroom; smoke 25 min, every leg settled; arc-4 boundary codex pass converged in 4 rounds; [lessons](lessons/phase-9.md))
 
 Each request follows the keyed-run recipe (Off-chain surfaces); `<scan-trap>` is defined there.
 
@@ -1031,7 +1031,7 @@ Layers: live testnet with real proofs, cross-chain settlement.
 
 ### Arc 5: showcase
 
-**P10. Rename, strip, embedded wallet, proving harness.**
+**P10. Rename, strip, embedded wallet, proving harness.** ✓ 2026-10-01 (live proving: medians 7.4 s unconstrained and 21.4 s on 2 CPUs, peak 1.19 GB; gate green on `5c98525` after a socket-path fix in the local network; [lessons](lessons/phase-10.md))
 
 Work:
 - `git mv apps/web apps/showcase` and rename the package.
@@ -1045,6 +1045,7 @@ Work:
   - it writes `test-results/proving.json`;
   - if the quota doesn't bind the browser's workers on this host, the constrained run moves to a reference laptop, and P10 asks the owner for it.
 - **Decision rule:** live proving if the median is at most 90 s unconstrained and 240 s on 2 CPUs, and peak memory is at most 3 GB. Otherwise the build ships simulate-plus-recorded-proof. The decision goes in lessons and in this plan.
+  - **Decided 2026-10-01: live proving.** Per-step medians 7.6 s unconstrained and 21.4 s at worst on 2 CPUs (the quota bound), peak 1.25 GB; the open-and-pay pair takes 13.9 s and 40.3 s ([lessons](lessons/phase-10.md)).
 - **AGENTS.md:** remove the test-wallet grant rule, and update the layout, commands and the "one network per bundle" rule.
 
 Validation gate:
@@ -1061,7 +1062,7 @@ Pass:
 
 Layers: component, browser real proving, build headers.
 
-**P11. UI, design F.**
+**P11. UI, design F.** ✓ 2026-10-01 (all seven steps from the recorded testnet tour, refusals from `rules.ts`; gate green on `5c98525`; [lessons](lessons/phase-11.md))
 
 Work:
 - **`ui/`:**
@@ -1088,7 +1089,7 @@ Pass: all seven steps render from the tour, and the refusals match `rules.ts`.
 
 Layers: component.
 
-**P12. Local e2e.**
+**P12. Local e2e.** ✓ 2026-10-01 (7 of 7 locally and in CI run 36829954515, 6 min; found live withdrawals broken for every user; [lessons](lessons/phase-12.md))
 
 Work:
 - `e2e/agent.sh`, in order:
@@ -1118,7 +1119,7 @@ Pass: green locally on a fresh network, and green in CI within 90 min.
 
 Layers: browser e2e, local network.
 
-**P13. Testnet live check.**
+**P13. Testnet live check.** ✓ 2026-10-01 (green against the hosted Workers preview of `1e4bb74`: the served build is the committed deployment, all four cheats refused with nothing sent, galactica's refund proven in the browser, A_demo's deposit; 2.7 min; [lessons](lessons/phase-13.md))
 
 Work:
 - `playwright.testnet.config.ts`: `baseURL` is `SHOWCASE_URL`. For this phase that's the hosted Workers preview URL of the showcase branch (Ask 8), so headers, CSP and isolation are tested as served. A local `vite preview` is only for development.

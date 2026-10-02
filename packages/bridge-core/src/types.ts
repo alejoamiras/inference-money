@@ -10,6 +10,12 @@ export interface L1Ctx {
 export type StageSink<S extends string> = (stage: S) => void
 
 /**
+ * The gas limit to send with: Aztec Inbox inserts, and USDC credited to a balance emptied since, cost more at inclusion
+ * than at estimation. Unused gas is not charged.
+ */
+export const withGasHeadroom = (estimate: bigint): bigint => estimate + estimate / 2n
+
+/**
  * Who signs for `l1.account`: the wallet client's own account when it is that address (a local key signs in process),
  * otherwise the bare address, which a JSON-RPC wallet signs for. Either way it is pinned to the reviewed account.
  */

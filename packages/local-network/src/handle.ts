@@ -4,7 +4,7 @@ import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { z } from "zod"
 
-export const REPO_ROOT = resolve(import.meta.dir, "../../..")
+export const REPO_ROOT = resolve(import.meta.dirname, "../../..")
 /** Real disk, never tmpfs: a store killed before teardown would otherwise pin its RAM until the holder dies. */
 export const NET_ROOT = join(homedir(), ".cache", "inference-money", "net")
 /** Outside each run's data dir, which teardown removes, so a failed run's logs survive it. */
@@ -56,7 +56,8 @@ export const netHandleSchema = z.strictObject({
 export type NetHandle = z.infer<typeof netHandleSchema>
 
 export const handlePath = (runId: string, root = NET_ROOT) => join(root, `${runId}.json`)
-export const runDataDir = (runId: string, root = NET_ROOT) => join(root, runId)
+/** Fixed-length whatever the run id: the node binds Unix sockets under it (see `assertSocketRoom`). */
+export const runDataDir = (runId: string, root = NET_ROOT) => join(root, createHash("sha256").update(runId).digest("hex").slice(0, 16))
 
 export function readHandle(runId: string, root = NET_ROOT): NetHandle | undefined {
 	const path = handlePath(runId, root)

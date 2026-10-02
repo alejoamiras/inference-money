@@ -35,7 +35,7 @@ function holderOf(lock: string): number | undefined {
 }
 
 /** Writes `data` to a new owner-only file and flushes it to disk. */
-function writeDurably(path: string, data: string): void {
+export function writeDurably(path: string, data: string): void {
 	const fd = openSync(path, "wx", 0o600)
 	try {
 		writeSync(fd, data)
@@ -45,7 +45,8 @@ function writeDurably(path: string, data: string): void {
 	}
 }
 
-function syncDir(dir: string): void {
+/** Flushes `dir`'s entries: a created, renamed or removed file survives a power loss only once its directory is synced. */
+export function syncDir(dir: string): void {
 	const fd = openSync(dir, "r")
 	try {
 		fsyncSync(fd)

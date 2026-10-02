@@ -1,10 +1,10 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync } from "node:fs"
+import { basename, dirname, join, resolve } from "node:path"
 import type { Writable } from "node:stream"
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
-import { parseManifest, signingKeyFor } from "@inference-money/bridge-core"
+import { parseManifest, signingKeyFor, tokenBridgeArtifact } from "@inference-money/bridge-core"
 import { aztecAddressOf } from "@inference-money/demo"
 import { REPO_ROOT } from "@inference-money/local-network"
 import type { Address } from "viem"
@@ -12,11 +12,11 @@ import { generatePrivateKey, privateKeyToAddress } from "viem/accounts"
 import { type Command, type Invocation, parseInvocation } from "./cli-args"
 import { TESTNET } from "./networks"
 import { runRedacted } from "./redact"
-import { DISPOSABLE_DIR, keyedWorktree } from "./run-state"
+import { DISPOSABLE_DIR, keyedWorktree, StateDir, syncDir, withStateDir, writeDurably } from "./run-state"
 import { scanFailed, scanForSecrets, scanLine } from "./scan"
 import { aztecSecretFrom, KEYED, l1PrivateKeyFrom, scrubbedEnv, secretNeedles } from "./secrets"
-import { endpointsFor, type ManifestRef } from "./session"
-import { readRoles } from "./token-reads"
+import type { ManifestRef } from "./session"
+import { layoutSlot, publicReader, type Roles, readRoles } from "./token-reads"
 
 /** The disposable fallback's keys: owner-only, outside every checkout, until `destroy`. */
 export const DISPOSABLE_FILE = join(DISPOSABLE_DIR, "testnet.env")
@@ -39,6 +39,10 @@ export interface DisposableAddresses {
  */
 export async function disposableInit(file = DISPOSABLE_FILE): Promise<DisposableAddresses> {
 	mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+	return withBundle(file, () => drawBundle(file))
+}
+
+async function drawBundle(file: string): Promise<DisposableAddresses> {
 	const l1Key = generatePrivateKey()
 	const [deployerSecret, adminSecret] = [Fr.random(), Fr.random()]
 	const admin = await accountOf(adminSecret)
@@ -48,9 +52,17 @@ export async function disposableInit(file = DISPOSABLE_FILE): Promise<Disposable
 		`${KEYED.adminSecret}=${adminSecret}`,
 		`${ADMIN_ADDRESS}=${admin}`,
 	]
-	writeFileSync(file, `${lines.join("\n")}\n`, { mode: 0o600, flag: "wx" })
+	writeDurably(file, `${lines.join("\n")}\n`)
+	syncDir(dirname(file))
 	return { l1: privateKeyToAddress(l1Key), deployer: await accountOf(deployerSecret), admin }
 }
+
+/**
+ * Holds `file`'s bundle while `fn` runs: `init`, `exec` and `destroy` exclude each other, so a `destroy` that passed its
+ * checks can't delete a bundle drawn after another `destroy` removed the one it checked. For `init` and `destroy` only,
+ * which spawn nothing: a signal releases the bundle and exits at once.
+ */
+const withBundle = <T>(file: string, fn: () => Promise<T>): Promise<T> => withStateDir(".lock", basename(file), fn, dirname(file))
 
 /** Refuses a file another user owns or anyone else can read or write, and a symlink, before reading a byte. */
 export function assertOwnerOnly(file: string, uid = process.getuid?.()): void {
@@ -97,20 +109,43 @@ export interface ExecOptions {
 	scan?: typeof scanForSecrets
 }
 
-/** The bridge of the one deployment a bundle made, recorded beside it. */
+/**
+ * Binds a bundle to one deployment: created exclusively and flushed before its `deploy testnet` starts, then given the
+ * bridge's address once that deploy succeeds. Left empty, it marks an attempt that may have created contracts, so a
+ * second deploy and `destroy` both refuse until someone establishes what it made.
+ */
 const deploymentFile = (file: string) => `${file}.deployment`
 const recordedBridge = (file: string): string | undefined =>
 	existsSync(deploymentFile(file)) ? readFileSync(deploymentFile(file), "utf8").trim() : undefined
 
-/**
- * Whether `inv` is the `deploy testnet` that binds a bundle to its deployment. A second is refused: with two
- * deployments, `destroy` could be shown the handed-over one while the other still answers to the keys.
- */
+const UNRECORDED = "A deploy with these disposable keys never recorded its bridge: establish what it created first."
+
 function bindsDeployment(inv: Invocation, file: string): boolean {
 	if (inv.command !== "deploy" || inv.args[0] !== "testnet") return false
-	const prior = recordedBridge(file)
-	if (prior) throw new Error(`These disposable keys already deployed bridge ${prior}: one deployment per bundle.`)
+	let fd: number
+	try {
+		fd = openSync(deploymentFile(file), "wx", 0o600)
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e
+		const prior = recordedBridge(file)
+		throw new Error(prior ? `These disposable keys already deployed bridge ${prior}: one deployment per bundle.` : UNRECORDED)
+	}
+	try {
+		fsyncSync(fd)
+	} finally {
+		closeSync(fd)
+	}
+	syncDir(dirname(file))
 	return true
+}
+
+/** Atomic and flushed, so a crash leaves the empty marker or the bridge, never a torn address. */
+function recordBridge(file: string, bridge: string): void {
+	const tmp = `${deploymentFile(file)}.${process.pid}.tmp`
+	rmSync(tmp, { force: true })
+	writeDurably(tmp, `${bridge}\n`)
+	renameSync(tmp, deploymentFile(file))
+	syncDir(dirname(file))
 }
 
 function childEnv(inv: Invocation, file: string): NodeJS.ProcessEnv {
@@ -131,14 +166,25 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 	const inv = parseInvocation(command)
 	if (inv.command.startsWith("disposable")) throw new Error("disposable exec runs a bridge command, not another disposable one")
 	const file = opts.file ?? DISPOSABLE_FILE
-	const binds = bindsDeployment(inv, file)
+	// No signal handler here: `runRedacted` owns cancellation, reaping the secret-bearing child before the scan runs and
+	// the bundle is released. One that exited first would leave that child running, unlocked.
+	const bundle = StateDir.acquire(".lock", basename(file), dirname(file))
+	try {
+		return await execUnder(inv, command, file, root, opts)
+	} finally {
+		bundle.release()
+	}
+}
+
+async function execUnder(inv: Invocation, command: string[], file: string, root: string, opts: ExecOptions): Promise<number> {
 	const env = childEnv(inv, file)
 	const needles = secretNeedles(env)
 	const argv = opts.argv ? opts.argv(command) : [CLI, ...command]
+	const binds = bindsDeployment(inv, file)
 	const code = await runRedacted(argv, needles, opts.out ?? process.stdout, opts.err ?? process.stderr, env)
 	if (binds && code === 0) {
 		const m = parseManifest(JSON.parse(readFileSync(join(root, "deployments", "testnet.json"), "utf8")))
-		writeFileSync(deploymentFile(file), `${m.l2.bridge.address}\n`, { mode: 0o600, flag: "wx" })
+		recordBridge(file, m.l2.bridge.address)
 	}
 	const scan = (opts.scan ?? scanForSecrets)(root, needles)
 	if (scanFailed(scan)) {
@@ -148,23 +194,40 @@ export async function disposableExec(command: string[], opts: ExecOptions = {}):
 	return code
 }
 
-const finalRoles = (ref: ManifestRef) => readRoles(createAztecNodeClient(endpointsFor(ref).nodeUrl), ref.m, "finalized")
+/** Read at the pinned testnet node, never one a manifest names, with the token the bridge itself is configured with. */
+async function finalRoles(ref: ManifestRef): Promise<Roles & { token: Fr }> {
+	const node = createAztecNodeClient(TESTNET.nodeUrl)
+	const token = await publicReader(node, ref.m.l2.bridge.address, "finalized")(layoutSlot(tokenBridgeArtifact, "config", 1))
+	return { ...(await readRoles(node, ref.m, "finalized")), token }
+}
+
+function assertRecorded(file: string, ref: ManifestRef): void {
+	const recorded = recordedBridge(file)
+	if (recorded === ref.m.l2.bridge.address) return
+	if (recorded === "") throw new Error(UNRECORDED)
+	throw new Error(
+		recorded === undefined
+			? `These disposable keys recorded no deployment; if they never deployed, delete ${file} by hand.`
+			: `These disposable keys deployed bridge ${recorded}; ${ref.path} names another.`,
+	)
+}
 
 /**
  * Deletes the disposable keys once the deployment they made shows, at its last finalized block, both roles held by the
  * manifest's admin alone, an account none of the keys control. Absence is no evidence (a finalized block from before
  * the deploy holds no roles at all), and a prune can undo a switch short of finalized; with the keys gone, a role left
- * with them could never move again. Anything less, a failed read included, keeps the file. Residual: a deploy that
- * crashed after creating contracts leaves them unrecorded and unreferenced, their roles stranded with the keys.
+ * with them could never move again. Anything less, a failed read or an unrecorded deploy included, keeps the file.
  */
-export async function disposableDestroy(ref: ManifestRef, opts: { file?: string; roles?: typeof finalRoles } = {}): Promise<void> {
+export function disposableDestroy(ref: ManifestRef, opts: { file?: string; roles?: typeof finalRoles } = {}): Promise<void> {
 	const file = opts.file ?? DISPOSABLE_FILE
+	if (!existsSync(file)) return Promise.resolve()
+	return withBundle(file, () => destroyUnder(ref, file, opts.roles ?? finalRoles))
+}
+
+async function destroyUnder(ref: ManifestRef, file: string, roles: typeof finalRoles): Promise<void> {
 	if (!existsSync(file)) return
 	const values = readValues(file)
-	const recorded = recordedBridge(file)
-	if (recorded !== undefined && recorded !== ref.m.l2.bridge.address) {
-		throw new Error(`These disposable keys deployed bridge ${recorded}; ${ref.path} names another.`)
-	}
+	assertRecorded(file, ref)
 	if (ref.m.l1.deployer.toLowerCase() !== privateKeyToAddress(l1PrivateKeyFrom(values)).toLowerCase()) {
 		throw new Error(`${ref.path} is not the deployment the disposable keys made.`)
 	}
@@ -172,7 +235,10 @@ export async function disposableDestroy(ref: ManifestRef, opts: { file?: string;
 		[KEYED.deployerSecret, KEYED.adminSecret].map(async (name) => (await accountOf(aztecSecretFrom(name, values))).toField()),
 	)
 	const admin = Fr.fromHexString(ref.m.l2.admin ?? "0x0")
-	const r = await (opts.roles ?? finalRoles)(ref)
+	const r = await roles(ref)
+	if (!r.token.equals(Fr.fromHexString(ref.m.l2.token.address))) {
+		throw new Error(`Bridge ${ref.m.l2.bridge.address} is configured with token ${r.token}, not ${ref.path}'s.`)
+	}
 	const alone = r.owner.equals(admin) && r.admin.equals(admin) && r.pendingOwner.isZero() && r.pendingAdmin.isZero()
 	if (admin.isZero() || disposable.some((a) => a.equals(admin)) || !alone) {
 		throw new Error(
@@ -181,4 +247,5 @@ export async function disposableDestroy(ref: ManifestRef, opts: { file?: string;
 	}
 	rmSync(file)
 	rmSync(deploymentFile(file), { force: true })
+	syncDir(dirname(file))
 }

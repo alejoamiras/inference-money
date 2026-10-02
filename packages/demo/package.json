@@ -2,10 +2,13 @@
 	"name": "@inference-money/demo",
 	"version": "0.0.0",
 	"private": true,
-	"description": "The demo cast (public keys derived from a deployment), the recorded tour's schema and the world-view decoder; browser-safe, shared by the deployer and the showcase.",
+	"description": "The demo cast (public keys derived from a deployment), its flows, the recorded tour's schema and the world-view decoder; browser-safe, shared by the deployer and the showcase.",
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./files": "./src/files.ts",
+		"./keys": "./src/keys.ts",
+		"./tour": "./src/tour.ts"
 	},
 	"scripts": {
 		"test": "bun test --preload ../../test-preload.ts src",

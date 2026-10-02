@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { signingKeyFor } from "@inference-money/bridge-core"
 import { MANIFEST } from "../../bridge-core/src/test/fixtures"
-import { aztecAddressOf, aztecSecret, castMember, ethereumKey, newUsersTag } from "./cast"
+import { aztecAddressOf, aztecSecret, castMember, newUsersTag } from "./cast"
+import { ethereumKey } from "./keys"
 
 const BRIDGE = MANIFEST.l2.bridge.address
 const TAG = "0123456789abcdef0123456789abcdef"

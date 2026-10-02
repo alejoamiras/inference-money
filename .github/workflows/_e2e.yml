@@ -1,7 +1,8 @@
 name: E2E (reusable)
 
-# The browser suite against its own local network: net:up, deploy:local, the app and test-wallet builds, the sidecar
-# and Playwright, all torn down by apps/web/e2e/agent.sh. Called from web.yml on PRs labelled `e2e`, or run by hand.
+# The browser suite against its own local network: net:up, deploy:local, the sidecar, the demo cast, the showcase build
+# and Playwright, all torn down by apps/showcase/e2e/agent.sh. Called from showcase.yml on PRs labelled `e2e`, or run by
+# hand.
 on:
   workflow_call:
   workflow_dispatch:
@@ -23,7 +24,7 @@ jobs:
           foundry: "true"
           aztec-node: "true"
       - name: Chromium (the pinned Playwright's build)
-        run: apps/web/node_modules/.bin/playwright install --with-deps chromium
+        run: apps/showcase/node_modules/.bin/playwright install --with-deps chromium
       - run: bun run test:e2e
       # A failed run keeps its logs, builds and traces under its state dir; a passing one leaves nothing to upload.
       - if: failure()

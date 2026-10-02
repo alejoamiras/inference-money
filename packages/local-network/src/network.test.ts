@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test"
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { resolveToolchain } from "./network"
+import { runDataDir } from "./handle"
+import { assertSocketRoom, resolveToolchain } from "./network"
 
 /** A repo root pinning `pinned`, and a node install at `base` holding `installed` with the given executables. */
 function fixture(pinned: string, installed: string, bins = ["internal-bin/anvil", "internal-bin/forge", "node_modules/.bin/aztec"]) {
@@ -20,6 +21,16 @@ function fixture(pinned: string, installed: string, bins = ["internal-bin/anvil"
 	writeFileSync(join(base, "node_modules", "@aztec-labs", "aztec", "package.json"), JSON.stringify({ version: installed }))
 	return { dir, root, env: { AZTEC_NODE_HOME: base }, base }
 }
+
+describe("assertSocketRoom", () => {
+	it("leaves room for the node's sockets under any run's data dir, and refuses a TMPDIR that doesn't", () => {
+		const longestRunId = `0123abcd-${"x".repeat(32)}`
+		const root = "/home/runner/.cache/inference-money/net"
+		expect(runDataDir(longestRunId, "/r")).toMatch(/^\/r\/[0-9a-f]{16}$/)
+		expect(() => assertSocketRoom(join(runDataDir(longestRunId, root), "tmp"))).not.toThrow()
+		expect(() => assertSocketRoom(join(root, longestRunId, "tmp"))).toThrow("sun_path")
+	})
+})
 
 describe("resolveToolchain", () => {
 	it("takes AZTEC_NODE_HOME only when it is a complete install of exactly the pinned node", () => {

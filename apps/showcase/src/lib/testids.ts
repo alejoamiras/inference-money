@@ -1,0 +1,23 @@
+/** Stable hooks for the e2e suite; copy and layout may change freely around them. */
+export const TESTIDS = {
+	walletStatus: "wallet-status",
+	castMember: "cast-member",
+	provingEnv: "proving-env",
+	provingRun: "proving-run",
+	provingState: "proving-state",
+	provingSample: "proving-sample",
+	mode: "mode",
+	network: "network",
+	composer: "composer",
+	field: "composer-field",
+	tryIt: "try-it",
+	chip: "scene-chip",
+	stage: "stage",
+	balance: "balance",
+	coin: "coin",
+	verdict: "verdict",
+	verdictRule: "verdict-rule",
+	feedRow: "feed-row",
+	feedSource: "feed-source",
+	payout: "payout",
+} as const

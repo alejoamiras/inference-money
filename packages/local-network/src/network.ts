@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
-import { delimiter, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import {
 	L1_CHAIN_ID,
 	localDeploymentDir,
@@ -102,7 +102,22 @@ function nodeEnv(t: Toolchain, anvilUrl: string, tmpDir: string): NodeJS.Process
 	}
 }
 
+/** The node's longest socket name in its TMPDIR, `cdb-ts-<pid>-<thread>-<n>.sock`, with room for a 7-digit pid and 4- and 6-digit counters. */
+const NODE_SOCKET = "cdb-ts-4194304-9999-999999.sock"
+/** `sun_path`'s size, NUL included. */
+const SUN_PATH = process.platform === "darwin" ? 104 : 108
+
+/** A socket path past `sun_path` fails to bind, and the node then hangs at startup instead of exiting. */
+export function assertSocketRoom(tmpDir: string): void {
+	const longest = Buffer.byteLength(join(tmpDir, NODE_SOCKET))
+	if (longest >= SUN_PATH) {
+		throw new Error(`the node's sockets under ${tmpDir} would exceed sun_path (${longest + 1} > ${SUN_PATH} bytes); shorten HOME`)
+	}
+}
+
 async function boot(t: Toolchain, runId: string, ports: NetPorts, dataDir: string, track: (s: Spawned) => void): Promise<void> {
+	const tmpDir = join(dataDir, "tmp")
+	assertSocketRoom(tmpDir)
 	const anvilUrl = `http://127.0.0.1:${ports.anvil}`
 	const logs = { anvil: join(NET_LOG_DIR, `${runId}-anvil.log`), aztec: join(NET_LOG_DIR, `${runId}-aztec.log`) }
 	const anvilArgs = ["--host", "127.0.0.1", "--port", String(ports.anvil), "--chain-id", String(L1_CHAIN_ID)]
@@ -112,7 +127,6 @@ async function boot(t: Toolchain, runId: string, ports: NetPorts, dataDir: strin
 	await waitHealthy(anvil, anvilUrl, "eth_chainId", 60_000, logs.anvil)
 	const nodeArgs = ["start", "--local-network", "--port", String(ports.aztec), "--admin-port", String(ports.aztecAdmin)]
 	nodeArgs.push("--p2p.p2pPort", String(ports.aztecP2p), "--l1-rpc-urls", anvilUrl, "--data-directory", join(dataDir, "node"))
-	const tmpDir = join(dataDir, "tmp")
 	mkdirSync(tmpDir, { recursive: true, mode: 0o700 })
 	const node = await spawnDetached("aztec", t.aztec, nodeArgs, { env: nodeEnv(t, anvilUrl, tmpDir), logFile: logs.aztec })
 	track(node)
@@ -195,7 +209,9 @@ export async function netDown(runId: string, log: (m: string) => void = console.
 	if (h && !(await stopAll(runId, h.processes, log)))
 		throw new Error(`run ${runId}: a process group was not verifiably stopped; handle kept`)
 	await releasePorts(runId)
-	rmSync(runDataDir(runId), { recursive: true, force: true })
+	// The handle's own record, when it names one of ours: a run from before a naming change keeps its dir name.
+	const dataDir = h && dirname(h.dataDir) === NET_ROOT ? h.dataDir : runDataDir(runId)
+	rmSync(dataDir, { recursive: true, force: true })
 	rmSync(localDeploymentDir(runId), { recursive: true, force: true })
 	removeHandle(runId)
 	if (!h) log(`[net] ${runId}: no handle; released any registry rows and state`)

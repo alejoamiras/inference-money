@@ -1,0 +1,64 @@
+# Phase 13 — Testnet live check
+
+Status: **done** 2026-10-01: the gate passed against the Workers preview of `1e4bb74` (version URL `efc5e736-inference-money.alejo-amiras.workers.dev`): both specs green in 2.7 min, no CSP violation.
+
+## Decisions
+
+1. **The served CSP is the only fence.** The local suite confines each context to the run's origins; against a hosted page that would test the fence, not the page, so the testnet check records every JSON-RPC method instead and fails on any CSP violation the page reports.
+2. **Tx links are checked on the chains, not the explorers.** Each recorded row must link its own hash in the pinned explorer route, and each hash is read back as executed from Sepolia and the Aztec node. Both explorers answer 200 for a hash that does not exist (checked 2026-10-01), so fetching their pages proves nothing.
+3. **The deposit is left unclaimed.** P13 checks the Ethereum lane only; the deposit's claim ticket lives in the test's browser, so each run leaves 0.01 USDC escrowed (`docs/operations.md` says so).
+
+## Findings
+
+1. **Workers Builds failed its deploy step on a Worker-name check, with the names equal.** The build passed; `wrangler versions upload` then stopped at "The name in your wrangler.jsonc file (inference-money) must match the name of your Worker". Wrangler raises that both when the API finds no Worker by the config's name and when the Worker it finds is not the one the build is attached to (`WRANGLER_CI_MATCH_TAG`, identical in 4.145 and 4.146). The repo connection in the dashboard was stale after the setup changes; disconnecting and connecting it again fixed it.
+2. **`npx wrangler` ran a release published 22 minutes earlier.** The deploy command fetched the newest wrangler (4.146.0) at deploy time, outside the lockfile and the 7-day age gate, with the build's Cloudflare token in its environment. Both deploy commands now pin `wrangler@4.138.0`, the newest release older than 7 days on 2026-10-01; `docs/operations.md` names them.
+
+## Codex, arc 5 boundary (GPT-6 Astra, high; session `01a0f87e…7e57`, account alejo-gmail)
+
+Scope: the showcase arc's own commits (P10–P13 and the socket fix); P9's commits on the same branch were the arc-4 boundary's.
+
+**Round 1:** not converged, nine findings, all verified against the code (and, for the privacy one, the testnet chain) and accepted:
+
+1. **High: a claim's secret was forgotten at its checkpoint.** `claim` keeps "consumed" only at a checkpoint, and bridge-core's contract says to keep the secret until `waitClaimFinalized`; the page dropped the ticket at once, so a pruned epoch would strand the deposit. A claimed ticket is now kept, skipped while its claim is checkpointed, dropped once final, and claimable again once its nullifier is gone.
+2. **High: a burn could vanish from recovery.** The exit was stored only after `exitToL1` located its message, so a reload during the checkpoint wait, or an `ExitUnconfirmedError`, lost a burn. `exitToL1` now hands the hash to `onSent` before the wait (a throwing `onSent` is still an `ExitUnconfirmedError`); the page stores it there, and the payout pass locates the withdrawal from it after a reload, dropping a burn that reverted or never mined (a dropped receipt counts only after 10 min, since a load-balanced node may not know a fresh tx).
+3. **High: the conflict retry could settle the wrong step.** It took the attempt's last send as "its own": when a payment's simulation hit a duplicate nullifier after the request it had just opened landed, the request settled the payment. The recording node now marks a send the node refused, and only a refused send whose earlier copy lands (waited for while pending) settles; anything else retries once.
+4. **Medium: payment amounts were labelled hidden.** `complete_from_private` emits the completed note's value unencrypted (`emit_private_log_unsafe`): the testnet pay tx's only private log is `[tag, 0x07, 0x989680]`, 10 USDC in the clear, which `docs/integration.md` already listed as visible. The decoder now reads it as a readable amount and counts it out of "encrypted logs"; the testnet tour was re-decoded from the chain (only `pay` changed), the fixture tour edited to match, and the pay row's public text says the amount is public.
+5. **Medium: payout checks could overlap** (the 30 s poll and a run's refresh), each sending the same withdrawal. One check runs at a time.
+6. **Medium: storage could block recovery.** A stored `null` crashed the sort, an unreadable ticket threw before the per-entry catch, and a blocked `localStorage` threw from the default parameter. Entries are shape-checked on read, each payout fails alone, and storage is read inside the catch.
+7. **Medium: the e2e sidecar's teardown lost ownership with its leader.** It is now spawned with this run's marker, a marked member proves a leaderless group, and its wallet dir goes once no process holds its pid.
+8. **Low: teardown recomputed the data dir**, stranding a run named before the digest change; it now removes the handle's own record when that is a child of the net root.
+9. **Low: comments.** The socket bound claimed every number at its widest (it reserves widths); `classify`'s doc restated its signature.
+
+**Round 2:** confirmed the claim, privacy, storage-getter and socket-wording fixes; not converged, six findings, all accepted but one part:
+
+1. **High: the exit was still stored after the node's response**, so a lost response or a reload in that window lost the burn. The wallet's recording node now hands the next tx to a one-shot `onNextSend` before forwarding it; `withdraw` stores the hash, recipient, amount and expiry there. `exitToL1`'s `onSent` went back out, unused.
+2. **High: a refused request-opening could settle a whole payment.** The landed-copy shortcut now settles only one-send actions; a payment runs again, and the payment gate refuses paying one request twice.
+3. **High: retiring an exit was unsafe both ways.** A dropped receipt is now proof of nothing until the finalized tip passes the tx's expiry (any block that could hold it is final by then), and a located burn's receipt is read again on every pass, so a pruned checkpoint shows as stuck instead of "proving" forever.
+4. **Medium: a malformed stored field still threw outside the per-entry catch.** Stored records are parsed with zod schemas (an entry that fails is skipped), and each claim entry is decoded alone: one that no longer decodes is dropped instead of blocking later claims.
+5. **Medium: the payout exclusion ended with the component.** It is now page-wide, in `finishPayouts`. Not taken: persisting the Ethereum payout tx before broadcast. A reload inside its inclusion window can send a second `withdraw`, which the Outbox reverts; the cost is one reverted tx's gas from a demo wallet, and guarding it means signing and sending in separate steps.
+6. **Medium: the sidecar's wallet dir could survive a SIGKILL that had not finished**, and a dead leader did not prove its group gone. The dir goes once the whole group has exited; a group still standing keeps it.
+
+**Round 3 (the cap):** confirmed the claim, privacy, gate, serialization and sidecar fixes; not converged, four findings, three accepted:
+
+1. **High: two runs could share the send journal.** Live → tour → live remounts live mode with a fresh run guard, so a second withdrawal could start while the first proved, and the first burn's hash could be stored with the second's amount. Runs are now one at a time page-wide (`runDraft` chains on the previous), and only the run that set the journal clears it.
+2. **High: retirement read the receipt before the finalized boundary**, so a tx included between the two reads could be retired on a stale absence. `locate` now asks bridge-core's `finalFate`, which reads the boundary first, and retires only a dropped burn that `finalFate` calls gone.
+3. **Medium: the codec revives any JSON**, so a tampered ticket (`{"ticket":{}}`) decoded and then threw outside the per-entry catch, blocking every payout behind it. Decoded exit and claim tickets are checked for the fields the page reads; one that fails is unreadable, and its entry is dropped.
+4. Rejected: "round-2 exits stored without `expiresAt` vanish after upgrading." No build that wrote that shape ever shipped: the hosted preview is `1e4bb74`, from before round 1, and stores exits as `{ id, actor, since, ticket }`, which the schema still reads through the ticket path.
+
+Past the cap with fixes unreviewed, the loop continues for a confirming round, per the owner's standing call on loops at the cap: minimal fixes only.
+
+**Round 4 (confirming):** confirmed the remount serialization, the `finalFate` ordering and the tampered-exit check, and agreed with rejection 4 and with the payout gas trade-off; not converged, two findings, both accepted:
+
+1. **High: the proving page sent outside the queue.** `#proving` drives the same wallet, so its tx could take a withdrawal's one-shot journal. The queue moved onto the wallet (`DemoWallet.exclusive`, one `oneAtATime` helper the payout pass reuses), and the proving check runs each timed action through it, outside its own timing.
+2. **Medium: a deposit entry that cannot be read back still held up later claims**, since only the claimed amount was checked and a draft that decodes can still throw in reconciliation. A claim ticket must now hold every field a claim reads, and each entry is tried alone: one that throws (a malformed draft, or the network) is kept and passed over, and its error shows only when no entry can claim.
+
+**Round 5 (confirming):** confirmed the wallet-wide queue (proving waits outside its timers) and that the queue survives a rejected run; not converged, two findings, one accepted:
+
+1. Rejected: "a ticket with a malformed string (`messageHash: "not-hex"`) passes the shape check and throws in the claim, ahead of every later deposit." Only a hand-edited `localStorage` holds one: the page stores only what bridge-core's codec encoded from a real claim, the codec refuses another protocol version, and a script that can write this origin's storage can already do anything the page can. The cost lands on the visitor who edited their own storage, and clearing site data recovers it; checking every value would re-implement the codec's schema in the page.
+2. **Medium: a deposit still confirming held up the claims after it**, since its reason returned at once (a reconciliation that cannot reach Ethereum reads as pending too). `claimable` keeps the first reason and scans on; it shows only when no entry can claim.
+
+**Round 6 (confirming):** confirmed the scan (a ticket after a confirming and a throwing entry claims; the reason shows only when none can); not converged on one finding, rejected: a hostile L1 RPC can return a Deposit event whose `key` is out of field range, which the page stores and every claim then trips on. The page's RPC and node are its trusted readers: a hostile one already makes `reconcileDeposit` report "not-deposited" (the draft, the only copy of the secret, goes), and an in-range wrong `key` or `index` wedges the claim just the same, so a range check closes nothing. Defending against a hostile reader is a second-RPC or light-client design for all of bridge-core's reconcile path. `docs/architecture.md` now states the trust model.
+
+**Round 7: converged.** Codex: "Converged under the stated trust model (high confidence): no material findings remain in the reviewed arc 5 code. I withdraw the hostile-reader finding."
+
+**After the loop (1fe6dae):** the suite, the local e2e (7/7) and the P13 gate against the new preview (`70d33f0e`, 2/2) pass.

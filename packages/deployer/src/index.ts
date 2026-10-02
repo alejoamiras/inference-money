@@ -1,7 +1,7 @@
+export { approvePermit2 } from "@inference-money/demo"
 export { acceptAdmin, bridgeOf, proposeAdmin, tokenOf } from "./admin"
 export { keepUntilFinal, type ReclaimSteps } from "./claim-finality"
 export { readDemoFile } from "./demo"
-export { approvePermit2 } from "./demo-l1"
 export { buildBridgeContracts, forgeRunDir } from "./evm"
 export { readBundle } from "./export"
 export { bridgeFeeJuice, topUpSponsor } from "./fee-juice"
