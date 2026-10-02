@@ -5,5 +5,7 @@ declare const __SHOWCASE_USERS_TAG__: string
 /** The public L1 RPC endpoint the page reads and sends through. */
 declare const __SHOWCASE_L1_RPC__: string
 declare const __SHOWCASE_PROOFS__: "real" | "fake"
+/** Where the page looks for Presto (`build/target.ts`): the app's own ports, or a local test's presto-server. */
+declare const __SHOWCASE_PRESTO__: { port: number; httpsPort: number }
 /** The guided tour's recording: the testnet's own acceptance run, or the local fixture. */
 declare const __SHOWCASE_TOUR__: unknown
