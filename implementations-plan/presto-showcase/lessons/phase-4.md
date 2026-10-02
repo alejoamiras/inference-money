@@ -34,6 +34,10 @@
 1. Medium, the hint still names Presto after a fallback when `/health` keeps answering (an undecodable proof, a transient `/prove` failure). **Accepted**: the hint no longer reads availability. With any status (the visitor connected) it says "proven by Presto when it can, else in this browser", always true; otherwise "proven in this browser". The re-check's comment no longer claims `/health` explains a failure. The spec asserts both hints (revoked; after the fallback).
 2. Low, "finishes where it started" overpromises: a native attempt can still fall back or fail. **Accepted**: `stop()` "does not cancel SDK work already under way"; the module comment and `docs/architecture.md` speak of later proofs.
 
+### Round 3 (resumed): converged
+
+"No new material findings — both round-2 fixes are verified; confidence: high." No findings; no comment changes warranted.
+
 ## Gate
 
 `bun run test:e2e` exit 0 (7 passed, 2.7 min, fake-proof bundle: Presto unreachable); `bun run test:e2e:presto` exit 0 (4 passed: the three infra specs and the Presto spec in 50 s); `bun run lint:actions` exit 0.

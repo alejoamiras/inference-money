@@ -139,6 +139,10 @@ export interface BuildTarget { /* … */ presto: { port: number; httpsPort: numb
 - Medium, shared startup reaches `#proving` → the consent lives in `LiveRoot`; the tour and harness never start it.
 - Medium, failure-path evidence → a locked, atomic binary install; teardown checks the owned process group (presto-server and its `bb` children); fake-proof bundles checked for no Presto module in any chunk; invalid port values tested.
 
+## Implementation audit
+
+**Codex (GPT-6 Astra, high), three rounds on the net diff from `2c52e23`: converged ("No new material findings").** Round 1 requested changes: a grant queued behind a check could probe after `stop()` (fixed, regression test); a stale `stop()` could clear a newer consent's guard (fixed: the guard's remover clears only its own check); the hint and ribbon kept "connected" after a fallback (fixed: a fallback re-checks, and round 2 made the hint independent of the last check, since a proof can fall back while `/health` still answers); `stop_group` had lost the final ownership check before SIGKILL (restored); narrating comments (trimmed). **Rejected**: cancelling a proof the SDK already started needs an SDK change; the wording now says stopping does not cancel SDK work under way, and the browser's permission still gates every request. Round 3: no findings. Log: `lessons/phase-4.md`.
+
 ## Phases
 
 ### Phase 1: build target, CSP and dependencies ✓
