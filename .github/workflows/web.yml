@@ -45,6 +45,7 @@ jobs:
               - '.github/workflows/_e2e.yml'
               - 'packages/local-network/**'
               - 'packages/deployer/**'
+              - 'packages/demo/**'
               - '.github/actions/setup-toolchains/**'
       - if: github.event_name == 'workflow_dispatch'
         id: override

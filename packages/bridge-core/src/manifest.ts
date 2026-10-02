@@ -23,9 +23,15 @@ const l2InstanceSchema = z.strictObject({
 
 const ZERO_FIELD: Hex = `0x${"0".repeat(64)}`
 
+/** The message and storage formats this code speaks; durable tickets carry it, and a reader refuses another. */
+export const PROTOCOL_VERSION = 2
+
 export const bridgeManifestSchema = z
 	.strictObject({
+		protocolVersion: z.literal(PROTOCOL_VERSION),
 		network: z.enum(["local", "testnet"]),
+		/** The commit the deploy ran from: its CLI can still finish this deployment's tickets after the formats move on. */
+		sourceCommit: z.string().regex(/^[0-9a-f]{40}$/, "expected a 40-hex commit"),
 		l1: z.strictObject({
 			chainId: uint.positive(),
 			usdc: evmAddress,
@@ -37,12 +43,18 @@ export const bridgeManifestSchema = z
 			outbox: evmAddress,
 			/** The first block a deposit log scan needs to read. */
 			deployBlock: uint,
+			/** The portal's initializer: its only power ended at `initialize`. */
+			deployer: evmAddress,
 		}),
 		l2: z.strictObject({
 			nodeVersion: z.string().min(1),
 			rollupVersion: uint.positive(),
 			nodeUrl: z.url(),
 			sponsoredFpc: field.optional(),
+			/** Bridge owner and merchant admin once the deploy's handover is accepted; absent until then. */
+			admin: field.optional(),
+			/** The admin is a disposable key standing in until the owner's admin takes over. */
+			interimAdmin: z.literal(true).optional(),
 			proxy: l2InstanceSchema,
 			token: l2InstanceSchema,
 			bridge: l2InstanceSchema,
@@ -56,6 +68,9 @@ export const bridgeManifestSchema = z
 				path: ["l2"],
 				message: "proxy, token and bridge must share one non-zero deployer (a zero deployer lets anyone initialize first)",
 			})
+		}
+		if (m.l2.interimAdmin && !m.l2.admin) {
+			ctx.addIssue({ code: "custom", path: ["l2", "interimAdmin"], message: "an interim admin needs an admin" })
 		}
 	})
 

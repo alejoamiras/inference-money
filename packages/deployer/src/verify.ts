@@ -2,28 +2,29 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
-import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import { getContractClassFromArtifact } from "@aztec-labs/stdlib/contract"
-import { DelayedPublicMutableValues } from "@aztec-labs/stdlib/delayed-public-mutable"
 import {
 	assertNetworkIdentity,
 	BRIDGE_CONTRACTS,
 	type BridgeManifest,
-	delayAt,
 	instanceFromRecord,
 	isBridgePaused,
 	sponsorInstance,
+	syncMerchantList,
 	tokenArtifact,
 	tokenBridgeArtifact,
 	tokenMinterProxyArtifact,
 } from "@inference-money/bridge-core"
-import type { Abi, Address, Hex, PublicClient } from "viem"
+import { aztecAddressOf, castMember, MERCHANTS } from "@inference-money/demo"
+import { type Abi, type Address, erc20Abi, type Hex, type PublicClient } from "viem"
 
 import { type BridgeEvmArtifacts, maskImmutables } from "./evm"
 import type { Check } from "./preflight"
 import { standardContractAddresses } from "./standard"
+import { type DelayState, entryDelay, guardianDelay, layoutSlot, publicReader, readRoles } from "./token-reads"
 
 const check = (name: string, ok: boolean, detail: string): Check => ({ name, ok, detail })
+const warn = (name: string, detail: string): Check => ({ name, ok: true, warn: true, detail })
 const same = (a: unknown, b: unknown) => String(a).toLowerCase() === String(b).toLowerCase()
 const pin = (name: string, actual: unknown, want: unknown) =>
 	check(name, same(actual, want), `${actual}${same(actual, want) ? "" : ` (want ${want})`}`)
@@ -47,7 +48,7 @@ async function codeMatches(
 	return check(`${name} runtime bytecode == fresh forge build (immutables masked)`, ok, `${(code.length - 2) / 2} bytes`)
 }
 
-async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeManifest, l1Deployer: Address): Promise<Check[]> {
+async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeManifest): Promise<Check[]> {
 	const { portal, router } = evm
 	const read = (address: Address, abi: Abi, functionName: string) => l1.readContract({ address, abi, functionName }) as Promise<unknown>
 	const p = (fn: string) => read(m.l1.portal, portal.abi, fn)
@@ -64,7 +65,7 @@ async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeMani
 		pin("portal.underlying", underlying, m.l1.usdc),
 		pin("portal.l2Bridge", l2Bridge, m.l2.bridge.address),
 		pin("portal.rollupVersion", rollupVersion, m.l2.rollupVersion),
-		pin("portal.initializer (L1 deployer)", initializer, l1Deployer),
+		pin("portal.initializer == L1 deployer", initializer, m.l1.deployer),
 		pin("portal.outbox", outbox, m.l1.outbox),
 		pin("portal.inbox", inbox, m.l1.inbox),
 		pin("portal.router", routerOfPortal, m.l1.router),
@@ -91,23 +92,11 @@ async function verifyInstances(node: AztecNode, m: BridgeManifest): Promise<Chec
 	return out
 }
 
-/** A storage field's slot in `artifact`'s layout, `offset` fields into its packed value. */
-function layoutSlot(artifact: ContractArtifact, field: string, offset = 0): Fr {
-	const layout = artifact.storageLayout[field]
-	if (!layout) throw new Error(`${artifact.name} has no ${field} storage`)
-	return layout.slot.add(new Fr(offset))
-}
-
-const reader = (node: AztecNode, contract: string) => (slot: Fr) =>
-	node.getPublicStorageAt("latest", AztecAddress.fromStringUnsafe(contract), slot)
-
 async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
 	const { proxy, token, bridge } = m.l2
-	const deployer = bridge.deployer
-	const [b, p, t] = [reader(node, bridge.address), reader(node, proxy.address), reader(node, token.address)]
+	const [b, p, t] = [publicReader(node, bridge.address), publicReader(node, proxy.address), publicReader(node, token.address)]
 	// A PublicImmutable's packed value starts at its slot: the bridge config is (token_minter_proxy, token, portal).
-	const [bOwner, bProxy, bToken, bPortal, bPaused, pOwner, pToken, pBridge, tDecimals, tMinter, tAuth] = await Promise.all([
-		b(layoutSlot(tokenBridgeArtifact, "owner")),
+	const [bProxy, bToken, bPortal, bPaused, pOwner, pToken, pBridge, tDecimals, tMinter, tAuth] = await Promise.all([
 		b(layoutSlot(tokenBridgeArtifact, "config")),
 		b(layoutSlot(tokenBridgeArtifact, "config", 1)),
 		b(layoutSlot(tokenBridgeArtifact, "config", 2)),
@@ -120,12 +109,12 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 		t(layoutSlot(tokenArtifact, "auth_contract")),
 	])
 	return [
-		pin("bridge owner == deployer", bOwner, deployer),
 		pin("bridge config.token_minter_proxy", bProxy, proxy.address),
 		pin("bridge config.token", bToken, token.address),
 		check("bridge config.portal", bPortal.toBigInt() === BigInt(m.l1.portal), bPortal.toString()),
 		check("bridge not paused", !bPaused, String(bPaused)),
-		pin("proxy owner == deployer", pOwner, deployer),
+		// The proxy's owner can only set token and bridge, once each: inert once both are wired.
+		pin("proxy owner == deployer", pOwner, bridge.deployer),
 		pin("proxy token", pToken, token.address),
 		pin("proxy bridge", pBridge, bridge.address),
 		check("token decimals == 6", tDecimals.toBigInt() === 6n, tDecimals.toString()),
@@ -134,25 +123,73 @@ async function verifyL2Wiring(node: AztecNode, m: BridgeManifest): Promise<Check
 	]
 }
 
-/** The merchant roles: the admin, no handover pending, and the guardian slot's delay settled at the setting. */
-async function verifyMerchantRoles(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
-	const t = reader(node, m.l2.token.address)
-	const [admin, pending, setting, guardian, latest] = await Promise.all([
-		t(layoutSlot(tokenArtifact, "merchant_admin")),
-		t(layoutSlot(tokenArtifact, "pending_merchant_admin")),
-		t(layoutSlot(tokenArtifact, "merchant_delay")),
-		DelayedPublicMutableValues.readFromTree(layoutSlot(tokenArtifact, "merchant_guardian"), t),
-		node.getBlockData("latest"),
-	])
-	if (!latest) throw new Error("the node returned no latest block")
-	const now = latest.header.globalVariables.timestamp
-	const delay = delayAt(guardian.sdc, now)
+/** "complete": the manifest's admin holds both roles. `{ pendingTo }`: a fresh deploy, proposed to that admin. */
+export type Handover = "complete" | { pendingTo: string }
+
+const ZERO = Fr.ZERO.toString()
+
+/** Both admin roles, the bridge's ownership and the merchant admin, against the expected handover state. */
+async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handover): Promise<Check[]> {
+	const { owner, pendingOwner, admin, pendingAdmin } = await readRoles(node, m)
+	const deployer = m.l2.bridge.deployer
+	if (handover !== "complete") {
+		return [
+			pin("bridge owner == deployer (handover proposed)", owner, deployer),
+			pin("bridge pending owner == admin", pendingOwner, handover.pendingTo),
+			pin("merchant admin == deployer (handover proposed)", admin, deployer),
+			pin("pending merchant admin == admin", pendingAdmin, handover.pendingTo),
+		]
+	}
+	const want = m.l2.admin ?? "an accepted admin (none in the manifest)"
 	return [
-		pin("token merchant admin == deployer", admin, m.l2.token.deployer),
-		check("token merchant admin: no handover pending", pending.isZero(), pending.toString()),
-		pin("token guardian slot delay == merchant delay", delay, setting.toBigInt()),
-		check("token guardian slot delay: no change pending", guardian.sdc.timestampOfChange <= now, `${delay}s`),
+		pin("bridge owner == admin", owner, want),
+		pin("bridge: no ownership transfer pending", pendingOwner, ZERO),
+		pin("merchant admin == admin", admin, want),
+		pin("no merchant admin handover pending", pendingAdmin, ZERO),
+		check("no deploy key keeps a role", !same(m.l2.admin, deployer), `admin ${m.l2.admin}`),
+		...(m.l2.interimAdmin ? [warn("admin is an interim (disposable) key", "switch to the owner's admin, then destroy it")] : []),
 	]
+}
+
+const delayCheck = (name: string, d: DelayState, setting: bigint, now: bigint): Check[] => {
+	const result = pin(`${name} delay == setting`, d.scheduled, setting)
+	if (d.changeAt <= now || d.current === d.scheduled) return [result]
+	return [result, warn(`${name} delay change pending`, `${d.current}s until ${d.changeAt}, then ${d.scheduled}s`)]
+}
+
+/** The guardian slot's and every added merchant's delay against the setting; a decrease still in flight only warns. */
+async function verifyDelays(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
+	const token = AztecAddress.fromStringUnsafe(m.l2.token.address)
+	const list = await syncMerchantList(node, token)
+	const setting = (await publicReader(node, m.l2.token.address)(layoutSlot(tokenArtifact, "merchant_delay"))).toBigInt()
+	const guardian = await guardianDelay(node, token, list.block, list.at)
+	const entries = await Promise.all(
+		[...list.entries.keys()].map(async (a) => {
+			const d = await entryDelay(node, token, AztecAddress.fromStringUnsafe(a), list.block, list.at)
+			return delayCheck(`merchant ${a}`, d, setting, list.at)
+		}),
+	)
+	return [...delayCheck("guardian slot", guardian, setting, list.at), ...entries.flat()]
+}
+
+/** Necessary, not sufficient: unclaimed deposits and unpaid withdrawals are liabilities too (integration's books). */
+async function verifyBacking(node: AztecNode, l1: PublicClient, m: BridgeManifest): Promise<Check[]> {
+	const [supply, reserve] = await Promise.all([
+		publicReader(node, m.l2.token.address)(layoutSlot(tokenArtifact, "total_supply")),
+		l1.readContract({ address: m.l1.usdc, abi: erc20Abi, functionName: "balanceOf", args: [m.l1.portal] }),
+	])
+	return [check("L2 supply ≤ portal USDC", supply.toBigInt() <= reserve, `${supply.toBigInt()} ≤ ${reserve}`)]
+}
+
+/** The demo merchants' keys are public: listed anywhere but local and testnet, they would let anyone act as a merchant. */
+export const DEMO_NETWORKS: readonly BridgeManifest["network"][] = ["local", "testnet"]
+
+async function verifyDemoCast(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
+	if (DEMO_NETWORKS.includes(m.network)) return [check("demo cast", true, `may be listed on ${m.network}`)]
+	const list = await syncMerchantList(node, AztecAddress.fromStringUnsafe(m.l2.token.address))
+	const cast = await Promise.all(MERCHANTS.map(async (a) => (await aztecAddressOf(castMember(m, a))).toString()))
+	const listed = cast.filter((a) => list.entries.has(a))
+	return [check("no demo merchant listed", listed.length === 0, listed.join(", ") || "none")]
 }
 
 async function verifyEnvironment(node: AztecNode, m: BridgeManifest): Promise<Check[]> {
@@ -174,15 +211,16 @@ async function verifyEnvironment(node: AztecNode, m: BridgeManifest): Promise<Ch
 }
 
 /**
- * Every privileged read-back the manifest depends on: L1 bytecode against a fresh forge build, L1 and L2 wiring, both
- * owners, class ids, network identity and the sponsor. A read that throws is a failed check, never a skipped one.
+ * Every read-back the manifest depends on, keyless: L1 bytecode against a fresh forge build, L1 and L2 wiring, the admin
+ * roles in their expected handover state, the delays, backing, the demo-cast rule, class ids, network identity and the
+ * sponsor. A read that throws is a failed check, never a skipped one. It trusts the endpoints `node` and `l1` read from.
  */
 export async function verifyDeployment(
 	m: BridgeManifest,
 	evm: BridgeEvmArtifacts,
 	l1: PublicClient,
 	node: AztecNode,
-	l1Deployer: Address,
+	handover: Handover = "complete",
 ): Promise<Check[]> {
 	const identity = await attempt("network identity", async () => {
 		await assertNetworkIdentity(node, l1, m)
@@ -192,10 +230,13 @@ export async function verifyDeployment(
 	return [
 		...identity,
 		check("one L2 deployer for all instances", deployers.size === 1, [...deployers].join(", ")),
-		...(await attempt("L1", () => verifyL1(l1, evm, m, l1Deployer))),
+		...(await attempt("L1", () => verifyL1(l1, evm, m))),
 		...(await attempt("L2 instances", () => verifyInstances(node, m))),
 		...(await attempt("L2 wiring", () => verifyL2Wiring(node, m))),
-		...(await attempt("merchant roles", () => verifyMerchantRoles(node, m))),
+		...(await attempt("admin roles", () => verifyRoles(node, m, handover))),
+		...(await attempt("merchant delays", () => verifyDelays(node, m))),
+		...(await attempt("backing", () => verifyBacking(node, l1, m))),
+		...(await attempt("demo cast", () => verifyDemoCast(node, m))),
 		...(await attempt("environment", () => verifyEnvironment(node, m))),
 	]
 }
@@ -208,7 +249,7 @@ export class VerificationFailed extends Error {
 }
 
 export function assertAllPass(checks: Check[], log: (m: string) => void): void {
-	for (const c of checks) log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
+	for (const c of checks) log(`${c.ok ? (c.warn ? "warn" : "ok  ") : "FAIL"} ${c.name}: ${c.detail}`)
 	const failures = checks.filter((c) => !c.ok)
 	if (failures.length > 0) throw new VerificationFailed(failures)
 }

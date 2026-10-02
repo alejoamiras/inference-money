@@ -15,14 +15,13 @@
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
 import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
-import { type BridgeManifest, l2UsdcBalance, registerBridgeContracts, registerSponsor } from "@inference-money/bridge-core"
+import { type BridgeManifest, l2UsdcBalance, registerBridgeContracts, registerSponsor, signingKeyFor } from "@inference-money/bridge-core"
 import {
 	enterOwnedTmpDir,
 	localManifestPath,
 	newSponsoredAccount,
 	openBridgeWallet,
 	readManifest,
-	signingKeyFor,
 	startBlockHeartbeat,
 } from "@inference-money/deployer"
 import { resolveEndpoints, runIdFor } from "@inference-money/local-network"

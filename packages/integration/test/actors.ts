@@ -7,7 +7,6 @@ import {
 	confirmDeposit,
 	type DepositKind,
 	type ExitTicket,
-	ensurePermit2Allowance,
 	type FeeChoice,
 	finishWithdrawal,
 	isClaimConsumed,
@@ -23,9 +22,9 @@ import {
 	waitClaimable,
 	waitReturnable,
 } from "@inference-money/bridge-core"
-import { l1Signer } from "@inference-money/deployer"
+import { approvePermit2, l1Signer } from "@inference-money/deployer"
 import { L1_CHAIN_ID } from "@inference-money/local-network"
-import { type Address, erc20Abi, getAbiItem, maxUint256, parseAbi } from "viem"
+import { type Address, erc20Abi, getAbiItem, parseAbi } from "viem"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { harness, newAccount } from "./harness"
 import { listMerchant, token } from "./token"
@@ -53,21 +52,7 @@ export async function l1Actor(usdc = 1_000n * USDC): Promise<L1Ctx> {
 		account: signer.account,
 		chain: signer.chain,
 	})
-	await ensurePermit2Allowance({
-		allowance: () =>
-			l1.publicClient.readContract({ address: m.l1.usdc, abi: erc20Abi, functionName: "allowance", args: [account, m.l1.permit2] }),
-		approveMax: () =>
-			signer.walletClient.writeContract({
-				address: m.l1.usdc,
-				abi: erc20Abi,
-				functionName: "approve",
-				args: [m.l1.permit2, maxUint256],
-				account: signer.account,
-				chain: signer.chain,
-			}),
-		waitReceipt: (hash) => l1.publicClient.waitForTransactionReceipt({ hash }),
-		needed: usdc,
-	})
+	await approvePermit2(signer, m, usdc)
 	return { publicClient: l1.publicClient, walletClient: signer.walletClient, account }
 }
 
@@ -208,7 +193,7 @@ export function returnable(t: ClaimTicket, from = t.draft.intent.recipient): Pro
 	return waitReturnable(t, node, wallet, m, from, undefined, { pollMs: 1_000, attempts: 600 })
 }
 
-/** Flips the bridge's pause as its owner, the local deploy account. */
+/** Flips the bridge's pause as its owner, the local admin. */
 export async function setPaused(paused: boolean): Promise<void> {
 	const { manifest: m, wallet, owner } = harness()
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)

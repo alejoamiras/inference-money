@@ -1,87 +1,32 @@
-import { REPO_ROOT, runIdFor } from "@inference-money/local-network"
-import { deployLocal, verifyLocal } from "./local"
-import { networkByName, TESTNET } from "./networks"
-import { probeNetwork } from "./preflight"
-import { describeError, outputNeedles, REDACTED_CHILD, runRedacted } from "./redact"
-import { scanForSecrets } from "./scan"
-import { loadTestnetSecrets } from "./secrets"
-import { smokeTestnet } from "./smoke"
-import { proofCompatSpike } from "./spike"
-import { deployTestnet, TESTNET_MANIFEST, verifyTestnet } from "./testnet"
+import { type Invocation, parseInvocation, USAGE } from "./cli-args"
+import { describeError, REDACTED_CHILD, runRedacted } from "./redact"
+import { holdSecrets, secretNeedles } from "./secrets"
 
-const USAGE =
-	"usage: bun src/cli.ts <probe|spike|deploy|verify|smoke> testnet | <deploy|verify> local | scan secrets   (RUN_ID selects the local run)"
-const log = (m: string) => console.log(m)
-
-async function probe(): Promise<number> {
-	const pins = networkByName("testnet")
-	const checks = await probeNetwork(pins, process.env.SEPOLIA_RPC_URL || pins.defaultL1RpcUrl)
-	for (const c of checks) console.log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}`)
-	const failed = checks.filter((c) => !c.ok).length
-	console.log(failed === 0 ? `probe ${pins.name}: all ${checks.length} checks passed` : `probe ${pins.name}: ${failed} failed`)
-	return failed === 0 ? 0 : 1
+/**
+ * The entry point stays free of the Aztec SDK: importing it starts a native bb process with this process's
+ * environment, so the handlers load only once the secrets are held.
+ */
+async function main(): Promise<number> {
+	let inv: Invocation
+	try {
+		inv = parseInvocation(process.argv.slice(2))
+	} catch (e) {
+		console.error(e instanceof Error ? e.message : USAGE)
+		return 2
+	}
+	const needles = secretNeedles()
+	// Any environment holding a secret runs the command as a child whose output is redacted line by line.
+	if (needles.length > 0 && process.env[REDACTED_CHILD] !== "1") return runRedacted(process.argv.slice(1), needles)
+	holdSecrets()
+	const { HANDLERS } = await import("./commands")
+	return HANDLERS[inv.command](inv)
 }
 
-async function spike(): Promise<number> {
-	const secrets = loadTestnetSecrets(REPO_ROOT)
-	const r = await proofCompatSpike(TESTNET, secrets, secrets.sepoliaRpcUrl ?? TESTNET.defaultL1RpcUrl, log)
-	console.log(
-		`spike testnet: account ${r.account} deployed in tx ${r.txHash} (block ${r.blockNumber}, fee ${r.transactionFee}) after ${r.minutes}m`,
-	)
-	return 0
-}
-
-/** Prints only a yes/no and counts: which secret matched, or where, is never output. */
-function scanSecrets(): number {
-	const r = scanForSecrets(REPO_ROOT, loadTestnetSecrets(REPO_ROOT))
-	console.log(`secrets:scan found=${r.found} files=${r.files} walletDirs=${r.walletDirs.length}`)
-	return r.found || r.walletDirs.length > 0 ? 1 : 0
-}
-
-const COMMANDS: Record<string, () => Promise<number> | number> = {
-	"probe testnet": probe,
-	"spike testnet": spike,
-	"deploy testnet": async () => {
-		const m = await deployTestnet(log)
-		console.log(`deploy testnet: verified; manifest ${TESTNET_MANIFEST} (bridge ${m.l2.bridge.address})`)
-		console.log("reminder: the L2 owner key (pause/unpause) is TESTNET_AZTEC_SECRET_KEY in .env.testnet; keep it.")
-		return 0
-	},
-	"verify testnet": async () => {
-		await verifyTestnet(log)
-		console.log("verify testnet: every check passed")
-		return 0
-	},
-	"smoke testnet": async () => {
-		await smokeTestnet(log)
-		console.log("smoke testnet: all four legs settled")
-		return 0
-	},
-	"deploy local": async () => {
-		const { path } = await deployLocal(runIdFor(), log)
-		console.log(`deploy local: verified; manifest ${path}`)
-		return 0
-	},
-	"verify local": async () => {
-		await verifyLocal(runIdFor(), log)
-		console.log("verify local: every check passed")
-		return 0
-	},
-	"scan secrets": scanSecrets,
-}
-
-const command = process.argv.slice(2, 4).join(" ")
-const run = COMMANDS[command]
-if (!run) {
-	console.error(USAGE)
-	process.exit(2)
-}
-if (!command.endsWith(" local") && process.env[REDACTED_CHILD] !== "1") {
-	process.exit(await runRedacted(process.argv.slice(1), outputNeedles(REPO_ROOT)))
-}
-try {
-	process.exit(await run())
-} catch (e) {
-	console.error(describeError(e))
-	process.exit(1)
+if (import.meta.main) {
+	try {
+		process.exit(await main())
+	} catch (e) {
+		console.error(describeError(e))
+		process.exit(1)
+	}
 }

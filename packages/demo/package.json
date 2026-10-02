@@ -1,0 +1,26 @@
+{
+	"name": "@inference-money/demo",
+	"version": "0.0.0",
+	"private": true,
+	"description": "The demo cast (public keys derived from a deployment), the recorded tour's schema and the world-view decoder; browser-safe, shared by the deployer and the showcase.",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "bun test --preload ../../test-preload.ts src",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
+	},
+	"dependencies": {
+		"@aztec-labs/accounts": "6.0.0-rc.1",
+		"@aztec-labs/aztec.js": "6.0.0-rc.1",
+		"@aztec-labs/stdlib": "6.0.0-rc.1",
+		"@inference-money/bridge-core": "workspace:*",
+		"viem": "2.56.7",
+		"zod": "4.6.5"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.2",
+		"typescript": "6.0.3"
+	}
+}

@@ -1,56 +1,65 @@
 import { describe, expect, it } from "bun:test"
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
+import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { assertOwnerOnly, containsSecret, parseEnvFile, parseTestnetSecrets, scrubbedEnv } from "./secrets"
+import { aztecSecretFrom, containsSecret, l1PrivateKeyFrom, scrubbedEnv, secretNeedles } from "./secrets"
 
 const KEY: `0x${string}` = `0x${"0b".repeat(32)}`
+const FR: `0x${string}` = `0x${"0c".repeat(32)}`
+const RPC = "https://eth-sepolia.example.com/v2/Abc123DefGhi456Jkl"
 
-describe("testnet secrets", () => {
-	it("parses keys, strips quotes and export prefixes, ignores comments", () => {
-		const env = parseEnvFile(
-			`# c\nexport TESTNET_L1_PRIVATE_KEY="${KEY}"\nTESTNET_AZTEC_SECRET_KEY=${KEY}\n\nSEPOLIA_RPC_URL='https://x'\n`,
-		)
-		expect(parseTestnetSecrets(env)).toEqual({ l1PrivateKey: KEY, aztecSecretKey: KEY, sepoliaRpcUrl: "https://x" })
-	})
-
-	it("names a malformed or out-of-range key without echoing its value", () => {
+describe("keyed-run secrets", () => {
+	it("reads each key from the environment and names a missing or malformed one without echoing it", () => {
+		expect(l1PrivateKeyFrom({ TESTNET_L1_PRIVATE_KEY: KEY })).toBe(KEY)
+		expect(aztecSecretFrom("TESTNET_ADMIN_SECRET", { TESTNET_ADMIN_SECRET: FR }).toString()).toBe(FR)
 		const aboveField = `0x${"ab".repeat(32)}`
-		for (const [name, bad] of [
-			["TESTNET_L1_PRIVATE_KEY", "0xdeadbeefsecret"],
-			["TESTNET_L1_PRIVATE_KEY", `0x${"00".repeat(32)}`],
-			["TESTNET_AZTEC_SECRET_KEY", aboveField],
+		for (const [read, name, bad] of [
+			[l1PrivateKeyFrom, "TESTNET_L1_PRIVATE_KEY", "0xdeadbeefsecret"],
+			[l1PrivateKeyFrom, "TESTNET_L1_PRIVATE_KEY", `0x${"00".repeat(32)}`],
+			[(env: NodeJS.ProcessEnv) => aztecSecretFrom("TESTNET_DEPLOYER_SECRET", env), "TESTNET_DEPLOYER_SECRET", aboveField],
 		] as const) {
-			const run = () =>
-				parseTestnetSecrets(
-					new Map([
-						["TESTNET_L1_PRIVATE_KEY", KEY],
-						[name, bad],
-					]),
-				)
+			const run = () => read({ [name]: bad })
 			expect(run).toThrow(new RegExp(name))
 			expect(run).not.toThrow(new RegExp(bad.slice(2)))
 		}
 	})
 
+	it("never falls back to a secrets file or argv: a clean environment fails by name alone", () => {
+		const dir = mkdtempSync(join(tmpdir(), "secrets-"))
+		writeFileSync(join(dir, ".env.testnet"), `TESTNET_L1_PRIVATE_KEY=${KEY}\n`)
+		const script = `import { l1PrivateKeyFrom } from "${join(import.meta.dir, "secrets.ts")}"; l1PrivateKeyFrom()`
+		const r = Bun.spawnSync([process.execPath, "-e", script, KEY], { cwd: dir, env: { PATH: process.env.PATH ?? "" } })
+		const out = `${r.stdout}${r.stderr}`
+		expect(r.exitCode).not.toBe(0)
+		expect(out).toContain("TESTNET_L1_PRIVATE_KEY is missing")
+		expect(out.toLowerCase()).not.toContain(KEY.slice(2))
+	})
+
+	it("holds every credential out of process.env: its readers still see it, a process spawned after does not", () => {
+		const script = [
+			`import { spawnSync } from "node:child_process"`,
+			`import { aztecSecretFrom, holdSecrets } from "${join(import.meta.dir, "secrets.ts")}"`,
+			"holdSecrets()",
+			`const child = spawnSync(process.execPath, ["-e", "console.log(process.env.TESTNET_ADMIN_SECRET ?? 'absent')"])`,
+			`console.log(aztecSecretFrom("TESTNET_ADMIN_SECRET").toString(), process.env.TESTNET_ADMIN_SECRET ?? "absent", String(child.stdout).trim())`,
+		].join("\n")
+		const r = Bun.spawnSync([process.execPath, "-e", script], { env: { PATH: process.env.PATH ?? "", TESTNET_ADMIN_SECRET: FR } })
+		expect(String(r.stdout).trim(), String(r.stderr)).toBe(`${FR} absent absent`)
+	})
+
+	it("takes needles from every credential-named variable, in every form, and nothing else", () => {
+		const needles = secretNeedles({ TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: RPC, PATH: "/usr/bin:/bin", X_TOKEN: "short" })
+		expect(needles).toContain(KEY)
+		expect(needles).toContain(KEY.slice(2))
+		expect(needles).toContain("abc123defghi456jkl")
+		expect(needles.some((n) => n.includes("/usr/bin") || n === "short")).toBe(false)
+		expect(secretNeedles({ PATH: "/bin", HOME: "/home/x" })).toEqual([])
+		expect(containsSecret(`log: ${KEY.slice(2).toUpperCase()}`, needles)).toBe(true)
+		expect(containsSecret(`tx 0x${"ab".repeat(31)}ff`, needles)).toBe(false)
+	})
+
 	it("scrubs credential-bearing variables from a child env, keeping the rest", () => {
 		const env = scrubbedEnv({ PATH: "/bin", HOME: "/h", TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: "https://k", MNEMONIC: "m" })
 		expect(env).toEqual({ PATH: "/bin", HOME: "/h" })
-	})
-
-	it("detects a secret in any case, with or without its prefix, and nothing else", () => {
-		const s = { l1PrivateKey: KEY, aztecSecretKey: `0x${"cd".repeat(32)}` as const, sepoliaRpcUrl: "https://rpc/key123" }
-		expect(containsSecret(`log: ${KEY.slice(2).toUpperCase()}`, s)).toBe(true)
-		expect(containsSecret("url https://RPC/KEY123 used", s)).toBe(true)
-		expect(containsSecret(`tx 0x${"ab".repeat(31)}ff`, s)).toBe(false)
-	})
-
-	it("refuses a key file readable by group or others", () => {
-		const path = join(mkdtempSync(join(tmpdir(), "secrets-")), ".env.testnet")
-		writeFileSync(path, "")
-		chmodSync(path, 0o644)
-		expect(() => assertOwnerOnly(path)).toThrow(/chmod 600/)
-		chmodSync(path, 0o600)
-		expect(() => assertOwnerOnly(path)).not.toThrow()
 	})
 })

@@ -1,357 +1,347 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { dirname, join } from "node:path"
-import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
+import { writeFileSync } from "node:fs"
 import { Fr } from "@aztec-labs/aztec.js/fields"
-import { type AztecNode, createAztecNodeClient } from "@aztec-labs/aztec.js/node"
-import { FeeJuiceContract } from "@aztec-labs/aztec.js/protocol"
+import { waitForTx } from "@aztec-labs/aztec.js/node"
 import { TxHash } from "@aztec-labs/aztec.js/tx"
-import { getFeeJuiceBalance } from "@aztec-labs/aztec.js/utils"
-import type { EmbeddedWallet } from "@aztec-labs/wallets/embedded"
 import {
 	assertNetworkIdentity,
-	type BridgeManifest,
-	type ClaimTicket,
-	claim,
-	confirmDeposit,
-	type DepositKind,
-	type ExitTicket,
-	ExitUnconfirmedError,
-	ensurePermit2Allowance,
+	bridgeRefusalOf,
+	completionCount,
+	type DepositDraft,
+	decodeClaimTicket,
+	decodeDepositDraft,
+	decodeExitTicket,
+	encodeTicket,
 	exitTicketFromTx,
 	exitToL1,
+	finalFate,
 	finishWithdrawal,
-	type L1Ctx,
+	isExitWithdrawn,
+	L2_DONE,
 	l2UsdcBalance,
-	type OutboxReader,
+	openRequest,
 	outboxReader,
-	prepareDeposit,
-	type Reconciled,
-	reconcileDeposit,
-	registerBridgeContracts,
-	registerSponsor,
-	submitDeposit,
-	waitClaimable,
-	waitClaimFinalized,
+	payRequest,
+	syncMerchantList,
+	tokenRefusalOf,
 } from "@inference-money/bridge-core"
-import { type Address, erc20Abi, maxUint256 } from "viem"
-import { signingKeyFor } from "./deploy-l2"
-import { bridgeFeeJuice } from "./fee-juice"
-import { readManifest } from "./manifest"
-import { withOwnedTmpDir } from "./owned-tmp"
-import { TESTNET_MANIFEST, type TestnetContext, testnetContext } from "./testnet"
-import { openBridgeWallet, recordingNode, type SentTx } from "./wallet"
+import { aztecWorld, ethereumWorld, parseTour, SMOKE_AMOUNTS, type TourStep, totalSupplySlot, tourHeader } from "@inference-money/demo"
+import type { Hex } from "viem"
+import { tokenOf } from "./admin"
+import { usersTagOf } from "./demo"
+import { castClaim, castDeposit, enlist, type Log, type Player, sendPrivate, sponsored, withHeartbeat } from "./demo-flows"
+import { demoSigner, l1Ctx, usdcOf } from "./demo-l1"
+import type { L1Signer } from "./l1"
+import { type StateDir, withStateDir } from "./run-state"
+import { type ManifestRef, type Session, withSession } from "./session"
+import type { SentTx } from "./wallet"
 
-/** The bridge plus its exit tickets (tx hash, recipient, amount): enough to finish a withdrawal, and no secret. */
-export const SMOKE_STATE = join(homedir(), ".cache", "inference-money", "smoke", "testnet.json")
-/** One USDC per leg: the smoke's per-leg ceiling is 1.25. */
-export const LEG_AMOUNT = 1_000_000n
-const SPONSOR_TOP_UP_FLOOR = 100n * 10n ** 18n
-const PROVEN_TIMEOUT_MS = 90 * 60_000
-const CLAIMABLE = { pollMs: 10_000, attempts: 360 }
+export const SMOKE_STEPS = ["deposit", "claim", "request", "pay", "refund", "transfer-refused", "exit-refused", "exit", "withdraw"] as const
+export type SmokeStep = (typeof SMOKE_STEPS)[number]
 
-interface Smoke {
-	c: TestnetContext
-	m: BridgeManifest
-	node: AztecNode
-	wallet: EmbeddedWallet
-	sent: SentTx[]
-	owner: AztecAddress
-	l1: L1Ctx
-	outbox: OutboxReader
-	log: (m: string) => void
+const A = SMOKE_AMOUNTS
+const usdc = (v: bigint) => v.toString()
+
+/** Each step as the tour tells it; `hidden` names what its Aztec tx carries that nobody else can read. */
+const STORY: Record<SmokeStep, Pick<TourStep, "actor" | "action" | "to" | "amount"> & { hidden?: string[] }> = {
+	deposit: { actor: "A_demo", action: "deposit", to: "alice", amount: usdc(A.deposit) },
+	claim: { actor: "alice", action: "claim", to: "alice", amount: usdc(A.deposit), hidden: ["recipient"] },
+	request: { actor: "galactica", action: "request", to: "galactica", amount: usdc(A.deposit), hidden: ["recipient", "payer"] },
+	pay: { actor: "alice", action: "pay", to: "galactica", amount: usdc(A.deposit), hidden: ["payer", "recipient", "amount"] },
+	refund: { actor: "galactica", action: "refund", to: "alice", amount: usdc(A.refund), hidden: ["sender", "recipient", "amount"] },
+	"transfer-refused": { actor: "alice", action: "transfer", to: "bob", amount: usdc(A.refused) },
+	"exit-refused": { actor: "alice", action: "exit", to: "B_demo", amount: usdc(A.refused) },
+	exit: { actor: "alice", action: "exit", to: "A_demo", amount: usdc(A.exit), hidden: ["sender"] },
+	withdraw: { actor: "A_demo", action: "withdraw", to: "A_demo", amount: usdc(A.exit) },
 }
 
-interface StoredExit {
-	tx: string
-	recipient: Address
-	amount: string
-	/** The exit's own checks (its ticket, a private exit's payer) passed. */
-	verified: boolean
-	withdrawn: boolean
+type Balances = Record<"alice" | "galactica" | "aDemo" | "portal", bigint>
+
+/** What a run moves: alice pays all she deposited, and withdraws what galactica refunded. */
+export const EXPECTED_DELTAS: Balances = {
+	alice: A.refund - A.exit,
+	galactica: A.deposit - A.refund,
+	aDemo: A.exit - A.deposit,
+	portal: A.deposit - A.exit,
 }
 
+/** A step's L2 tx as it went to the node: enough to settle it after a crash, and to tell what the world sees. */
+export interface Journaled {
+	step: SmokeStep
+	hash: string
+	feePayer: string
+	expiresAt: string
+}
+
+/** Owner-only, per deployment: everything an interrupted run resumes from, the deposit's secret included. */
 export interface SmokeState {
-	/** Exits burned on any other bridge are discarded, never resumed. */
-	bridge: string
-	exits: Partial<Record<DepositKind, StoredExit>>
+	baseline: Record<keyof Balances, string>
+	done: SmokeStep[]
+	draft?: string
+	claim?: string
+	commitment?: string
+	exit?: string
+	/** The last L2 tx a step sent: a step that finds its own here settles it instead of sending again. */
+	sent?: Journaled
+	tour: Partial<Record<SmokeStep, TourStep>>
 }
 
-const KINDS = ["public", "private"] as const
+const STATE = "smoke.json"
+const WITHDRAWABLE = { timeoutMs: 3 * 60 * 60_000 }
 
-/** Stored exits not yet withdrawn; with none, a run clears the state and starts all four legs. */
-export const pendingExits = (state: SmokeState): DepositKind[] =>
-	KINDS.filter((k) => state.exits[k] !== undefined && !state.exits[k].withdrawn)
-
-/** A run passes only when both of its exits were recorded, verified and withdrawn. */
-export function assertSmokeComplete(state: SmokeState): void {
-	const missing = KINDS.filter((k) => !(state.exits[k]?.verified && state.exits[k]?.withdrawn))
-	if (missing.length > 0) {
-		throw new Error(`smoke incomplete: the ${missing.join(" and ")} exit did not complete; the next run starts all four legs again`)
-	}
+interface Run {
+	s: Session
+	dir: StateDir
+	state: SmokeState
+	cast: Record<"alice" | "bob" | "galactica", Player>
+	aDemo: L1Signer
+	bDemo: L1Signer
+	log: Log
 }
 
-/**
- * The stored state when it is this bridge's. Another deployment's is dropped only when none of its exits await
- * withdrawal: those tickets are the only record of how to finish them.
- */
-export function adoptState(stored: Partial<SmokeState> | undefined, bridge: string): SmokeState {
-	if (stored?.bridge === bridge && stored.exits) return stored as SmokeState
-	const pending = stored?.exits ? pendingExits(stored as SmokeState) : []
-	if (pending.length > 0) {
-		throw new Error(
-			`${SMOKE_STATE} holds a pending ${pending.join(" and ")} exit of bridge ${stored?.bridge}; finish it or move the file aside`,
+const save = (r: Run) => r.dir.write(STATE, r.state)
+const nextStep = (state: SmokeState) => SMOKE_STEPS.find((s) => !state.done.includes(s))
+const tokenAddress = (r: Run) => tokenOf(r.s.wallet, r.s.m).address
+const outbox = (r: Run) => outboxReader(r.aDemo.publicClient, r.s.m.l1.outbox)
+
+async function balances(r: Pick<Run, "s" | "cast" | "aDemo">): Promise<Balances> {
+	const priv = (p: Player) => l2UsdcBalance(r.s.wallet, r.s.m, p.address, "private")
+	const [alice, galactica, aDemo, portal] = await Promise.all([
+		priv(r.cast.alice),
+		priv(r.cast.galactica),
+		usdcOf(r.aDemo, r.s.m, r.aDemo.account.address),
+		usdcOf(r.aDemo, r.s.m, r.s.m.l1.portal),
+	])
+	return { alice, galactica, aDemo, portal }
+}
+
+/** The step's tour entry from the tx the journal recorded for it. */
+async function aztecEntry(r: Run, step: SmokeStep): Promise<TourStep> {
+	const j = r.state.sent
+	if (j?.step !== step) throw new Error(`the ${step} step ended without the journal seeing its tx`)
+	const effect = await r.s.node.getTxEffect(TxHash.fromString(j.hash))
+	if (!effect) throw new Error(`the node has no effect for the ${step} tx ${j.hash}`)
+	const { hidden = [], ...story } = STORY[step]
+	const committed = { feePayer: j.feePayer, expiresAt: BigInt(j.expiresAt) }
+	const world = aztecWorld(effect.data, committed, [await totalSupplySlot(r.s.m)], hidden)
+	const l2 = { txHash: j.hash, block: Number(effect.l2BlockNumber), expiration: Number(j.expiresAt) }
+	return { id: step, ...story, verdict: "settled", l2, world }
+}
+
+async function ethereumEntry(r: Run, step: SmokeStep, hash: Hex | undefined, fields: [string, string][]): Promise<TourStep> {
+	const entry: TourStep = { id: step, ...STORY[step], verdict: "settled", world: ethereumWorld(fields) }
+	if (!hash) return entry
+	const receipt = await r.aDemo.publicClient.getTransactionReceipt({ hash })
+	return { ...entry, l1: { txHash: hash, block: Number(receipt.blockNumber) } }
+}
+
+/** Runs `attempt`, which must be refused with `rule` before anything reaches the node. */
+async function refusedEntry(
+	r: Run,
+	step: SmokeStep,
+	rule: string,
+	ruleOf: (e: unknown) => string | undefined,
+	attempt: () => Promise<unknown>,
+) {
+	const before = r.s.sent.length
+	const outcome = await attempt().then(
+		() => "no refusal",
+		(e: unknown) => ruleOf(e) ?? `another failure: ${e instanceof Error ? e.message : String(e)}`,
+	)
+	if (outcome !== rule) throw new Error(`${step}: expected the ${rule} refusal, got ${outcome}`)
+	if (r.s.sent.length !== before) throw new Error(`${step}: the refused attempt reached the node`)
+	const entry: TourStep = { id: step, ...STORY[step], verdict: "refused", rule, world: [] }
+	return entry
+}
+
+const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
+	deposit: async (r) => {
+		const persist = (d: DepositDraft) => {
+			r.state.draft = encodeTicket("draft", d)
+			save(r)
+		}
+		const prior = r.state.draft ? decodeDepositDraft(r.state.draft) : undefined
+		const plan = { from: "alice", to: r.cast.alice.address, kind: "private", amount: A.deposit } as const
+		const t = await castDeposit(r.s, plan, prior, persist)
+		r.state.claim = encodeTicket("claim", t)
+		return ethereumEntry(r, "deposit", t.draft.l1TxHash, [
+			["depositor", t.depositor],
+			["amount", usdc(t.draft.intent.amount)],
+			["kind", "private"],
+			["secret hash", t.draft.secretHash.toString()],
+			["message index", t.leafIndex.toString()],
+		])
+	},
+	claim: async (r) => {
+		if (!r.state.claim) throw new Error("no claim ticket stored")
+		await castClaim(r.s, decodeClaimTicket(r.state.claim), r.log)
+		return aztecEntry(r, "claim")
+	},
+	request: async (r) => {
+		const { alice, galactica } = r.cast
+		const list = await syncMerchantList(r.s.node, tokenAddress(r))
+		const intent = { from: galactica.address, to: galactica.address, completer: alice.address }
+		const { commitment } = await openRequest(r.s.wallet, r.s.node, tokenAddress(r), intent, { list, fee: sponsored(r.s) })
+		r.state.commitment = commitment.toString()
+		return aztecEntry(r, "request")
+	},
+	pay: async (r) => {
+		if (!r.state.commitment) throw new Error("no request stored")
+		const commitment = Fr.fromHexString(r.state.commitment)
+		const list = await syncMerchantList(r.s.node, tokenAddress(r))
+		const p = { from: r.cast.alice.address, commitment, amount: A.deposit, kind: "private" } as const
+		await payRequest(r.s.gate, r.s.wallet, tokenAddress(r), p, { list, fee: sponsored(r.s) })
+		if ((await completionCount(r.s.node, tokenAddress(r), commitment)) !== 1)
+			throw new Error("the request is not completed exactly once")
+		return aztecEntry(r, "pay")
+	},
+	refund: async (r) => {
+		await sendPrivate(r.s, r.cast.galactica.address, r.cast.alice.address, A.refund)
+		return aztecEntry(r, "refund")
+	},
+	"transfer-refused": (r) => {
+		const { alice, bob } = r.cast
+		const transfer = tokenOf(r.s.wallet, r.s.m).methods.transfer_private_to_private!(alice.address, bob.address, A.refused, 0)
+		return refusedEntry(r, "transfer-refused", "transfer", tokenRefusalOf, () =>
+			transfer.simulate({ from: alice.address, fee: sponsored(r.s) }),
 		)
+	},
+	"exit-refused": (r) => {
+		// asMerchant skips the SDK's own destination check, so the refusal shown is the bridge's.
+		const e = {
+			kind: "private",
+			from: r.cast.alice.address,
+			recipientL1: r.bDemo.account.address,
+			amount: A.refused,
+			asMerchant: true,
+		} as const
+		return refusedEntry(r, "exit-refused", "exitDestination", bridgeRefusalOf, () => exitToL1(e, r.s.wallet, r.s.node, r.s.m))
+	},
+	exit: async (r) => {
+		const e = { kind: "private", from: r.cast.alice.address, recipientL1: r.aDemo.account.address, amount: A.exit } as const
+		r.state.exit = encodeTicket("exit", await exitToL1(e, r.s.wallet, r.s.node, r.s.m))
+		return aztecEntry(r, "exit")
+	},
+	withdraw: async (r) => {
+		if (!r.state.exit) throw new Error("no exit ticket stored")
+		const t = decodeExitTicket(r.state.exit)
+		let hash: Hex | undefined
+		if (await isExitWithdrawn(t, r.s.node, outbox(r))) r.log("  an earlier run completed the withdrawal; its L1 tx is not on record")
+		else hash = await finishWithdrawal(t, r.s.node, outbox(r), l1Ctx(r.aDemo), r.s.m, (st) => r.log(`  withdraw: ${st}`), WITHDRAWABLE)
+		return ethereumEntry(r, "withdraw", hash, [
+			["recipient", t.recipient],
+			["amount", usdc(t.amount)],
+		])
+	},
+}
+
+/**
+ * "landed" once checkpointed without a revert, as a step's own send waits; "gone" only on finalized evidence, so a
+ * step never runs twice. A tx this node lacks may sit in another's mempool until it expires: that, or a revert not yet
+ * finalized, fails the run until a rerun can tell.
+ */
+export async function fateOf(node: Session["node"], j: Journaled): Promise<"landed" | "gone"> {
+	const fate = await finalFate(node, j.hash, BigInt(j.expiresAt))
+	if (fate !== "unsettled") return fate
+	const hash = TxHash.fromString(j.hash)
+	if ((await node.getTxReceipt(hash)).isDropped()) {
+		const until = new Date(Number(j.expiresAt) * 1000).toISOString()
+		throw new Error(`The ${j.step} tx ${j.hash} is in no block, but may still land until ${until}: rerun after that.`)
 	}
-	return { bridge, exits: {} }
+	if ((await waitForTx(node, hash, { ...L2_DONE, dontThrowOnRevert: true })).hasExecutionSucceeded()) return "landed"
+	throw new Error(`The ${j.step} tx ${j.hash} reverted in a block a prune could still undo: rerun once it is finalized.`)
 }
 
-function readState(bridge: string, log: (m: string) => void): SmokeState {
-	const stored = existsSync(SMOKE_STATE) ? (JSON.parse(readFileSync(SMOKE_STATE, "utf8")) as Partial<SmokeState>) : undefined
-	const state = adoptState(stored, bridge)
-	if (stored && state.exits !== stored.exits)
-		log(`discarding completed smoke state of another deployment (${stored.bridge ?? "unbound"})`)
-	return state
+/**
+ * Settles a step whose tx went out before a crash: a landed one is done (an exit rebuilds its ticket from the tx), a
+ * gone one runs again. A request's commitment cannot be read back from its tx, so an unfinished request is opened anew.
+ */
+async function settleJournal(r: Run, step: SmokeStep): Promise<TourStep | undefined> {
+	const j = r.state.sent
+	if (j?.step !== step || !STORY[step].hidden || step === "request") return undefined
+	if ((await fateOf(r.s.node, j)) === "gone") {
+		delete r.state.sent
+		save(r)
+		return undefined
+	}
+	if (step === "exit") {
+		const t = await exitTicketFromTx(TxHash.fromString(j.hash), r.aDemo.account.address, A.exit, r.s.node, outbox(r), r.s.m)
+		if (typeof t === "string") throw new Error(`the exit ${j.hash} landed, but its withdrawal is ${t}`)
+		r.state.exit = encodeTicket("exit", t)
+	}
+	return aztecEntry(r, step)
 }
 
-function writeState(s: SmokeState): void {
-	mkdirSync(dirname(SMOKE_STATE), { recursive: true, mode: 0o700 })
-	const tmp = `${SMOKE_STATE}.${process.pid}.tmp`
-	writeFileSync(tmp, `${JSON.stringify(s, null, "\t")}\n`)
-	renameSync(tmp, SMOKE_STATE)
-}
-
-async function sentDuring<T>(s: Smoke, fn: () => Promise<T>): Promise<{ result: T; txs: SentTx[] }> {
-	const from = s.sent.length
-	const result = await fn()
-	return { result, txs: s.sent.slice(from) }
-}
-
-function assertSponsoredPayer(s: Smoke, txs: SentTx[], what: string): void {
-	if (txs.length !== 1 || txs[0]?.feePayer !== s.m.l2.sponsoredFpc) {
-		throw new Error(`${what}: expected one tx paid by the sponsor, got ${JSON.stringify(txs)}`)
+async function runSteps(r: Run): Promise<void> {
+	for (let step = nextStep(r.state); step; step = nextStep(r.state)) {
+		r.log(`${step}…`)
+		const entry = (await settleJournal(r, step)) ?? (await STEPS[step](r))
+		r.state.tour[step] = entry
+		r.state.done.push(step)
+		save(r)
+		r.log(`${step}: ${entry.verdict} ${entry.l2?.txHash ?? entry.l1?.txHash ?? entry.rule ?? ""}`)
 	}
 }
 
-const l2Balance = (s: Smoke, kind: DepositKind) => l2UsdcBalance(s.wallet, s.m, s.owner, kind)
+export function assertDeltas(baseline: SmokeState["baseline"], now: Balances): void {
+	const moved = (k: keyof Balances) => now[k] - BigInt(baseline[k])
+	const wrong = (Object.keys(EXPECTED_DELTAS) as (keyof Balances)[]).filter((k) => moved(k) !== EXPECTED_DELTAS[k])
+	if (wrong.length === 0) return
+	const lines = wrong.map((k) => `${k} moved ${moved(k)}, expected ${EXPECTED_DELTAS[k]}`)
+	throw new Error(`The run's deltas are off (as they are when anyone else moves the cast's funds meanwhile): ${lines.join("; ")}`)
+}
 
-const usdcOf = (s: Smoke, who: Address) =>
-	s.l1.publicClient.readContract({ address: s.m.l1.usdc, abi: erc20Abi, functionName: "balanceOf", args: [who] })
+const asStrings = (b: Balances) => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v.toString()])) as SmokeState["baseline"]
 
-async function ensureUsdc(s: Smoke, needed: bigint): Promise<void> {
-	const held = await usdcOf(s, s.l1.account)
-	if (held < needed) throw new Error(`${s.l1.account} holds ${held} USDC units; the smoke needs ${needed}. Fund it first.`)
-	const allowance = () =>
-		s.l1.publicClient.readContract({
-			address: s.m.l1.usdc,
-			abi: erc20Abi,
-			functionName: "allowance",
-			args: [s.l1.account, s.m.l1.permit2],
-		})
-	await ensurePermit2Allowance({
-		allowance,
-		approveMax: () =>
-			s.c.l1.walletClient.writeContract({
-				address: s.m.l1.usdc,
-				abi: erc20Abi,
-				functionName: "approve",
-				args: [s.m.l1.permit2, maxUint256],
-				account: s.c.l1.account,
-				chain: s.c.l1.chain,
+function writeTour(path: string, r: Run): void {
+	const tour = parseTour({ ...tourHeader(r.s.m), steps: SMOKE_STEPS.map((step) => r.state.tour[step]) })
+	writeFileSync(path, `${JSON.stringify(tour, null, "\t")}\n`)
+	r.log(`tour written to ${path}`)
+}
+
+async function startRun(s: Session, dir: StateDir, tag: string, log: Log): Promise<Run> {
+	const rpc = s.endpoints.l1RpcUrl
+	const aDemo = demoSigner(rpc, s.m, "alice")
+	await assertNetworkIdentity(s.node, aDemo.publicClient, s.m)
+	const cast = await enlist(s, ["alice", "bob", "galactica"] as const, tag)
+	const stored = dir.read<SmokeState>(STATE)
+	const state = stored ?? { baseline: asStrings(await balances({ s, cast, aDemo })), done: [], tour: {} }
+	if (stored) log(`resuming the run at ${nextStep(stored) ?? "its checks"}`)
+	const run: Run = { s, dir, state, cast, aDemo, bDemo: demoSigner(rpc, s.m, "bob"), log }
+	save(run)
+	return run
+}
+
+/**
+ * The acceptance run with the demo cast, keyless: A_demo deposits privately to alice, who claims, pays galactica's
+ * request, gets a refund, is refused a transfer to bob and an exit to B_demo, and withdraws to A_demo. Every step is
+ * journaled in an owner-only state dir per deployment, so an interrupted run resumes where it stopped, and the run
+ * asserts deltas from its own start, so a repeat run on the same cast passes too. `record` writes the tour.
+ */
+export function smoke(ref: ManifestRef, opts: { record?: string; log: Log }): Promise<void> {
+	const tag = usersTagOf(ref)
+	return withStateDir("smoke", ref.m.l2.bridge.address, async (dir) => {
+		let live: Run | undefined
+		const onSend = (tx: SentTx) => {
+			const step = live && nextStep(live.state)
+			if (!live || !step) return
+			live.state.sent = { step, hash: tx.hash, feePayer: tx.feePayer, expiresAt: tx.expiresAt.toString() }
+			save(live)
+		}
+		await withSession(ref, { payments: dir.paymentStore(), onSend }, (s) =>
+			withHeartbeat(s, async () => {
+				const run = await startRun(s, dir, tag, opts.log)
+				live = run
+				await runSteps(run)
+				live = undefined
+				try {
+					assertDeltas(run.state.baseline, await balances(run))
+				} finally {
+					dir.remove(STATE)
+					dir.remove("payments.json")
+				}
+				if (opts.record) writeTour(opts.record, run)
+				opts.log("smoke passed: every step settled or was refused as expected, and the balances moved as they should")
 			}),
-		waitReceipt: (hash) => s.l1.publicClient.waitForTransactionReceipt({ hash }),
-		needed,
-	})
-}
-
-export interface SponsorTopUp {
-	node: AztecNode
-	wallet: EmbeddedWallet
-	/** Sends the public claim; any account may. */
-	from: AztecAddress
-	sponsor: AztecAddress
-	fee?: { paymentMethod: FeePaymentMethod }
-	bridge: Omit<Parameters<typeof bridgeFeeJuice>[0], "node" | "to" | "log">
-	log: (m: string) => void
-}
-
-/** Bridges a faucet mint to the sponsor and claims it publicly: the private legs must not find it drained. */
-export async function topUpSponsor(p: SponsorTopUp): Promise<bigint> {
-	const minted = await bridgeFeeJuice({ ...p.bridge, node: p.node, to: p.sponsor, log: p.log })
-	const claimCall = FeeJuiceContract.at(p.wallet).methods.claim(
-		p.sponsor,
-		minted.claimAmount,
-		minted.claimSecret,
-		new Fr(minted.messageLeafIndex),
-	)
-	await claimCall.send({ from: p.from, fee: p.fee })
-	const balance = await getFeeJuiceBalance(p.sponsor, p.node)
-	if (balance < SPONSOR_TOP_UP_FLOOR) throw new Error(`the sponsor holds ${balance} FJ after the top-up`)
-	p.log(`sponsor ${p.sponsor} topped up to ${balance}`)
-	return balance
-}
-
-async function depositAndClaim(s: Smoke, kind: DepositKind): Promise<void> {
-	const tip = (await s.l1.publicClient.getBlock()).timestamp
-	const d = await prepareDeposit({ amount: LEG_AMOUNT, recipient: s.owner, kind }, s.m, () => tip)
-	await submitDeposit(d, s.l1, s.m, s.node)
-	const t = await confirmDeposit(d, s.l1, s.m)
-	s.log(`${kind} deposit mined (${d.l1TxHash}); waiting until claimable`)
-	await waitClaimable(t, s.node, s.wallet, s.m, s.owner, (w) => s.log(`  ${w}`), CLAIMABLE)
-	const before = await l2Balance(s, kind)
-	const { result, txs } = await sentDuring(s, () => claim(t, s.node, s.wallet, s.m, { from: s.owner }))
-	if (result !== "claimed") throw new Error(`${kind} claim returned ${result}`)
-	if (kind === "private") assertSponsoredPayer(s, txs, "private claim")
-	const delta = (await l2Balance(s, kind)) - before
-	if (delta !== LEG_AMOUNT) throw new Error(`${kind} claim moved ${delta}, expected ${LEG_AMOUNT}`)
-	s.log(`leg ${kind} deposit → claim: +${delta} on L2 (${txs[0]?.hash}, payer ${txs[0]?.feePayer}); waiting until final`)
-	await keepUntilFinal(t, {
-		finality: (x) => waitClaimFinalized(x, s.node, s.m),
-		reconcile: (x) => reconcileDeposit(x.draft, s.l1, s.m),
-		claimAgain: async (x) => {
-			await waitClaimable(x, s.node, s.wallet, s.m, s.owner, (w) => s.log(`  ${w}`), CLAIMABLE)
-			await claim(x, s.node, s.wallet, s.m, { from: s.owner })
-		},
-		pause: (ms) => new Promise((r) => setTimeout(r, ms)),
-		log: s.log,
-	})
-}
-
-export interface ReclaimSteps {
-	finality(t: ClaimTicket): Promise<"finalized" | "dropped">
-	reconcile(t: ClaimTicket): Promise<Reconciled>
-	claimAgain(t: ClaimTicket): Promise<void>
-	pause(ms: number): Promise<void>
-	log(line: string): void
-}
-
-/**
- * A checkpointed claim can still be pruned, so its ticket, the only copy of the secret, is kept until the claim is
- * final. Only a deposit proven never to have reached L1 gives it up; every other failure is retried.
- */
-export async function keepUntilFinal(first: ClaimTicket, steps: ReclaimSteps): Promise<void> {
-	let t = first
-	while ((await steps.finality(t)) === "dropped") {
-		steps.log("  the claim was pruned before it was final; claiming again")
-		t = await reclaim(t, steps)
-	}
-}
-
-async function reclaim(t: ClaimTicket, steps: ReclaimSteps): Promise<ClaimTicket> {
-	for (;;) {
-		const r = await steps.reconcile(t)
-		if (r === "not-deposited") throw new Error("the pruned claim's deposit never reached L1 and its permit expired")
-		if (r === "pending") steps.log("  the deposit is not readable on L1 right now; retrying in a minute")
-		else {
-			try {
-				await steps.claimAgain(r)
-				return r
-			} catch (e) {
-				steps.log(`  claiming again failed (${e instanceof Error ? e.message : String(e)}); retrying in a minute`)
-			}
-		}
-		await steps.pause(60_000)
-	}
-}
-
-/** The burn is stored before any check, so a failed check still leaves its withdrawal resumable. */
-async function exitLeg(s: Smoke, kind: DepositKind, state: SmokeState): Promise<void> {
-	const e = { kind, from: s.owner, recipientL1: s.l1.account, amount: LEG_AMOUNT }
-	const from = s.sent.length
-	const sent = await exitToL1(e, s.wallet, s.node, s.m).then(
-		(t) => ({ tx: t.l2TxHash, failure: undefined }),
-		(x: unknown) => {
-			if (x instanceof ExitUnconfirmedError) return { tx: x.l2TxHash, failure: x }
-			throw x
-		},
-	)
-	const stored: StoredExit = {
-		tx: sent.tx.toString(),
-		recipient: e.recipientL1,
-		amount: e.amount.toString(),
-		verified: false,
-		withdrawn: false,
-	}
-	state.exits[kind] = stored
-	writeState(state)
-	if (sent.failure) throw sent.failure
-	if (kind === "private") assertSponsoredPayer(s, s.sent.slice(from), "private exit")
-	stored.verified = true
-	writeState(state)
-	s.log(`${kind} exit sent (${sent.tx}); ticket stored`)
-}
-
-async function withdrawLeg(s: Smoke, kind: DepositKind, state: SmokeState): Promise<void> {
-	const stored = state.exits[kind]
-	if (!stored || stored.withdrawn) return
-	const t = await exitTicketFromTx(TxHash.fromString(stored.tx), stored.recipient, BigInt(stored.amount), s.node, s.outbox, s.m)
-	if (t === "not-found") throw new Error(`${kind} exit ${stored.tx} holds no matching message`)
-	if (t !== "all-consumed") {
-		const before = await usdcOf(s, stored.recipient)
-		await finishWithdrawal(t as ExitTicket, s.node, s.outbox, s.l1, s.m, (st) => s.log(`  ${kind} withdraw: ${st}`), {
-			timeoutMs: PROVEN_TIMEOUT_MS,
-		})
-		const delta = (await usdcOf(s, stored.recipient)) - before
-		if (delta !== BigInt(stored.amount)) throw new Error(`${kind} withdraw paid ${delta}, expected ${stored.amount}`)
-		s.log(`leg ${kind} exit → withdraw: +${delta} on L1`)
-	}
-	stored.withdrawn = true
-	writeState(state)
-}
-
-async function freshLegs(s: Smoke, state: SmokeState): Promise<void> {
-	await ensureUsdc(s, 2n * LEG_AMOUNT)
-	await depositAndClaim(s, "public")
-	await topUpSponsor({
-		node: s.node,
-		wallet: s.wallet,
-		from: s.owner,
-		sponsor: AztecAddress.fromStringUnsafe(s.m.l2.sponsoredFpc as string),
-		bridge: { l1RpcUrl: s.c.l1RpcUrl, l1PrivateKey: s.c.secrets.l1PrivateKey, l1ChainId: s.c.pins.l1ChainId },
-		log: s.log,
-	})
-	await depositAndClaim(s, "private")
-	for (const kind of KINDS) await exitLeg(s, kind, state)
-}
-
-async function runLegs(s: Smoke): Promise<void> {
-	await assertNetworkIdentity(s.node, s.l1.publicClient, s.m)
-	let state = readState(s.m.l2.bridge.address, s.log)
-	const pending = pendingExits(state)
-	if (pending.length > 0) {
-		s.log(`resuming stored exits: ${pending.join(", ")}`)
-	} else {
-		state = { bridge: s.m.l2.bridge.address, exits: {} }
-		writeState(state)
-		await freshLegs(s, state)
-	}
-	for (const kind of KINDS) await withdrawLeg(s, kind, state)
-	assertSmokeComplete(state)
-}
-
-/**
- * Four legs against the live testnet with real proofs: public and private deposit → claim, then public and private
- * exit → L1 withdraw, each with its exact delta asserted and each private tx's committed payer checked against the
- * sponsor. Exit tickets are stored as they are sent, so a rerun finishes pending withdrawals instead of repeating legs;
- * it passes only if both of its exits completed.
- */
-export async function smokeTestnet(log: (m: string) => void): Promise<void> {
-	const c = testnetContext()
-	const m = readManifest(TESTNET_MANIFEST)
-	const node = createAztecNodeClient(m.l2.nodeUrl)
-	const sent: SentTx[] = []
-	await withOwnedTmpDir(async () => {
-		const wallet = await openBridgeWallet(recordingNode(node, sent), { prove: true })
-		try {
-			await registerSponsor(wallet, m)
-			await registerBridgeContracts(wallet, m)
-			const secret = Fr.fromHexString(c.secrets.aztecSecretKey)
-			const owner = (await wallet.createSchnorrAccount(secret, Fr.ZERO, signingKeyFor(secret))).address
-			const l1: L1Ctx = { publicClient: c.l1.publicClient, walletClient: c.l1.walletClient, account: c.l1.account.address }
-			await runLegs({ c, m, node, wallet, sent, owner, l1, outbox: outboxReader(c.l1.publicClient, m.l1.outbox), log })
-		} finally {
-			await wallet.stop()
-		}
+		)
 	})
 }
