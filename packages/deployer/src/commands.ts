@@ -146,7 +146,7 @@ export const HANDLERS: Record<Command, Handler> = {
 	},
 	async export(inv) {
 		const out = flag(inv, "out") as string
-		for (const file of exportBundle(loadManifest(inv.args[0] as string).m, out)) log(`wrote ${out}/${file}`)
+		for (const file of await exportBundle(loadManifest(inv.args[0] as string).m, out)) log(`wrote ${out}/${file}`)
 		return 0
 	},
 	async "demo setup"(inv) {

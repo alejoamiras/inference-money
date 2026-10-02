@@ -21,7 +21,7 @@ import { type Abi, type Address, erc20Abi, type Hex, type PublicClient } from "v
 import { type BridgeEvmArtifacts, maskImmutables } from "./evm"
 import type { Check } from "./preflight"
 import { standardContractAddresses } from "./standard"
-import { type DelayState, entryDelay, guardianDelay, layoutSlot, publicReader, readRoles } from "./token-reads"
+import { type DelayState, entryDelay, guardianDelay, layoutSlot, publicReader, readGuardian, readRoles } from "./token-reads"
 
 const check = (name: string, ok: boolean, detail: string): Check => ({ name, ok, detail })
 const warn = (name: string, detail: string): Check => ({ name, ok: true, warn: true, detail })
@@ -128,16 +128,23 @@ export type Handover = "complete" | { pendingTo: string }
 
 const ZERO = Fr.ZERO.toString()
 
-/** Both admin roles, the bridge's ownership and the merchant admin, against the expected handover state. */
+/** Both admin roles, the bridge's ownership and the merchant admin, against the expected handover state; the guardian too. */
 async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handover): Promise<Check[]> {
 	const { owner, pendingOwner, admin, pendingAdmin } = await readRoles(node, m)
 	const deployer = m.l2.bridge.deployer
+	const guardian = await readGuardian(node, AztecAddress.fromStringUnsafe(m.l2.token.address))
+	const notGuardian = check(
+		"no deploy key is the guardian, now or scheduled",
+		!same(guardian.current, deployer) && !same(guardian.scheduled, deployer),
+		`${guardian.current}, then ${guardian.scheduled}`,
+	)
 	if (handover !== "complete") {
 		return [
 			pin("bridge owner == deployer (handover proposed)", owner, deployer),
 			pin("bridge pending owner == admin", pendingOwner, handover.pendingTo),
 			pin("merchant admin == deployer (handover proposed)", admin, deployer),
 			pin("pending merchant admin == admin", pendingAdmin, handover.pendingTo),
+			notGuardian,
 		]
 	}
 	const want = m.l2.admin ?? "an accepted admin (none in the manifest)"
@@ -147,6 +154,7 @@ async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handove
 		pin("merchant admin == admin", admin, want),
 		pin("no merchant admin handover pending", pendingAdmin, ZERO),
 		check("no deploy key keeps a role", !same(m.l2.admin, deployer), `admin ${m.l2.admin}`),
+		notGuardian,
 		...(m.l2.interimAdmin ? [warn("admin is an interim (disposable) key", "switch to the owner's admin, then destroy it")] : []),
 	]
 }
