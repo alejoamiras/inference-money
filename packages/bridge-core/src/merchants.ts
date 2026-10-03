@@ -70,7 +70,6 @@ export async function contractEvent(artifact: ContractArtifact, name: string): P
 	return { eventSelector: await EventSelector.fromSignature(signature), abiType, fieldNames: abiType.fields.map((f) => f.name) }
 }
 
-/** A token event's decoding definition. */
 export const tokenEvent = (name: string): Promise<EventMetadataDefinition> => contractEvent(tokenArtifact, name)
 
 async function listedAccounts(node: MerchantNode, token: AztecAddress, block: number): Promise<AztecAddress[]> {

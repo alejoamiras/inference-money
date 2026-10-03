@@ -66,7 +66,7 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
     );
 
     /// @notice `amount` is the reserve's debit and the message's amount, not what the recipient nets under a token fee.
-    /// `callerOnL1` is the caller the message was hashed with: zero means anyone could execute it, never the tx sender.
+    /// `callerOnL1` is the caller the message was hashed with: zero when anyone could execute it.
     event Withdraw(address indexed recipient, uint256 amount, address callerOnL1);
 
     IRegistry public registry;

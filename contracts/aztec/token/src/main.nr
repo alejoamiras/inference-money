@@ -89,7 +89,6 @@ pub contract Token {
         effective_at: u64,
     }
 
-    // Changes to the list's roles and its delay setting, one event each.
     #[event]
     struct MerchantAdminProposed {
         pending_admin: AztecAddress,
