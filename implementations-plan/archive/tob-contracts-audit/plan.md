@@ -8,8 +8,29 @@ claude_model: opus
 codex: default model (GPT-6 Astra), high effort
 harden: none
 baseline: be70fec
-status: approved by the owner 2026-10-03; implementing
+status: completed 2026-10-03 (PRs #22, #23 and the close-out on top)
 ---
+
+## Outcome
+
+**2026-10-03: completed; the work lands when the owner merges the stack.**
+
+- **PR #22, arc 1, no deployed-code change:** the exits' L1 payout rule in the static guard (F-1), six refusal tests (F-2), the tests that kill the surviving L1 mutants (F-6), and USDC's controls documented (F-4).
+- **PR #23, arc 2, needs the redeploy:**
+  - events for every admin change and L1 payout, asserted in forge and on a local network (F-3);
+  - the router's transient guard (F-7);
+  - Slither in CI with the audit's results fixed (F-5).
+- **The docs-only close-out** sits on top.
+
+All seven findings are fixed and nothing was dropped. Three changes from the plan:
+
+- **Slither:** the arc 2 review found that a path filter hides `src/` findings that run through a library. The filter is gone, and the owner excluded `pragma`, which then fired on the dependencies' own ranges.
+- **`PortalInitialized`:** it indexes `underlying`, which Slither's `unindexed-event-address` required.
+- **Codex loops:** arc 1 converged in round 3, arc 2 in round 2, and the cross-arc pass in round 2.
+
+The testnet deployment stays stale until the owner's keyed redeploy, tracked in `follow-ups.md`.
+
+**This plan is closed. Its `/goal` and `/loop` seeds below are retired: never run them.**
 
 # Fix the Trail of Bits contracts audit findings
 
