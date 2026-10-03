@@ -50,7 +50,7 @@ The 2026-10-03 audit of the contracts with the Trail of Bits methodology (Slithe
 
 ### Arc 1: `tob-tests` (branch `worktree-tob-contracts-audit`), no deployed-code change
 
-#### Phase 1: the exits' payout rule (F-1)
+#### Phase 1: the exits' payout rule (F-1) ✓
 
 In `contracts/aztec/scripts/check-sole-consumer.sh`:
 
