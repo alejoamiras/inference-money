@@ -21,7 +21,7 @@ import { computeSecretHash } from "@aztec-labs/stdlib/hash"
 export const DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET = 3140354885
 
 /**
- * `salt` MUST be a fresh `Fr.random()`. The secret hash and the amount are public on L1, so a guessable salt lets an
+ * `salt` MUST be a fresh `randomSecret()`. The secret hash and the amount are public on L1, so a guessable salt lets an
  * observer brute-force `(salt, recipient)` and learn the recipient before the claim.
  */
 export const deriveClaimSecret = (salt: Fr, recipient: AztecAddress): Fr =>

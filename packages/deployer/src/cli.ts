@@ -7,11 +7,22 @@ import { holdSecrets, secretNeedles } from "./secrets"
  * environment, so the handlers load only once the secrets are held.
  */
 async function main(): Promise<number> {
+	// Bun loads a working-directory `.env` into every process it starts, before any code runs; only this flag stops it.
+	if (!process.execArgv.includes("--no-env-file")) {
+		console.error("start the CLI with `bun run bridge` (bun --no-env-file): a .env file in the working directory must never reach it")
+		return 2
+	}
 	let inv: Invocation
 	try {
 		inv = parseInvocation(process.argv.slice(2))
 	} catch (e) {
 		console.error(e instanceof Error ? e.message : USAGE)
+		return 2
+	}
+	// The Aztec SDK reads SEED when it loads, and then draws every random value, its own secrets and nonces included,
+	// from a 32-bit counter.
+	if (process.env.SEED) {
+		console.error("SEED is set, which makes the Aztec SDK's randomness predictable: unset it and retry")
 		return 2
 	}
 	const needles = secretNeedles()

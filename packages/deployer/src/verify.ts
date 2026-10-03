@@ -128,14 +128,17 @@ export type Handover = "complete" | { pendingTo: string }
 
 const ZERO = Fr.ZERO.toString()
 
-/** Both admin roles, the bridge's ownership and the merchant admin, against the expected handover state; the guardian too. */
-async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handover): Promise<Check[]> {
+/**
+ * Both admin roles, the bridge's ownership and the merchant admin, against the expected handover state, and the guardian
+ * against `guardianWant`. A deploy key can schedule a guardian before the handover, and the handover leaves it in place.
+ */
+async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handover, guardianWant: string): Promise<Check[]> {
 	const { owner, pendingOwner, admin, pendingAdmin } = await readRoles(node, m)
 	const deployer = m.l2.bridge.deployer
 	const guardian = await readGuardian(node, AztecAddress.fromStringUnsafe(m.l2.token.address))
-	const notGuardian = check(
-		"no deploy key is the guardian, now or scheduled",
-		!same(guardian.current, deployer) && !same(guardian.scheduled, deployer),
+	const guardianAsExpected = check(
+		"guardian == the expected one (none unless named), now and scheduled",
+		same(guardian.current, guardianWant) && same(guardian.scheduled, guardianWant),
 		`${guardian.current}, then ${guardian.scheduled}`,
 	)
 	if (handover !== "complete") {
@@ -144,7 +147,7 @@ async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handove
 			pin("bridge pending owner == admin", pendingOwner, handover.pendingTo),
 			pin("merchant admin == deployer (handover proposed)", admin, deployer),
 			pin("pending merchant admin == admin", pendingAdmin, handover.pendingTo),
-			notGuardian,
+			guardianAsExpected,
 		]
 	}
 	const want = m.l2.admin ?? "an accepted admin (none in the manifest)"
@@ -154,7 +157,7 @@ async function verifyRoles(node: AztecNode, m: BridgeManifest, handover: Handove
 		pin("merchant admin == admin", admin, want),
 		pin("no merchant admin handover pending", pendingAdmin, ZERO),
 		check("no deploy key keeps a role", !same(m.l2.admin, deployer), `admin ${m.l2.admin}`),
-		notGuardian,
+		guardianAsExpected,
 		...(m.l2.interimAdmin ? [warn("admin is an interim (disposable) key", "switch to the owner's admin, then destroy it")] : []),
 	]
 }
@@ -222,6 +225,7 @@ async function verifyEnvironment(node: AztecNode, m: BridgeManifest): Promise<Ch
  * Every read-back the manifest depends on, keyless: L1 bytecode against a fresh forge build, L1 and L2 wiring, the admin
  * roles in their expected handover state, the delays, backing, the demo-cast rule, class ids, network identity and the
  * sponsor. A read that throws is a failed check, never a skipped one. It trusts the endpoints `node` and `l1` read from.
+ * `guardian` is the merchant guardian the caller expects, in office and scheduled: none by default.
  */
 export async function verifyDeployment(
 	m: BridgeManifest,
@@ -229,6 +233,7 @@ export async function verifyDeployment(
 	l1: PublicClient,
 	node: AztecNode,
 	handover: Handover = "complete",
+	guardian: string = ZERO,
 ): Promise<Check[]> {
 	const identity = await attempt("network identity", async () => {
 		await assertNetworkIdentity(node, l1, m)
@@ -241,7 +246,7 @@ export async function verifyDeployment(
 		...(await attempt("L1", () => verifyL1(l1, evm, m))),
 		...(await attempt("L2 instances", () => verifyInstances(node, m))),
 		...(await attempt("L2 wiring", () => verifyL2Wiring(node, m))),
-		...(await attempt("admin roles", () => verifyRoles(node, m, handover))),
+		...(await attempt("admin roles", () => verifyRoles(node, m, handover, guardian))),
 		...(await attempt("merchant delays", () => verifyDelays(node, m))),
 		...(await attempt("backing", () => verifyBacking(node, l1, m))),
 		...(await attempt("demo cast", () => verifyDemoCast(node, m))),

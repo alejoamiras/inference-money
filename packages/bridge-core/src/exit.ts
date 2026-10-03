@@ -3,7 +3,7 @@ import { SetPublicAuthwitContractInteraction } from "@aztec-labs/aztec.js/author
 import { BatchCall, Contract, NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { waitForTx } from "@aztec-labs/aztec.js/node"
-import type { TxHash } from "@aztec-labs/aztec.js/tx"
+import { type TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { computeL2ToL1MessageHash } from "@aztec-labs/stdlib/hash"
 import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
@@ -104,13 +104,20 @@ export class ExitUnconfirmedError extends Error {
 }
 
 /**
- * The exit tx reverted, so its burn and withdraw message were discarded with the rest of its app logic: there is
- * nothing to finish, and exiting again is safe.
+ * The exit tx reverted, so its burn and withdraw message were discarded with the rest of its app logic. Once `final`,
+ * there is nothing to finish and exiting again is safe. Before that a prune can re-include the tx, which may then burn:
+ * keep its hash and read {@link locateWithdrawal} again, and an exit sent meanwhile may land beside it.
  */
 export class ExitRevertedError extends Error {
-	constructor(readonly l2TxHash: TxHash) {
+	constructor(
+		readonly l2TxHash: TxHash,
+		readonly final: boolean,
+	) {
+		const rejected = `The withdrawal ${l2TxHash} was rejected on Aztec`
 		super(
-			`The withdrawal ${l2TxHash} was rejected on Aztec, so nothing was burned. If the bridge is paused, wait for it to resume; otherwise try again.`,
+			final
+				? `${rejected}, so nothing was burned. If the bridge is paused, wait for it to resume; otherwise try again.`
+				: `${rejected}, and nothing is burned so far. A reorg can still bring it back: keep this hash, and wait until it is final before trying again.`,
 		)
 		this.name = "ExitRevertedError"
 	}
@@ -133,7 +140,7 @@ async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: R
  * entry batched into the same tx for a public one. A sponsor that cannot pay is a {@link SponsorUnavailableError} with
  * nothing burned. The send returns its hash before any wait, so every failure after it, the wait for `opts.wait`
  * included, is an {@link ExitUnconfirmedError} carrying that hash; only a checkpointed revert with no withdraw message
- * in its effect, which burned nothing, is an {@link ExitRevertedError}.
+ * in its effect, which burned nothing so far, is an {@link ExitRevertedError}.
  */
 export async function exitToL1(
 	e: ExitIntent,
@@ -154,13 +161,17 @@ export async function exitToL1(
 	const located = await locateWithdrawal(e.recipientL1, e.amount, txHash, node, m, opts.wait).catch((cause: unknown) => {
 		throw new ExitUnconfirmedError(txHash, e.recipientL1, e.amount, { cause })
 	})
-	if (located === "reverted") throw new ExitRevertedError(txHash)
+	if (typeof located === "string") throw new ExitRevertedError(txHash, located === "reverted")
 	return located
 }
 
+/** A revert that burned nothing: "reverted" in a finalized block; before that a prune can still re-include the tx. */
+export type WithdrawalRevert = "reverted" | "reverted-unfinalized"
+
 /**
- * The withdrawal `txHash` emitted to `recipient` for `amount`, once it reaches `wait` (a checkpoint by default), or
- * "reverted" when the tx reverted without it. Exits and returns emit the same message, so both locate it here.
+ * The withdrawal `txHash` emitted to `recipient` for `amount`, once it reaches `wait` (a checkpoint by default), or a
+ * {@link WithdrawalRevert} when the tx reverted without it. Exits and returns emit the same message, so both locate it
+ * here.
  */
 export async function locateWithdrawal(
 	recipient: Address,
@@ -169,10 +180,10 @@ export async function locateWithdrawal(
 	node: ExitNode,
 	m: BridgeManifest,
 	wait: L2Wait = L2_DONE,
-): Promise<ExitTicket | "reverted"> {
+): Promise<ExitTicket | WithdrawalRevert> {
 	// Only `getTxReceipt` is read.
 	let receipt = await waitForTx(node as AztecNode, txHash, { ...wait, dontThrowOnRevert: true })
-	// "reverted" lets the caller forget the burn, so a revert seen at a proposed block must hold at a checkpoint too.
+	// A proposed block is the cheapest to undo, so a revert is reported from a checkpoint at the earliest.
 	if (receipt.hasExecutionReverted() && tipOf(wait) === "proposed") {
 		receipt = await waitForTx(node as AztecNode, txHash, { ...L2_DONE, dontThrowOnRevert: true })
 	}
@@ -181,7 +192,9 @@ export async function locateWithdrawal(
 	// A revert proves nothing burned only alongside an effect that lacks the message: setup effects survive a revert.
 	if (!found) throw new Error(`Exit ${txHash} is mined, but the node returned no effect for it.`)
 	const [index, ...rest] = found
-	if (index === undefined && receipt.hasExecutionReverted()) return "reverted"
+	if (index === undefined && receipt.hasExecutionReverted()) {
+		return receipt.status === TxStatus.FINALIZED ? "reverted" : "reverted-unfinalized"
+	}
 	if (index === undefined || rest.length > 0) throw new Error(`Exit ${txHash} mined without exactly one matching withdraw message.`)
 	return { l2TxHash: txHash, recipient, amount, messageHash: expected.toString() as Hex, messageIndexInTx: index }
 }

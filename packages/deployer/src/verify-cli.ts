@@ -11,6 +11,8 @@ export interface VerifyFlags {
 	tour?: string | undefined
 	node?: string | undefined
 	l1Rpc?: string | undefined
+	/** The guardian the deployment should have, in office and scheduled; none when absent. */
+	guardian?: string | undefined
 	log: (m: string) => void
 }
 
@@ -29,9 +31,10 @@ function tourChecks(path: string, ref: ManifestRef): Check[] {
  */
 export async function verifyManifest(ref: ManifestRef, flags: VerifyFlags): Promise<number> {
 	const { nodeUrl, l1RpcUrl } = endpointsFor(ref, { node: flags.node, l1Rpc: flags.l1Rpc })
-	flags.log(`verifying ${ref.path} through node ${nodeUrl}`)
+	// The origin only: a provider URL carries its API key in the path or the query.
+	flags.log(`verifying ${ref.path} through node ${new URL(nodeUrl).origin}`)
 	const l1 = createPublicClient({ transport: http(l1RpcUrl) }) as PublicClient
-	const checks = await verifyDeployment(ref.m, buildFresh(), l1, createAztecNodeClient(nodeUrl))
+	const checks = await verifyDeployment(ref.m, buildFresh(), l1, createAztecNodeClient(nodeUrl), "complete", flags.guardian)
 	if (flags.tour) checks.push(...tourChecks(flags.tour, ref))
 	try {
 		assertAllPass(checks, flags.log)

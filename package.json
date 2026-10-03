@@ -10,8 +10,8 @@
 		"contracts/aztec"
 	],
 	"scripts": {
-		"bridge": "bun packages/deployer/src/cli.ts",
-		"deploy:local": "bun packages/deployer/src/cli.ts deploy local",
+		"bridge": "bun --no-env-file packages/deployer/src/cli.ts",
+		"deploy:local": "bun --no-env-file packages/deployer/src/cli.ts deploy local",
 		"lint": "biome check . && sort-package-json --check package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json' && bun run lint:shell",
 		"lint:actions": "actionlint",
 		"lint:fix": "biome check --write . && sort-package-json package.json 'packages/*/package.json' 'apps/*/package.json' 'contracts/*/package.json'",
@@ -20,8 +20,8 @@
 		"net:status": "bun packages/local-network/src/cli.ts status",
 		"net:up": "bun packages/local-network/src/cli.ts up",
 		"prepare": "husky",
-		"probe:testnet": "bun packages/deployer/src/cli.ts probe testnet",
-		"secrets:scan": "bun packages/deployer/src/cli.ts scan secrets",
+		"probe:testnet": "bun --no-env-file packages/deployer/src/cli.ts probe testnet",
+		"secrets:scan": "bun --no-env-file packages/deployer/src/cli.ts scan secrets",
 		"test": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present test",
 		"test:e2e": "bun run --cwd apps/showcase test:e2e",
 		"test:e2e:presto": "bun run --cwd apps/showcase test:e2e:presto",
@@ -32,7 +32,7 @@
 		"test:integration": "bun run --cwd packages/integration test:integration",
 		"test:noir": "bun run --cwd contracts/aztec test:noir",
 		"typecheck": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present typecheck",
-		"verify:local": "bun packages/deployer/src/cli.ts verify local"
+		"verify:local": "bun --no-env-file packages/deployer/src/cli.ts verify local"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
@@ -41,7 +41,8 @@
 		"husky": "9.1.7",
 		"lint-staged": "17.5.1",
 		"sort-package-json": "4.0.0",
-		"typescript": "6.0.3"
+		"typescript": "6.0.3",
+		"wrangler": "4.138.0"
 	},
 	"packageManager": "bun@1.4.0",
 	"engines": {

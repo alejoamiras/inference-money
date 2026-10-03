@@ -6,7 +6,7 @@ import { getAddress } from "viem"
 import { messageNullifier } from "./claim"
 import { type ClaimTicket, prepareDeposit } from "./deposit"
 import { type ExitNode, expectedExitMessage } from "./exit"
-import { depositFate, type FateNode, ReturnRevertedError, ReturnUnconfirmedError, returnDeposit } from "./return"
+import { depositFate, type FateNode, ReturnUnconfirmedError, returnDeposit } from "./return"
 import { fakeWallet } from "./test/fake-wallet"
 import { a, f, MANIFEST as M, receiptAt } from "./test/fixtures"
 
@@ -50,7 +50,7 @@ describe("returnDeposit", () => {
 				M,
 				{ from: recipient },
 			),
-		).rejects.toBeInstanceOf(ReturnRevertedError)
+		).rejects.toMatchObject({ name: "ReturnRevertedError", final: false })
 		expect(w.sent[0]).toMatchObject({ calls: ["return_deposit_public"], feePayer: undefined })
 
 		const unreadable = effectNode([payout], () => Promise.reject(new Error("503")))

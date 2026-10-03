@@ -1,5 +1,5 @@
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
-import { Fr } from "@aztec-labs/aztec.js/fields"
+import type { Fr } from "@aztec-labs/aztec.js/fields"
 import { computeSecretHash } from "@aztec-labs/stdlib/hash"
 import { type Address, getAbiItem, type Hex, isAddressEqual, type Log, type PublicClient, pad, parseEventLogs } from "viem"
 import { PERMIT2_DEPOSIT_ROUTER_ABI } from "./abi"
@@ -11,6 +11,7 @@ import { type MerchantList, merchantStatus } from "./merchants"
 import { assertReaderChain, assertSigningContext, NetworkMismatchError } from "./network"
 import { assertBridgeLive, type PauseSource } from "./pause"
 import { type DepositTypedData, type DepositWitness, depositPermitTypedData, PERMIT_DEADLINE_SECONDS, randomPermitNonce } from "./permit2"
+import { randomSecret } from "./random"
 import { type L1Ctx, MAX_L2_AMOUNT, type StageSink, sendChain, signerOf, withGasHeadroom } from "./types"
 
 export type DepositKind = "public" | "private"
@@ -86,7 +87,7 @@ export async function assertDepositIntent(i: DepositIntent): Promise<void> {
 export async function prepareDeposit(i: DepositIntent, m: BridgeManifest, now: () => bigint): Promise<DepositDraft> {
 	await assertDepositIntent(i)
 	const isPrivate = i.kind === "private"
-	const secretOrSalt = Fr.random()
+	const secretOrSalt = randomSecret()
 	const secretHash = await computeSecretHash(isPrivate ? deriveClaimSecret(secretOrSalt, i.recipient) : secretOrSalt)
 	const witness: DepositWitness = {
 		aztecRecipient: isPrivate ? ZERO_WORD : (i.recipient.toString() as Hex),

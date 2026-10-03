@@ -35,7 +35,7 @@ const CLI = join(REPO_ROOT, "packages", "deployer", "src", "cli.ts")
 
 /** `bun run bridge …` in a process of its own, as an operator runs it: its exit code and everything it printed. */
 async function bridge(...args: string[]): Promise<{ code: number; out: string }> {
-	const p = Bun.spawn(["bun", CLI, ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
+	const p = Bun.spawn(["bun", "--no-env-file", CLI, ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" })
 	const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited])
 	return { code, out: `${out}${err}` }
 }
@@ -121,11 +121,11 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			expect(await failing()).toEqual([])
 		})
 
-		it("a deploy key scheduled as the guardian", async () => {
+		it("a guardian nobody named, scheduled by a deploy key", async () => {
 			const deployer = AztecAddress.fromStringUnsafe(harness().manifest.l2.bridge.deployer)
 			await tokenAt().methods.schedule_merchant_guardian!(deployer).send(asAdmin())
 			try {
-				expect(await failing()).toEqual(["no deploy key is the guardian, now or scheduled"])
+				expect(await failing()).toEqual(["guardian == the expected one (none unless named), now and scheduled"])
 			} finally {
 				await tokenAt().methods.schedule_merchant_guardian!(AztecAddress.ZERO).send(asAdmin())
 			}

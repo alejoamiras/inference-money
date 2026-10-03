@@ -102,8 +102,8 @@ export const HANDLERS: Record<Command, Handler> = {
 		}),
 	"merchants delay": (inv) =>
 		asAdmin(inv, async (s, admin) => {
-			const txs = await setMerchantDelay(s, admin, parseDelay(inv.args[1] as string))
-			log(`delay set and synced to every merchant in ${txs} tx(s); a decrease applies after old − new`)
+			const { txs, synced } = await setMerchantDelay(s, admin, parseDelay(inv.args[1] as string))
+			log(`delay set and synced to the ${synced} merchant(s) the node lists, in ${txs} tx(s); a decrease applies after old − new`)
 		}),
 	"merchants guardian": (inv) =>
 		asAdmin(inv, async (s, admin) => {
@@ -129,13 +129,16 @@ export const HANDLERS: Record<Command, Handler> = {
 			await setPaused(s, admin, inv.args[1] === "on")
 			log(`bridge ${inv.args[1] === "on" ? "paused" : "unpaused"}`)
 		}),
-	verify: (inv) =>
-		verifyManifest(loadManifest(inv.args[0] as string), {
+	verify: (inv) => {
+		const guardian = flag(inv, "guardian")
+		return verifyManifest(loadManifest(inv.args[0] as string), {
 			tour: flag(inv, "tour"),
 			node: flag(inv, "node"),
 			l1Rpc: flag(inv, "l1-rpc"),
+			guardian: guardian ? aztecAddress(guardian).toString() : undefined,
 			log,
-		}),
+		})
+	},
 	async "manifest-path"() {
 		console.log(localManifestPath(runIdFor()))
 		return 0

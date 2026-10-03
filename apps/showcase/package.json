@@ -7,6 +7,8 @@
 	"scripts": {
 		"build": "vite build",
 		"build:testnet": "BRIDGE_TARGET=testnet vite build && BUILT_TARGET=testnet BUILT_DIST=dist vitest run build/manifest-identity.test.ts build/bundle.test.ts",
+		"deploy": "wrangler deploy",
+		"deploy:preview": "wrangler versions upload",
 		"dev": "vite",
 		"preview": "vite preview",
 		"test": "vitest run",

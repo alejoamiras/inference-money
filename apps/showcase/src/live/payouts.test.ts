@@ -19,10 +19,14 @@ const TICKET: ExitTicket = {
 const EXPIRES = 1_000n
 
 /** What Ethereum and the node say: whether the burn's message is located, and each payout sent. */
-const chain = vi.hoisted(() => ({ paid: 0, located: "ticket" as "ticket" | "reverted", hold: undefined as Promise<void> | undefined }))
+const chain = vi.hoisted(() => ({
+	paid: 0,
+	located: "ticket" as "ticket" | "reverted" | "reverted-unfinalized",
+	hold: undefined as Promise<void> | undefined,
+}))
 vi.mock("@inference-money/bridge-core", async (original) => ({
 	...(await original<typeof import("@inference-money/bridge-core")>()),
-	locateWithdrawal: async () => (chain.located === "ticket" ? TICKET : "reverted"),
+	locateWithdrawal: async () => (chain.located === "ticket" ? TICKET : chain.located),
 	isExitWithdrawn: async () => false,
 	finishWithdrawal: async () => {
 		chain.paid++
@@ -79,8 +83,11 @@ describe("finishPayouts", () => {
 	it("retires a burn only once it can no longer land, and drops reverted or unreadable entries without blocking the rest", async () => {
 		const expired = ctxWith(TxStatus.DROPPED, [burned()], EXPIRES + 1n)
 		expect([await pass(expired.ctx), expired.store.size]).toEqual([[], 0])
-		chain.located = "reverted"
+		// A prune can re-include a burn its checkpoint reverted, so it stays listed until that revert is final.
+		chain.located = "reverted-unfinalized"
 		const reverted = ctxWith(TxStatus.CHECKPOINTED, [burned()])
+		expect([await pass(reverted.ctx), reverted.store.size]).toMatchObject([[{ state: "stuck", note: /rejected/ }], 1])
+		chain.located = "reverted"
 		expect([await pass(reverted.ctx), reverted.store.size]).toEqual([[], 0])
 		chain.located = "ticket"
 		const before = chain.paid

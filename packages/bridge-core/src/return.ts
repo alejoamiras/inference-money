@@ -42,9 +42,15 @@ export class ReturnUnconfirmedError extends Error {
 	}
 }
 
-/** The return reverted with the rest of its app logic: the deposit is unconsumed, so it can still be claimed or returned. */
+/**
+ * The return reverted with the rest of its app logic: the deposit is unconsumed, so it can still be claimed or returned.
+ * Until `final`, a prune can re-include the tx and return the deposit after all; {@link depositFate} then finds it.
+ */
 export class ReturnRevertedError extends Error {
-	constructor(readonly l2TxHash: TxHash) {
+	constructor(
+		readonly l2TxHash: TxHash,
+		readonly final: boolean,
+	) {
 		super(`The return ${l2TxHash} was rejected on Aztec, so the deposit is untouched. If the bridge is paused, wait for it to resume.`)
 		this.name = "ReturnRevertedError"
 	}
@@ -95,7 +101,7 @@ export async function returnDeposit(
 	const located = await locateWithdrawal(t.depositor, amount, txHash, node, m).catch((cause: unknown) => {
 		throw new ReturnUnconfirmedError(txHash, t.depositor, amount, { cause })
 	})
-	if (located === "reverted") throw new ReturnRevertedError(txHash)
+	if (typeof located === "string") throw new ReturnRevertedError(txHash, located === "reverted")
 	return located
 }
 

@@ -16,11 +16,16 @@ export interface OwnedProcess {
 	marker: string
 }
 
-/** The pid's start time, or undefined when no process has it; any other `ps` failure throws. */
+/**
+ * The pid's start time, or undefined when no process has it; any other `ps` failure throws. `ps` prints it in the
+ * caller's time zone and locale, so both are fixed: the text must compare equal from any shell, at any later time. The
+ * `utc` tag keeps it from ever equalling an untagged record, whose zone no reader can know.
+ */
 export function processStart(pid: number): string | undefined {
 	try {
-		const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
-		return out.trim() || undefined
+		const env = { ...process.env, TZ: "UTC", LC_ALL: "C" }
+		const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env })
+		return out.trim() ? `utc ${out.trim()}` : undefined
 	} catch (e) {
 		const x = e as { status?: number; stdout?: string }
 		if (x.status === 1 && !x.stdout?.trim()) return undefined
@@ -65,7 +70,10 @@ export type GroupState = "ours" | "gone" | "reused" | "unverified"
 export function groupState(p: OwnedProcess): GroupState {
 	try {
 		const start = processStart(p.pgid)
-		if (start !== undefined) return start === p.started ? "ours" : "reused"
+		if (start === p.started) return "ours"
+		// An untagged record's start time proves nothing. A pid is not reused while its group lives, so a member
+		// carrying the marker still proves the group; nothing else does.
+		if (start !== undefined) return markerEvidence(p.pgid, p.marker) === "ours" ? "ours" : "reused"
 		if (!groupAlive(p.pgid)) return "gone"
 		return markerEvidence(p.pgid, p.marker)
 	} catch {

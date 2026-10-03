@@ -20,6 +20,11 @@ export interface DeployContext {
 	wallet: EmbeddedWallet
 	usdc: Address
 	permit2: Address
+	/**
+	 * The network's pinned L1 registry; absent (local), the node's own answer. The portal derives its outbox from it once
+	 * and for good, and the outbox alone approves withdrawals, so on a pinned network the node is never asked.
+	 */
+	registry?: Address
 	/** The L2 owner of proxy and bridge. */
 	deployerSecret: Fr
 	fees: L2Fees
@@ -39,7 +44,7 @@ export const sourceCommit = (): string => execFileSync("git", ["rev-parse", "HEA
 export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 	const info = await c.node.getNodeInfo()
 	const l1c = info.l1ContractAddresses
-	const registry = getAddress(l1c.registryAddress.toString())
+	const registry = getAddress(c.registry ?? l1c.registryAddress.toString())
 	const deployer = await ensureAccount(c.wallet, c.deployerSecret, c.fees, c.log, "deployer")
 	await ensureStandardContracts(c.wallet, c.node, { from: deployer, ...(c.fees.tx ? { fee: { paymentMethod: c.fees.tx } } : {}) }, c.log)
 	const portal = await deployPortal(c.l1, c.evm)

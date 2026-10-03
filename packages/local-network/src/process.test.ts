@@ -29,13 +29,31 @@ describe("owned process groups", () => {
 		expect(groupState(p)).toBe("gone")
 	})
 
-	it("never signals a group whose leader's start time differs from the record", async () => {
+	it("never signals a group whose leader's start time differs from the record and whose members lack its marker", async () => {
 		const p = await spawnDetached("victim", "sleep", ["60"], { env: process.env, logFile: join(dir, "victim.log") })
 		spawned.push(p)
-		const impostor = { ...p, started: "Thu Jan  1 00:00:00 1970" }
+		const impostor = { ...p, started: "Thu Jan  1 00:00:00 1970", marker: "another-run" }
 		expect(groupState(impostor)).toBe("reused")
 		expect(await stopOwnedGroup(impostor)).toBe("reused")
 		expect(groupState(p)).toBe("ours")
+	})
+
+	it("still owns its group from a shell in another time zone, and an untagged record only by its marker", async () => {
+		const p = await spawnDetached("zoned", "sleep", ["60"], { env: process.env, logFile: join(dir, "zoned.log") })
+		spawned.push(p)
+		const tz = process.env.TZ
+		try {
+			process.env.TZ = "Asia/Tokyo"
+			expect(groupState(p)).toBe("ours")
+			// An untagged record is in a zone no reader knows: even text equal to the leader's start time proves nothing.
+			const untagged = p.started.replace(/^utc /, "")
+			expect(untagged).not.toBe(p.started)
+			expect(groupState({ ...p, started: untagged })).toBe("ours")
+			expect(groupState({ ...p, started: untagged, marker: "another-run" })).toBe("reused")
+		} finally {
+			if (tz === undefined) delete process.env.TZ
+			else process.env.TZ = tz
+		}
 	})
 
 	it("once the leader exits, owns the group only through a member carrying its marker", async () => {
