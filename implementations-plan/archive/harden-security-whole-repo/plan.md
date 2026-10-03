@@ -20,13 +20,14 @@ status: closed 2026-10-03, completed (see Outcome)
 
 **Accepted with no change**, by the owner: C-003, C-007, C-008, C-010, C-011, and C-013's accept-time half.
 
-**Reviews:** the stamp plan's gate was Opus 5.5 and a fresh Codex session, both "approve with conditions"; Codex's first audit rejected with a path to approval and was iterated on ([phase-3](lessons/phase-3.md)). Fix loops: arc 1 converged in round 3, arc 2 in round 3, the cross-arc pass in round 2 ([phase-2](lessons/phase-2.md), [phase-5](lessons/phase-5.md)).
+**Reviews:** the stamp plan's gate was Opus 5.5 and a fresh Codex session, both "approve with conditions"; Codex's first audit rejected with a path to approval and was iterated on ([phase-3](lessons/phase-3.md)). Fix loops: arc 1 converged in round 3 (a fourth, on the later wrangler fix, found nothing), arc 2 in round 3, the cross-arc pass in round 2 ([phase-2](lessons/phase-2.md), [phase-5](lessons/phase-5.md)).
 
 **Changed, dropped or deferred, and why:**
 - **[A22]'s rewrite moved into Phase 4:** its old case asserted the double payment the token now refuses.
 - **The review loops added a `replaced` record** to the payment store, beyond the plan: attempts that meet one stale request share its replacement.
 - **Not deployed:** the stamp change is code only. Testnet runs the old token until the owner redeploys (a keyed run).
-- **Deferred** (open in `implementations-plan/follow-ups.md`): the testnet redeploy with the new token, and the Cloudflare dashboard's switch to the locked wrangler.
+- **Deferred** (open in `implementations-plan/follow-ups.md`): the testnet redeploy with the new token.
+- **wrangler moved to the root:** locked first in `apps/showcase`, it broke Workers Builds, whose dashboard command runs `npx wrangler@4.138.0` from the root ([phase-1](lessons/phase-1.md)). At the root that command runs the locked copy, so the dashboard needs no change.
 
 # Harden pass: the fixes, then expiring pay-once stamps
 
