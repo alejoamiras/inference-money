@@ -34,7 +34,7 @@ contract Permit2DepositRouter is ReentrancyGuardTransient {
     error PublicDepositNeedsRecipient();
     /// @dev The Permit2 pull delivered a different amount than signed (fee-on-transfer, upgrade).
     error InexactPull();
-    /// @dev The portal left part of the deposit with the router.
+    /// @dev The deposit moved the router's balance: the portal left part of it behind, or a token fee spent donations.
     error ResidualBalance();
 
     event Deposit(
