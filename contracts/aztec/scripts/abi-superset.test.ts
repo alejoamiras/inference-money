@@ -24,7 +24,15 @@ const ADDED_FUNCTIONS = [
 	"try_prove_merchant",
 ]
 const ADDED_STORAGE = ["merchant_admin", "merchant_delay", "merchant_guardian", "merchant_off", "merchants", "pending_merchant_admin"]
-const ADDED_EVENTS = ["Token::MerchantAdded", "Token::MerchantDelayScheduled", "Token::MerchantOffScheduled"]
+const ADDED_EVENTS = [
+	"Token::MerchantAdded",
+	"Token::MerchantAdminAccepted",
+	"Token::MerchantAdminProposed",
+	"Token::MerchantDelayScheduled",
+	"Token::MerchantDelaySet",
+	"Token::MerchantGuardianScheduled",
+	"Token::MerchantOffScheduled",
+]
 // The class registry packs public bytecode 31 bytes per field plus a length field, and refuses more than 3000
 // (MAX_PACKED_PUBLIC_BYTECODE_SIZE_IN_FIELDS). Upstream packs to 707; the ceiling leaves the fork headroom for fixes.
 const MAX_PUBLIC_BYTECODE_FIELDS = 2700

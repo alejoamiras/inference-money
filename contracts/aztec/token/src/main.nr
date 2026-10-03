@@ -89,6 +89,31 @@ pub contract Token {
         effective_at: u64,
     }
 
+    // Changes to the list's roles and its delay setting, one event each.
+    #[event]
+    struct MerchantAdminProposed {
+        pending_admin: AztecAddress,
+    }
+
+    #[event]
+    struct MerchantAdminAccepted {
+        previous_admin: AztecAddress,
+        admin: AztecAddress,
+    }
+
+    #[event]
+    struct MerchantGuardianScheduled {
+        guardian: AztecAddress,
+        effective_at: u64,
+    }
+
+    // `set_merchant_delay` also reschedules the guardian slot's own delay, which applies from this timestamp.
+    #[event]
+    struct MerchantDelaySet {
+        delay: u64,
+        guardian_delay_effective_at: u64,
+    }
+
     /// A merchant entry: registered, switched off now, the latest scheduled switch value and when it applies, and the
     /// entry's delay now and scheduled.
     #[derive(Deserialize, Eq, Serialize)]
@@ -687,6 +712,8 @@ pub contract Token {
         assert((delay >= MERCHANT_MIN_DELAY) & (delay <= MERCHANT_MAX_DELAY), "Delay out of range");
         self.storage.merchant_delay.write(delay);
         self.storage.merchant_guardian.schedule_delay_change(delay);
+        let (_, guardian_delay_effective_at) = self.storage.merchant_guardian.get_scheduled_delay();
+        self.emit(MerchantDelaySet { delay, guardian_delay_effective_at });
     }
 
     /// @notice Schedules the delay setting on one entry; a no-op when it is already the entry's scheduled delay
@@ -711,6 +738,7 @@ pub contract Token {
     fn propose_merchant_admin(new_admin: AztecAddress) {
         self.internal._assert_merchant_admin();
         self.storage.pending_merchant_admin.write(new_admin);
+        self.emit(MerchantAdminProposed { pending_admin: new_admin });
     }
 
     /// @notice Completes the handover to the proposed merchant admin
@@ -721,8 +749,10 @@ pub contract Token {
             !pending.is_zero() & (self.msg_sender() == pending),
             "Only the pending merchant admin",
         );
+        let previous_admin = self.storage.merchant_admin.read();
         self.storage.merchant_admin.write(pending);
         self.storage.pending_merchant_admin.write(AztecAddress::zero());
+        self.emit(MerchantAdminAccepted { previous_admin, admin: pending });
     }
 
     /// @notice Schedules the guardian, who can only cancel pending merchant changes; zero removes it
@@ -732,6 +762,8 @@ pub contract Token {
     fn schedule_merchant_guardian(guardian: AztecAddress) {
         self.internal._assert_merchant_admin();
         self.storage.merchant_guardian.schedule_value_change(guardian);
+        let (_, effective_at) = self.storage.merchant_guardian.get_scheduled_value();
+        self.emit(MerchantGuardianScheduled { guardian, effective_at });
     }
 
     /// @notice Cancels an entry's pending change: re-schedules its current value, and its current delay if a decrease
