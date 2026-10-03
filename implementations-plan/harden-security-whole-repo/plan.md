@@ -93,7 +93,7 @@ The design is under Architecture & Implementation, Arc 2. In order, validating t
 
 **Validation gate.** Commands, after step 6's commit: `bash contracts/aztec/scripts/compile.sh --check && bun run test:noir && bash contracts/aztec/scripts/check-sole-consumer.sh && bun run lint && bun run typecheck && bun run test`. Pass: all exit 0; `abi-superset.test.ts` reports no added function, storage or event and the bytecode under its ceiling. Layers: lint, typecheck, unit (TS, TXE, keystone), the artifact-equals-source check.
 
-#### Phase 5: clients, a real network, docs
+#### Phase 5: clients, a real network, docs ✓
 
 1. `packages/integration`, on the harness's network with real kernels and a real PXE:
    - [A22] in `requests.test.ts`, rewritten: a second payment is refused through both paths with the exported string, and the siloed `paid(c)` leaf is on chain after a private-only payment and after a public-only one (two requests).
