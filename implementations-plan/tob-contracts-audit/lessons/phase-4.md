@@ -16,3 +16,8 @@ The integration spec is the proof for each emit: it reads the event back from th
 
 - **The local network needs a complete pinned node install, and a cached one can be an empty shell.** `test:integration` failed before any spec ran: `aztec 6.0.0-rc.1 toolchain is incomplete (missing …/node_modules/.bin/aztec …)`. `~/.aztec` holds no 6.0.0-rc.1, and every `~/.cache/inference-money/aztec-node-*` dir had a 4 KB `node_modules`: `install-node.sh` links them into the installing worktree's `packages/local-network/toolchain`, which dies with that worktree. Fix: `bash packages/local-network/scripts/install-node.sh ~/.cache/inference-money/aztec-node-tob` (frozen lock, Foundry digest checked) and `AZTEC_NODE_HOME` pointing at it.
 - Earlier steps of the same gate passed on the first run: the static guard (self-test and real), lint, no drift under `contracts/aztec`, `compile.sh --check`, `test:noir`, `bun run test`, typecheck.
+- **The handover spec's open-ended event query caught its own cleanup.** The second run passed 43 of 44: reading `MerchantAdminProposed` from a start block, after the `finally` had withdrawn the proposal, found the withdrawal's zero-address event too. The assertions now run inside `try`, before the withdrawal (4943dbf).
+
+## Gate
+
+Run with Phase 5 (one combined gate, sequenced so nothing reads an artifact `compile.sh` is rebuilding): static guard self-test and real, lint, `lint:actions`, `test:evm`, `test:evm:gas`, `test:evm:formal`, `test:evm:slither`, no drift under `contracts/aztec`, `compile.sh --check`, `test:noir`, `bun run test`, typecheck, `test:integration` (`44 pass, 0 fail`, then the clock specs `4 pass, 0 fail`): every step exit 0.
