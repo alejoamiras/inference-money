@@ -4,14 +4,14 @@ Open work lifted out of closed plans, one line each with a pointer; delete a lin
 
 ## Testnet
 
-- Redeploy testnet with the expiring, pay-once token, then record the demo again: `deployments/testnet.json` names the old token's class id, which the current artifact no longer derives, so production's live mode cannot use that deployment until then. [plan](harden-security-whole-repo/plan.md#arc-2-expiring-pay-once-stamps)
+- Redeploy testnet with the expiring, pay-once token, then record the demo again: `deployments/testnet.json` names the old token's class id, which the current artifact no longer derives, so production's live mode cannot use that deployment until then. [plan](archive/harden-security-whole-repo/plan.md#arc-2-expiring-pay-once-stamps)
 - Replace the temporary dRPC node URL (`packages/deployer/src/networks.ts`, carried into `deployments/testnet.json` and the testnet bundle's CSP) with a keyless public node once one serves rollup `2914217885`. [D29](archive/usdc-bridge/plan.md#decision-ledger)
 - A poisoned demo binding is fixed only by rotation (`demo setup --rotate`): a new users' tag, a new cast and fresh demo funds. [plan](archive/galactica-compliant-usdc/plan.md#key-interfaces-storage-message-formats)
 - The showcase's conflict retry trusts the node's outright refusal. An SDK retry after a lost response, read from a lagging backend, could still send twice: fine for demo funds, not for real ones. [phase-15](archive/galactica-compliant-usdc/lessons/phase-15.md)
 
 ## Showcase
 
-- Switch the Cloudflare dashboard's Workers Builds deploy commands to the locked wrangler (`bun run deploy`, `bun run deploy:preview` in `apps/showcase`); until then the build installs an unlocked one. [plan](harden-security-whole-repo/plan.md#owner-decisions-2026-10-02-all-asks-answered)
+- Switch the Cloudflare dashboard's Workers Builds deploy commands to the locked wrangler (`bun run deploy`, `bun run deploy:preview` in `apps/showcase`); until then the build installs an unlocked one. [plan](archive/harden-security-whole-repo/plan.md#owner-decisions-2026-10-02-all-asks-answered)
 - `tryLock` (`packages/local-network/src/registry.ts`) reads the lock's holder, then checks it is alive: a holder that released the lock and exited in between is reported dead (two e2e runs starting together). Re-read the lock before throwing. [phase-4](archive/presto-showcase/lessons/phase-4.md)
 - Presto's SDK reads `setForceLocal` only as a proof starts, so a proof under way when the consent stops still goes to Presto; a cancellation in the SDK would close it. [plan](archive/presto-showcase/plan.md#implementation-audit)
 - The page opens on "Try it yourself", and a first visit shows only the header until the lazy chunk carrying the Aztec SDK arrives (35–40 s cold on 2026-10-02, about 1 s cached): a skeleton of the live page, rendered before the SDK, would cover the wait (`apps/showcase/src/App.tsx`, its `Suspense` fallback).
