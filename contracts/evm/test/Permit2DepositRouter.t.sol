@@ -13,7 +13,7 @@ import {MockPermit2} from "./mocks/MockPermit2.sol";
 import {MockTokenPortal} from "./mocks/MockPortal.sol";
 import {MockUsdc} from "./mocks/MockUsdc.sol";
 import {RouterFixture} from "./mocks/RouterFixture.sol";
-import {FeeOnTransferERC20, HookERC20} from "./mocks/TestTokens.sol";
+import {FeeOnTransferERC20, HookERC20, OverDeliveringERC20, SenderSurchargeERC20} from "./mocks/TestTokens.sol";
 
 contract Permit2DepositRouterTest is RouterFixture {
     MockUsdc internal usdc;
@@ -117,6 +117,28 @@ contract Permit2DepositRouterTest is RouterFixture {
         router.deposit(100e6, RECIPIENT, SECRET_HASH, false, 0, 1, hex"");
         assertEq(tax.balanceOf(user), 1_000e6, "nothing left the user");
         assertEq(inbox.sent(), 0, "no message");
+    }
+
+    /// A token that delivers more than signed is refused by the router's own pull check, before the portal's.
+    function test_overDeliveryRefusedAtThePull() public {
+        OverDeliveringERC20 gen = new OverDeliveringERC20();
+        _deployStack(gen);
+        gen.mint(user, 1_000e6);
+        vm.prank(user);
+        vm.expectRevert(Permit2DepositRouter.InexactPull.selector);
+        router.deposit(100e6, RECIPIENT, SECRET_HASH, false, 0, 1, hex"");
+    }
+
+    /// A token that charges its sender keeps the pull and the portal's credit exact, but charges the router for its
+    /// transfer to the portal: a donation must not pay that fee.
+    function test_senderSurchargeCannotSpendDonations() public {
+        SenderSurchargeERC20 sur = new SenderSurchargeERC20(100);
+        _deployStack(sur);
+        sur.mint(user, 101e6);
+        sur.mint(address(router), 5e6);
+        vm.prank(user);
+        vm.expectRevert(Permit2DepositRouter.ResidualBalance.selector);
+        router.deposit(100e6, RECIPIENT, SECRET_HASH, false, 0, 1, hex"");
     }
 
     /// A portal that leaves part of the deposit behind trips the settle check, even with a donation to hide behind.

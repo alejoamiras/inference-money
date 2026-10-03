@@ -32,6 +32,15 @@ contract FeeOnTransferERC20 is PlainERC20 {
     }
 }
 
+/// Moves one unit more than asked on every transfer, out of the sender's balance.
+contract OverDeliveringERC20 is PlainERC20 {
+    constructor() PlainERC20("Generous", "GEN") {}
+
+    function _update(address from, address to, uint256 value) internal override {
+        super._update(from, to, from == address(0) || to == address(0) ? value : value + 1);
+    }
+}
+
 /// Charges the SENDER `surchargeBps` on top of every transfer: the recipient nets the full value, so only the
 /// sender's own debit shows it.
 contract SenderSurchargeERC20 is PlainERC20 {
