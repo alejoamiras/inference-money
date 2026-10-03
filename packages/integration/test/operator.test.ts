@@ -3,13 +3,19 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { join } from "node:path"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Contract } from "@aztec-labs/aztec.js/contracts"
+import { getPublicEvents } from "@aztec-labs/aztec.js/events"
 import { Fr } from "@aztec-labs/aztec.js/fields"
+import type { TxReceipt } from "@aztec-labs/aztec.js/tx"
+import type { ContractArtifact } from "@aztec-labs/stdlib/abi"
 import {
 	type BridgeManifest,
+	contractEvent,
 	instanceFromRecord,
 	MERCHANT_MAX_DELAY,
 	MERCHANT_MIN_DELAY,
 	signingKeyFor,
+	tokenArtifact,
+	tokenBridgeArtifact,
 } from "@inference-money/bridge-core"
 import { parseTour, TOUR_STEPS, tourHeader } from "@inference-money/demo"
 import {
@@ -17,6 +23,7 @@ import {
 	accountFor,
 	bridgeOf,
 	buildBridgeContracts,
+	guardianDelay,
 	LOCAL_ADMIN_SECRET,
 	openBridgeWallet,
 	proposeAdmin,
@@ -29,7 +36,7 @@ import { REPO_ROOT } from "@inference-money/local-network"
 import { encodeAbiParameters, type Hex, keccak256, pad } from "viem"
 import { l2Actor } from "./actors"
 import { harness, INTEGRATION } from "./harness"
-import { asAdmin, sponsored } from "./token"
+import { asAdmin, blockTimestamp, sponsored } from "./token"
 
 const CLI = join(REPO_ROOT, "packages", "deployer", "src", "cli.ts")
 
@@ -58,6 +65,22 @@ async function failing(m: BridgeManifest = harness().manifest): Promise<string[]
 
 const bridgeAt = () => bridgeOf(harness().wallet, harness().manifest)
 const tokenAt = () => tokenOf(harness().wallet, harness().manifest)
+
+type FromBlock = Parameters<typeof getPublicEvents>[2]["fromBlock"]
+type Since = { txHash: TxReceipt["txHash"] } | { fromBlock: FromBlock }
+
+/** The first block after the latest: where a call made through a helper that returns no receipt lands, or later. */
+const nextBlock = async (): Promise<Since> => ({ fromBlock: ((await harness().node.getBlockNumber()) + 1) as FromBlock })
+
+/** Every `name` event the bridge or the token emitted in `since`, each field as a string. */
+async function emitted(contract: "bridge" | "token", name: string, since: Since): Promise<Record<string, string>[]> {
+	const artifact: ContractArtifact = contract === "bridge" ? tokenBridgeArtifact : tokenArtifact
+	const { events } = await getPublicEvents<Record<string, unknown>>(harness().node, await contractEvent(artifact, name), {
+		contractAddress: AztecAddress.fromStringUnsafe(harness().manifest.l2[contract].address),
+		...since,
+	})
+	return events.map((e) => Object.fromEntries(Object.entries(e.event).map(([k, v]) => [k, String(v)])))
+}
 
 describe.skipIf(!INTEGRATION)("operator CLI", () => {
 	let dir: string
@@ -111,21 +134,37 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 
 		it("a handover proposed and not withdrawn", async () => {
 			const { wallet, owner, manifest: m } = harness()
-			await proposeAdmin(wallet, m, owner, await l2Actor(), sponsored())
+			const next = await l2Actor()
+			const proposed = await nextBlock()
+			await proposeAdmin(wallet, m, owner, next, sponsored())
+			const handover = { owner: owner.toString(), pending_owner: next.toString() }
+			let cancelled: TxReceipt | undefined
+			let withdrawn: TxReceipt | undefined
 			try {
 				expect(await failing()).toEqual(["bridge: no ownership transfer pending", "no merchant admin handover pending"])
+				// `proposed` is open-ended: read it before the withdrawal below emits a second proposal (of zero).
+				expect(await emitted("bridge", "OwnershipTransferStarted", proposed)).toEqual([handover])
+				expect(await emitted("token", "MerchantAdminProposed", proposed)).toEqual([{ pending_admin: next.toString() }])
 			} finally {
-				await bridgeAt().methods.cancel_ownership_transfer!().send(asAdmin())
-				await tokenAt().methods.propose_merchant_admin!(AztecAddress.ZERO).send(asAdmin())
+				cancelled = (await bridgeAt().methods.cancel_ownership_transfer!().send(asAdmin())).receipt
+				withdrawn = (await tokenAt().methods.propose_merchant_admin!(AztecAddress.ZERO).send(asAdmin())).receipt
 			}
 			expect(await failing()).toEqual([])
+			expect(await emitted("bridge", "OwnershipTransferCancelled", { txHash: cancelled!.txHash })).toEqual([handover])
+			expect(await emitted("token", "MerchantAdminProposed", { txHash: withdrawn!.txHash })).toEqual([
+				{ pending_admin: AztecAddress.ZERO.toString() },
+			])
 		})
 
 		it("a guardian nobody named, scheduled by a deploy key", async () => {
 			const deployer = AztecAddress.fromStringUnsafe(harness().manifest.l2.bridge.deployer)
-			await tokenAt().methods.schedule_merchant_guardian!(deployer).send(asAdmin())
+			const { receipt } = await tokenAt().methods.schedule_merchant_guardian!(deployer).send(asAdmin())
 			try {
 				expect(await failing()).toEqual(["guardian == the expected one (none unless named), now and scheduled"])
+				const { result: roles } = await tokenAt().methods.get_merchant_roles!().simulate({ from: harness().owner })
+				expect(await emitted("token", "MerchantGuardianScheduled", { txHash: receipt.txHash })).toEqual([
+					{ guardian: deployer.toString(), effective_at: String(roles.scheduled_guardian_at) },
+				])
 			} finally {
 				await tokenAt().methods.schedule_merchant_guardian!(AztecAddress.ZERO).send(asAdmin())
 			}
@@ -133,22 +172,30 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 		})
 
 		it("a paused bridge", async () => {
-			await bridgeAt().methods.set_paused!(true).send(asAdmin())
+			const { receipt: paused } = await bridgeAt().methods.set_paused!(true).send(asAdmin())
+			let resumed: TxReceipt | undefined
 			try {
 				expect(await failing()).toEqual(["bridge not paused"])
 			} finally {
-				await bridgeAt().methods.set_paused!(false).send(asAdmin())
+				resumed = (await bridgeAt().methods.set_paused!(false).send(asAdmin())).receipt
 			}
 			expect(await failing()).toEqual([])
+			expect(await emitted("bridge", "PauseSet", { txHash: paused.txHash })).toEqual([{ paused: "true" }])
+			expect(await emitted("bridge", "PauseSet", { txHash: resumed!.txHash })).toEqual([{ paused: "false" }])
 		})
 
 		// The setter reschedules the guardian slot itself; each listed entry keeps its delay until synced.
 		it("a delay setting not yet synced to the merchants", async () => {
-			await tokenAt().methods.set_merchant_delay!(MERCHANT_MIN_DELAY).send(asAdmin())
+			const { receipt } = await tokenAt().methods.set_merchant_delay!(MERCHANT_MIN_DELAY).send(asAdmin())
 			try {
 				const drifted = await failing()
 				expect(drifted.length).toBeGreaterThan(0)
 				expect(drifted.filter((name) => !/^merchant 0x[0-9a-f]{64} delay == setting$/.test(name))).toEqual([])
+				const token = AztecAddress.fromStringUnsafe(harness().manifest.l2.token.address)
+				const slot = await guardianDelay(harness().node, token, receipt.blockNumber!, await blockTimestamp(receipt))
+				expect(await emitted("token", "MerchantDelaySet", { txHash: receipt.txHash })).toEqual([
+					{ delay: String(MERCHANT_MIN_DELAY), guardian_delay_effective_at: String(slot.changeAt) },
+				])
 			} finally {
 				await tokenAt().methods.set_merchant_delay!(MERCHANT_MAX_DELAY).send(asAdmin())
 			}
@@ -212,10 +259,17 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 		const { wallet, owner, manifest: m, manifestPath } = harness()
 		const secret = Fr.random()
 		await ok("admin", "propose", manifestPath, (await accountFor(wallet, secret)).toString())
+		const accepted = await nextBlock()
 		const next = await acceptAdmin(wallet, harness().node, m, secret, () => {})
 		try {
 			expect(await failing({ ...m, l2: { ...m.l2, admin: next.toString() as Hex } })).toEqual([])
 			expect(await failing()).toEqual(["bridge owner == admin", "merchant admin == admin"])
+			expect(await emitted("bridge", "OwnershipTransferred", accepted)).toEqual([
+				{ previous_owner: owner.toString(), new_owner: next.toString() },
+			])
+			expect(await emitted("token", "MerchantAdminAccepted", accepted)).toEqual([
+				{ previous_admin: owner.toString(), admin: next.toString() },
+			])
 		} finally {
 			await proposeAdmin(wallet, m, next, owner, sponsored())
 			await acceptAdmin(wallet, harness().node, m, LOCAL_ADMIN_SECRET, () => {})

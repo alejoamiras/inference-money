@@ -79,6 +79,19 @@ It cannot check a secret hash. A private deposit is claimed or returned only wit
 
 The bridge, in turn, refuses an exit no Ethereum call could pay: to the portal itself (`Recipient cannot be the portal`; its payout must lower its own balance), or naming a recipient or caller wider than 20 bytes, which the ABI would otherwise decode into an `EthAddress`.
 
+## Following the contracts
+
+An indexer reconstructs every admin-controlled value from the deployment's initial state plus events. The constructors emit nothing: read their state once (`bun run bridge verify` checks it), then follow:
+
+| Contract | Events |
+|---|---|
+| TokenBridge (Aztec) | `PauseSet{paused}`, `OwnershipTransferStarted{owner, pending_owner}`, `OwnershipTransferCancelled{owner, pending_owner}`, `OwnershipTransferred{previous_owner, new_owner}` |
+| Token (Aztec) | the merchant list: `MerchantAdded`, `MerchantOffScheduled`, `MerchantDelayScheduled`; its roles and delay: `MerchantAdminProposed{pending_admin}`, `MerchantAdminAccepted{previous_admin, admin}`, `MerchantGuardianScheduled{guardian, effective_at}`, `MerchantDelaySet{delay, guardian_delay_effective_at}` |
+| TokenPortal (Ethereum) | `PortalInitialized` (the whole binding, Outbox included), `DepositToAztecPublic`, `DepositToAztecPrivate`, `Withdraw(recipient, amount, callerOnL1)` |
+| Permit2DepositRouter (Ethereum) | `Deposit` |
+
+Aztec events are public logs: read them with the SDK's `getPublicEvents` and bridge-core's `contractEvent(artifact, name)`; the Ethereum ones are in bridge-core's `TOKEN_PORTAL_ABI` and `PERMIT2_DEPOSIT_ROUTER_ABI`. A refused change emits nothing, and an event naming a replaced holder (`previous_owner`, `previous_admin`, a cancelled `pending_owner`) read it before the write. `Withdraw.amount` is the reserve's debit, not what the recipient nets under a USDC fee; `callerOnL1` is the caller the message was hashed with, zero when anyone could execute it.
+
 ## What each action makes public
 
 - **Visible.** Ethereum shows who deposited and who withdrew, with amounts. Aztec shows claim and withdrawal amounts (total-supply writes) and payment-request amounts (completion logs). A return shows no amount on Aztec, but its payout on Ethereum shows recipient and amount, which a public deposit links back to. The merchant list is public. The pause checks a bridge call enqueues reveal bridge use, and an account's first claim is distinguishable from later ones.

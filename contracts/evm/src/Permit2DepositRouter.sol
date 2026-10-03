@@ -3,7 +3,7 @@ pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
 import {ISignatureTransfer} from "./interfaces/ISignatureTransfer.sol";
 import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
 
@@ -12,7 +12,7 @@ import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
 /// binds the L2 intent (recipient, secret hash, public/private) to the signed transfer, and only the signer may
 /// submit it, so a leaked signature cannot be redirected. The portal's message names the signer as the depositor.
 /// Ownerless: no sweep, no setters.
-contract Permit2DepositRouter is ReentrancyGuard {
+contract Permit2DepositRouter is ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     bytes32 public constant DEPOSIT_WITNESS_TYPEHASH =
@@ -34,7 +34,7 @@ contract Permit2DepositRouter is ReentrancyGuard {
     error PublicDepositNeedsRecipient();
     /// @dev The Permit2 pull delivered a different amount than signed (fee-on-transfer, upgrade).
     error InexactPull();
-    /// @dev The portal left part of the deposit with the router.
+    /// @dev The deposit moved the router's balance: the portal left part of it behind, or a token fee spent donations.
     error ResidualBalance();
 
     event Deposit(
@@ -88,6 +88,8 @@ contract Permit2DepositRouter is ReentrancyGuard {
             DEPOSIT_WITNESS_TYPE_STRING,
             signature
         );
+        // The balance from before the pull is compared after it on purpose; nonReentrant refuses a nested deposit meanwhile.
+        // slither-disable-next-line reentrancy-balance
         if (TOKEN.balanceOf(address(this)) - before != amount) revert InexactPull();
 
         TOKEN.forceApprove(address(PORTAL), amount);

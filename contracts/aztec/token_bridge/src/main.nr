@@ -15,7 +15,7 @@ pub contract TokenBridge {
 use crate::{config::Config, funding_address_note::{funding_note, FundingAddressNote}};
 
 use aztec::{
-macros::{functions::{external, initializer, only_self, view}, storage::storage},
+macros::{events::event, functions::{external, initializer, only_self, view}, storage::storage},
 messages::delivery::MessageDelivery,
 protocol::address::{AztecAddress, EthAddress},
 state_vars::{Owned, PrivateImmutable, PublicImmutable, PublicMutable, StateVariable},
@@ -39,6 +39,31 @@ is_paused: PublicMutable<bool, Context>,
 funding_address: Owned<PrivateImmutable<FundingAddressNote, Context>, Context>,
 }
 
+// Every change to the owner, the pending owner or the pause flag emits one of these. They sit above every function:
+// check-sole-consumer.sh reads a function's body up to the next `fn`.
+#[event]
+struct PauseSet {
+paused: bool,
+}
+
+#[event]
+struct OwnershipTransferStarted {
+owner: AztecAddress,
+pending_owner: AztecAddress,
+}
+
+#[event]
+struct OwnershipTransferCancelled {
+owner: AztecAddress,
+pending_owner: AztecAddress,
+}
+
+#[event]
+struct OwnershipTransferred {
+previous_owner: AztecAddress,
+new_owner: AztecAddress,
+}
+
 #[external("public")]
 #[initializer]
 fn constructor(token_minter_proxy: AztecAddress, token: AztecAddress, portal: EthAddress) {
@@ -53,27 +78,33 @@ fn transfer_ownership(new_owner: AztecAddress) {
 assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
 assert(!new_owner.is_zero(), "New owner cannot be zero address");
 self.storage.pending_owner.write(new_owner);
+self.emit(OwnershipTransferStarted { owner: self.msg_sender(), pending_owner: new_owner });
 }
 
 #[external("public")]
 fn cancel_ownership_transfer() {
 assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
-assert(!self.storage.pending_owner.read().is_zero(), "No pending owner");
+let pending_owner = self.storage.pending_owner.read();
+assert(!pending_owner.is_zero(), "No pending owner");
 self.storage.pending_owner.write(AztecAddress::zero());
+self.emit(OwnershipTransferCancelled { owner: self.msg_sender(), pending_owner });
 }
 
 #[external("public")]
 fn claim_ownership() {
 let sender = self.msg_sender();
 assert(self.storage.pending_owner.read() == sender, "Only pending owner can claim");
+let previous_owner = self.storage.owner.read();
 self.storage.owner.write(sender);
 self.storage.pending_owner.write(AztecAddress::zero());
+self.emit(OwnershipTransferred { previous_owner, new_owner: sender });
 }
 
 #[external("public")]
 fn set_paused(paused: bool) {
 assert(self.storage.owner.read() == self.msg_sender(), "Only owner");
 self.storage.is_paused.write(paused);
+self.emit(PauseSet { paused });
 }
 
 #[external("private")]

@@ -8,6 +8,7 @@
 	"node": "24.12.0",
 	"foundry": "1.7.1",
 	"halmos": "0.3.3",
+	"slither": "0.11.6",
 	"solc": "0.8.28",
 	"prestoServer": "1.1.3"
 }
