@@ -6,7 +6,27 @@ code_review: off
 claude_model: opus
 codex: default model, medium effort
 baseline: 9f84cdb
+status: closed 2026-10-03, completed (see Outcome)
 ---
+
+## Outcome
+
+**Closed 2026-10-03: completed.** The three-PR stack below awaits the owner's merge. This plan is now a historical record. The `/goal` seed under **Seeds** is retired: do not run it, and do not treat any section below as a task list.
+
+**Shipped**, as a stack on `main` (`gh stack merge --squash` on the top PR lands it all):
+- #18 `fix`, arc 1: the audit's chosen fixes (C-001, C-002, C-004, C-005, C-006, C-009, C-012 docs, C-013's guardian half, C-014, C-015, C-016), the CLI's `--no-env-file`, and the three routed bugs (process groups owned from any time zone, a reverted exit final only once finalized, the launcher's anvil off port 8545).
+- #19 `feat(token)`, arc 2: C-017 as the owner decided. Stamps carry their opening's hour and expire 24 h to 25 h later, a request takes one payment, bridge-core refuses a marked (stale) private payment and shares one replacement per stale request.
+- The docs-only close-out on top: this Outcome, the promoted lessons and follow-ups, and the archive move.
+
+**Accepted with no change**, by the owner: C-003, C-007, C-008, C-010, C-011, and C-013's accept-time half.
+
+**Reviews:** the stamp plan's gate was Opus 5.5 and a fresh Codex session, both "approve with conditions"; Codex's first audit rejected with a path to approval and was iterated on ([phase-3](lessons/phase-3.md)). Fix loops: arc 1 converged in round 3, arc 2 in round 3, the cross-arc pass in round 2 ([phase-2](lessons/phase-2.md), [phase-5](lessons/phase-5.md)).
+
+**Changed, dropped or deferred, and why:**
+- **[A22]'s rewrite moved into Phase 4:** its old case asserted the double payment the token now refuses.
+- **The review loops added a `replaced` record** to the payment store, beyond the plan: attempts that meet one stale request share its replacement.
+- **Not deployed:** the stamp change is code only. Testnet runs the old token until the owner redeploys (a keyed run).
+- **Deferred** (open in `implementations-plan/follow-ups.md`): the testnet redeploy with the new token, and the Cloudflare dashboard's switch to the locked wrangler.
 
 # Harden pass: the fixes, then expiring pay-once stamps
 
