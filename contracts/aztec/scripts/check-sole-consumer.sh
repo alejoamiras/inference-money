@@ -19,7 +19,7 @@
 # redirect, or lets an attacker's L1 contract mint unbacked tokens.
 #
 # Counts are occurrences across every non-test source the bridge executes (its crate plus the local claim_secret and
-# portal_messages libs), after stripping comments; bodies are analysed on a newline-flattened copy because signatures
+# portal_messages libs), after stripping comments and emptying string literals; bodies are analysed on a newline-flattened copy because signatures
 # span lines.
 # `--self-test` mutates the real source one rule at a time and requires each mutant to fail for its own reason.
 set -euo pipefail
@@ -29,10 +29,10 @@ bridge_main="$aztec_root/token_bridge/src/main.nr"
 lib_src="$aztec_root/claim_secret/src"
 messages_src="$aztec_root/portal_messages/src"
 
-# Drops block and line comments but keeps string literals (matched first in one alternation), so neither a
-# commented-out shape nor a comment opener inside a string can hide or fake live code.
+# Drops block and line comments and empties string literals (matched first in one alternation, so a comment opener
+# inside a string is never read as one): no check can match commented-out or quoted text as code.
 strip_comments() {
-  LC_ALL=C perl -0pe 's{("(?:[^"\\]|\\.)*")|/\*.*?\*/|//[^\n]*}{defined $1 ? $1 : ""}gse'
+  LC_ALL=C perl -0pe 's{("(?:[^"\\]|\\.)*")|/\*.*?\*/|//[^\n]*}{defined $1 ? q("") : ""}gse'
 }
 
 violation() {
@@ -44,11 +44,6 @@ S='[[:space:]]*'
 config_read="let config${S}=${S}self\\.storage\\.config\\.read\\(\\)"
 # The context's own call: a lookalike (`not_message_portal(...)`) would pass a bare `message_portal(` match.
 pay_portal="(^|[^A-Za-z0-9_.])self\\.context\\.message_portal${S}\\(${S}config\\.portal${S},${S}"
-
-# For counts: an assert message naming `message_portal` or `let config` must not count as code.
-strip_strings() {
-  printf '%s' "$1" | sed -E 's/"([^"\\]|\\.)*"//g'
-}
 token_view="self\\.view\\(${S}Token::at\\(${S}config\\.token${S}\\)"
 
 # fn_body <flat source> <name>: the text from `fn <name>` up to the next ` fn `.
@@ -104,19 +99,18 @@ consumes_derived() {
 # flow_is <fn> <body> <conditions>: the body branches only on the rule conditions given (space-separated, in order) and
 # has no loop, match or closure: `if false { assert(…) }` keeps exactly the text the other checks match, but never runs.
 flow_is() {
-  local code ifs
-  code=$(strip_strings "$2")
-  if printf '%s' "$code" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
+  local ifs
+  if printf '%s' "$2" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
     violation "$1 has a loop, match or closure" || return 1
   fi
-  ifs=$(printf '%s' "$code" | grep -oE "(^|[^A-Za-z0-9_])if[^A-Za-z0-9_{][^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
+  ifs=$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])if[^A-Za-z0-9_{][^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
     tr '\n' ' ' | sed -E 's/ $//')
   [ "$ifs" = "$3" ] || violation "$1 branches on [$ifs], not exactly on the rule conditions [$3]"
 }
 
 # A claim mints and nothing else: a withdraw from the same consumption would pay the deposit out twice.
 no_portal_message() {
-  if strip_strings "$2" | grep -q message_portal; then
+  if printf '%s' "$2" | grep -q message_portal; then
     violation "$1 messages the portal" || return 1
   fi
 }
@@ -126,7 +120,7 @@ pays_depositor() {
   need "$1" "$2" \
     "${pay_portal}withdraw_content_hash${S}\\(${S}depositor${S},${S}amount${S},${S}EthAddress::zero\\(\\)${S}\\)${S}\\)" \
     "does not pay the depositor" || return 1
-  [ "$(strip_strings "$2" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
+  [ "$(printf '%s' "$2" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
     violation "$1 messages the portal more than once" || return 1
   if printf '%s' "$2" | sed -E 's/mint_to_(public|private)_content_hash//g' | grep -q mint; then
     violation "$1 mints" || return 1
@@ -136,7 +130,7 @@ pays_depositor() {
 # config_once <fn> <body>: one binding of `config`, read from storage; a second (say, a Config with another portal)
 # would redirect every config.portal after it.
 config_once() {
-  [ "$(strip_strings "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]config([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
+  [ "$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]config([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
     violation "$1 binds config more than once" || return 1
   need "$1" "$2" "${config_read}${S};" "does not read config from storage"
 }
@@ -145,22 +139,21 @@ config_once() {
 # hash names its parameters by text, so none may be rebound; and `flow_is` only lists branch conditions, so a payout
 # moved into one branch would pass without the depth check.
 pays_recipient() {
-  local content code prefix depth
+  local content prefix depth
   content=$(bound_to "$2" "withdraw_content_hash${S}\\(${S}recipient${S},${S}amount${S},${S}caller_on_l1${S}\\)")
   [ -n "$content" ] || violation "$1 does not hash withdraw(recipient, amount, caller_on_l1)" || return 1
   need "$1" "$2" \
     "let ${content}${S}=${S}withdraw_content_hash${S}\\(${S}recipient${S},${S}amount${S},${S}caller_on_l1${S}\\)${S};" \
     "alters its withdraw hash" || return 1
-  code=$(strip_strings "$2")
-  [ "$(printf '%s' "$code" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]${content}([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
+  [ "$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]${content}([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
     violation "$1 rebinds $content" || return 1
-  if printf '%s' "$code" | grep -qE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_](recipient|amount|caller_on_l1)([^A-Za-z0-9_]|$)"; then
+  if printf '%s' "$2" | grep -qE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_](recipient|amount|caller_on_l1)([^A-Za-z0-9_]|$)"; then
     violation "$1 rebinds a parameter its withdraw hashes" || return 1
   fi
   need "$1" "$2" "${pay_portal}${content}${S}\\)" "does not pay the hashed withdraw to config.portal" || return 1
-  [ "$(printf '%s' "$code" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
+  [ "$(printf '%s' "$2" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
     violation "$1 messages the portal more than once" || return 1
-  prefix=$(printf '%s' "$code" | sed -E 's/message_portal.*//')
+  prefix=$(printf '%s' "$2" | sed -E 's/message_portal.*//')
   depth=$(($(printf '%s' "$prefix" | tr -cd '{' | wc -c) - $(printf '%s' "$prefix" | tr -cd '}' | wc -c)))
   [ "$depth" -eq 1 ] || violation "$1 pays out inside a branch"
 }
@@ -389,6 +382,16 @@ let content ='
   mutant exit_private_unpaid "exit_to_l1_private does not pay the hashed withdraw to config.portal" main "$exit_pay" "" 2
   mutant exit_lookalike_payout "exit_to_l1_public does not pay the hashed withdraw to config.portal" main "$exit_pay" \
     "not_message_portal(config.portal, content);"
+  mutant exit_quoted_hash "exit_to_l1_public does not hash withdraw(recipient, amount, caller_on_l1)" main \
+    "let content = $exit_hash;" "let content = 0; assert(true, \"let content = $exit_hash;\");"
+  mutant exit_quoted_config "exit_to_l1_private does not read config from storage" main \
+    "let config = self.storage.config.read();
+assert(recipient != config.portal, \"Recipient cannot be the portal\");
+if as_merchant" \
+    "let config = Config { token_minter_proxy: config.token_minter_proxy, token: config.token, portal: caller_on_l1 };
+assert(true, \"let config = self.storage.config.read();\");
+assert(recipient != config.portal, \"Recipient cannot be the portal\");
+if as_merchant"
   mutant exit_pays_twice "exit_to_l1_public messages the portal more than once" main "$exit_pay" "$exit_pay $exit_pay"
   mutant exit_pays_portal "exit_to_l1_public does not hash withdraw(recipient, amount, caller_on_l1)" main \
     "$exit_hash" "withdraw_content_hash(config.portal, amount, caller_on_l1)"
