@@ -2,7 +2,7 @@
 pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
-import {ReentrancyGuard} from "@oz/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
 
 import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
@@ -165,7 +165,7 @@ contract Permit2DepositRouterTest is RouterFixture {
         );
         _deposit(100e6, false);
 
-        assertEq(hook.innerResult(), ReentrancyGuard.ReentrancyGuardReentrantCall.selector, "re-entry allowed");
+        assertEq(hook.innerResult(), ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector, "re-entry allowed");
         assertEq(hook.balanceOf(address(portal)), 100e6, "outer deposit exact");
         assertEq(inbox.sent(), 1, "one message");
         _assertRouterClean(0);

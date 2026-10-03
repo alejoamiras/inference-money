@@ -73,8 +73,12 @@ contract PortalWithdrawRealOutboxTest is Test {
     }
 
     function test_provenMessagesPayOnce() public {
+        vm.expectEmit(address(portal));
+        emit TokenPortal.Withdraw(alice, 200, relayer);
         vm.prank(relayer);
         portal.withdraw(alice, 200, true, EPOCH, CHECKPOINTS, 0, _path(bobLeaf, emptyPair));
+        vm.expectEmit(address(portal));
+        emit TokenPortal.Withdraw(bob, 300, address(0));
         vm.prank(mallory);
         portal.withdraw(bob, 300, false, EPOCH, CHECKPOINTS, 1, _path(aliceLeaf, emptyPair));
         _assertBalances(200, 300);

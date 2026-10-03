@@ -11,6 +11,7 @@
 //     Aztec address), and every deposit must raise the portal's balance by exactly `amount`.
 //   - `withdraw` must lower the portal's balance by exactly `amount`.
 //   - Deposits and `withdraw` are nonReentrant.
+//   - `initialize` and `withdraw` emit events (`PortalInitialized`, `Withdraw`).
 pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
@@ -27,8 +28,9 @@ import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
 import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 
 import {IDepositRouter} from "./interfaces/IDepositRouter.sol";
+import {ITokenPortal} from "./interfaces/ITokenPortal.sol";
 
-contract TokenPortal is ReentrancyGuardTransient {
+contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     error AlreadyInitialized();
@@ -50,6 +52,22 @@ contract TokenPortal is ReentrancyGuardTransient {
     event DepositToAztecPrivate(
         address indexed depositor, uint256 amount, bytes32 secretHashForL2MessageConsumption, bytes32 key, uint256 index
     );
+
+    /// @notice The portal's whole binding, including the Outbox that is `withdraw`'s only authority.
+    event PortalInitialized(
+        address registry,
+        address indexed underlying,
+        bytes32 l2Bridge,
+        address router,
+        address rollup,
+        address inbox,
+        address outbox,
+        uint256 rollupVersion
+    );
+
+    /// @notice `amount` is the reserve's debit and the message's amount, not what the recipient nets under a token fee.
+    /// `callerOnL1` is the caller the message was hashed with: zero means anyone could execute it, never the tx sender.
+    event Withdraw(address indexed recipient, uint256 amount, address callerOnL1);
 
     IRegistry public registry;
     IERC20 public underlying;
@@ -92,6 +110,10 @@ contract TokenPortal is ReentrancyGuardTransient {
         outbox = rollup.getOutbox();
         inbox = rollup.getInbox();
         rollupVersion = rollup.getVersion();
+
+        emit PortalInitialized(
+            _registry, _underlying, _l2Bridge, _router, address(rollup), address(inbox), address(outbox), rollupVersion
+        );
     }
 
     /**
@@ -166,14 +188,13 @@ contract TokenPortal is ReentrancyGuardTransient {
         uint256 _leafIndex,
         bytes32[] calldata _path
     ) external nonReentrant {
+        address callerOnL1 = _withCaller ? msg.sender : address(0);
         // The signature only tags the action so the hash is unique to it; nothing calls it.
         DataStructures.L2ToL1Msg memory message = DataStructures.L2ToL1Msg({
             sender: DataStructures.L2Actor(l2Bridge, rollupVersion),
             recipient: DataStructures.L1Actor(address(this), block.chainid),
             content: Hash.sha256ToField(
-                abi.encodeWithSignature(
-                    "withdraw(address,uint256,address)", _recipient, _amount, _withCaller ? msg.sender : address(0)
-                )
+                abi.encodeWithSignature("withdraw(address,uint256,address)", _recipient, _amount, callerOnL1)
             )
         });
 
@@ -184,6 +205,7 @@ contract TokenPortal is ReentrancyGuardTransient {
         uint256 before = underlying.balanceOf(address(this));
         underlying.safeTransfer(_recipient, _amount);
         if (before - underlying.balanceOf(address(this)) != _amount) revert InexactTransfer();
+        emit Withdraw(_recipient, _amount, callerOnL1);
     }
 
     function _depositPublic(address _depositor, bytes32 _to, uint256 _amount, bytes32 _secretHash)
