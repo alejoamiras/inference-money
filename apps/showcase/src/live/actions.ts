@@ -16,6 +16,7 @@ import {
 	L2_PROPOSED,
 	type ListOptions,
 	openRequest,
+	payReplacingStale,
 	payRequest,
 	reconcileDeposit,
 	syncMerchantList,
@@ -256,36 +257,40 @@ async function request(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 }
 
 /**
- * Pays a merchant through a request it opened for the payer, as its server would, reusing one already open. A user
- * cannot open a stamped request, so paying a user pays into one made without the merchant list, which the rules refuse.
+ * The request a merchant `d.to` opens for the payer, as its server would, kept until paid. A user cannot open a stamped
+ * request, so paying a user pays into one made without the merchant list, which the rules refuse.
  */
+async function openFor(ctx: LiveCtx, d: ValidDraft, key: string, opts: ListOptions): Promise<Fr> {
+	if (!isMerchant(d.to)) return Fr.random()
+	const merchant = address(ctx, d.to)
+	const intent = { from: merchant, to: merchant, completer: address(ctx, d.actor) }
+	const { commitment } = await openRequest(ctx.demo.wallet, ctx.demo.node, token(ctx), intent, opts)
+	ctx.requests.set(key, commitment)
+	return commitment
+}
+
+/** Pays a merchant through a request it opened for the payer, reusing one already open unless it is too old. */
 async function pay(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 	const since = ctx.demo.sent.length
 	const key = `${d.to}>${d.actor}`
 	const opts = await listOptions(ctx)
-	let commitment = ctx.requests.get(key)
-	if (!commitment && isMerchant(d.to)) {
-		const merchant = address(ctx, d.to)
-		const intent = { from: merchant, to: merchant, completer: address(ctx, d.actor) }
-		commitment = (await openRequest(ctx.demo.wallet, ctx.demo.node, token(ctx), intent, opts)).commitment
-		ctx.requests.set(key, commitment)
+	const amount = d.amount as bigint
+	const payInto = async (commitment: Fr) => {
+		const payment = { from: address(ctx, d.actor), commitment, amount, kind: "private" } as const
+		try {
+			await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
+		} catch (e) {
+			// Refused before any send: a request opened at a proposed block that a prune removed holds no stamp any more.
+			if (message(e) === TOKEN_REFUSALS.payment) ctx.requests.delete(key)
+			throw e
+		}
 	}
-	const payment = {
-		from: address(ctx, d.actor),
-		commitment: commitment ?? Fr.random(),
-		amount: d.amount as bigint,
-		kind: "private",
-	} as const
-	try {
-		await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
-	} catch (e) {
-		// Refused before any send: a request opened at a proposed block that a prune removed holds no stamp any more.
-		if (message(e) === TOKEN_REFUSALS.payment) ctx.requests.delete(key)
-		throw e
-	}
+	const reopen = () => openFor(ctx, d, key, opts)
+	const stored = ctx.requests.get(key)
+	await (stored ? payReplacingStale(ctx.demo.gate, token(ctx), stored, payInto, reopen) : payInto(await reopen()))
 	ctx.requests.delete(key)
 	const kinds: TxKind[] = ctx.demo.sent.length - since > 1 ? ["request", "pay"] : ["pay"]
-	const detail = `${HOLDER_NAME[d.actor]} paid ${usdc2(payment.amount)} USDC into ${HOLDER_NAME[d.to]}'s request.`
+	const detail = `${HOLDER_NAME[d.actor]} paid ${usdc2(amount)} USDC into ${HOLDER_NAME[d.to]}'s request.`
 	return { kind: "settled", detail, rows: await aztecRows(ctx, since, kinds) }
 }
 

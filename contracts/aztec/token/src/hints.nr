@@ -7,6 +7,9 @@
 //   1. a merchant side is always kept, and the answer is NEITHER only when no side is a merchant;
 //   2. opening a request, a merchant recipient is always proven, so a merchant's request is stamped, never padded;
 //   3. otherwise, of two merchants, prove the one with no change scheduled ahead: its read keeps the tx's expiry longest.
+// A payment into a request has its own order, by what each proof costs the tx's expiry: a stamp still unmarked (it
+// caps nothing a tx would not have anyway), else a merchant payer, else a live stamp (it shortens the expiry), else
+// NEITHER.
 use aztec::{
     oracle::{capsules, nullifiers::check_nullifier_exists, storage::raw_storage_read},
     protocol::{
@@ -16,7 +19,9 @@ use aztec::{
     },
     state_vars::{Map, PublicImmutable, StateVariable},
 };
-use merchant_stamp::MERCHANT_SIDE_SLOT;
+use merchant_stamp::{
+    MERCHANT_SIDE_SLOT, stamp, stamp_bucket, STAMP_BUCKET_SLOT, STAMP_LIVE_BUCKETS, stamp_unmarked_until,
+};
 
 pub global FIRST: u8 = 0;
 pub global SECOND: u8 = 1;
@@ -55,22 +60,52 @@ pub unconstrained fn merchant_side_hint(
     })
 }
 
-/// Which proof a payment into a request makes: FIRST (the request's stamp exists), SECOND (`from` is a merchant) or
-/// NEITHER. The stamp comes first: proving it reads no merchant entry, so it caps no expiry.
+/// Which proof a payment into a request makes, and of which stamp: FIRST (the stamp in the returned bucket), SECOND
+/// (`from` is a merchant) or NEITHER. A capsule naming the payer needs no stamp, so none is looked for.
 pub unconstrained fn payment_side_hint(
     list: MerchantList,
-    stamp_nullifier: Field,
+    commitment: Field,
     from: AztecAddress,
-) -> u8 {
-    capsule_side(list.this).unwrap_or_else(|| {
-        if check_nullifier_exists(stamp_nullifier) {
+) -> (u8, u64) {
+    let named = capsule_side(list.this);
+    let bucket = if named.is_some() & (named.unwrap_unchecked() != FIRST) {
+        Option::none()
+    } else {
+        live_stamp(list, commitment)
+    };
+    let side = named.unwrap_or_else(|| {
+        let unmarked = bucket.is_some()
+            & (list.anchor.timestamp() < stamp_unmarked_until(bucket.unwrap_unchecked()));
+        if unmarked {
             FIRST
         } else if probe(list, from).merchant {
             SECOND
+        } else if bucket.is_some() {
+            FIRST
         } else {
             NEITHER
         }
-    })
+    });
+    (side, bucket.unwrap_or(0))
+}
+
+// The bucket of the request's stamp: the tx's capsule when it carries one (passed through unchecked, like the side),
+// else the newest bucket still live at the anchor whose stamp exists there.
+unconstrained fn live_stamp(list: MerchantList, commitment: Field) -> Option<u64> {
+    capsules::load(list.this, STAMP_BUCKET_SLOT, AztecAddress::zero())
+        .map(|bucket: Field| bucket as u64)
+        .or_else(|| {
+            let newest = stamp_bucket(list.anchor.timestamp());
+            let mut found = Option::none();
+            for i in 0..STAMP_LIVE_BUCKETS {
+                if found.is_none() & (i <= newest) {
+                    if check_nullifier_exists(stamp(commitment, newest - i)) {
+                        found = Option::some(newest - i);
+                    }
+                }
+            }
+            found
+        })
 }
 
 /// Whether `account` is a listed merchant, switched on, at the anchor block, per the node.

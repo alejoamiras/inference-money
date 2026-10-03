@@ -4,6 +4,7 @@ Open work lifted out of closed plans, one line each with a pointer; delete a lin
 
 ## Testnet
 
+- Redeploy testnet with the expiring, pay-once token, then record the demo again: `deployments/testnet.json` names the old token's class id, which the current artifact no longer derives, so production's live mode cannot use that deployment until then. [plan](harden-security-whole-repo/plan.md#arc-2-expiring-pay-once-stamps)
 - Replace the temporary dRPC node URL (`packages/deployer/src/networks.ts`, carried into `deployments/testnet.json` and the testnet bundle's CSP) with a keyless public node once one serves rollup `2914217885`. [D29](archive/usdc-bridge/plan.md#decision-ledger)
 - A poisoned demo binding is fixed only by rotation (`demo setup --rotate`): a new users' tag, a new cast and fresh demo funds. [plan](archive/galactica-compliant-usdc/plan.md#key-interfaces-storage-message-formats)
 - The showcase's conflict retry trusts the node's outright refusal. An SDK retry after a lost response, read from a lagging backend, could still send twice: fine for demo funds, not for real ones. [phase-15](archive/galactica-compliant-usdc/lessons/phase-15.md)

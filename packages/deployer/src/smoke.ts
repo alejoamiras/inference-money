@@ -20,6 +20,7 @@ import {
 	l2UsdcBalance,
 	openRequest,
 	outboxReader,
+	payReplacingStale,
 	payRequest,
 	syncMerchantList,
 	tokenRefusalOf,
@@ -199,12 +200,15 @@ const STEPS: Record<SmokeStep, (r: Run) => Promise<TourStep>> = {
 	},
 	pay: async (r) => {
 		if (!r.state.commitment) throw new Error("no request stored")
-		const commitment = Fr.fromHexString(r.state.commitment)
-		const list = await syncMerchantList(r.s.node, tokenAddress(r))
-		const p = { from: r.cast.alice.address, commitment, amount: A.deposit, kind: "private" } as const
-		await payRequest(r.s.gate, r.s.wallet, tokenAddress(r), p, { list, fee: sponsoredFee(r.s.m) })
-		if ((await completionCount(r.s.node, tokenAddress(r), commitment)) !== 1)
-			throw new Error("the request is not completed exactly once")
+		const payInto = async (commitment: Fr) => {
+			const list = await syncMerchantList(r.s.node, tokenAddress(r))
+			const p = { from: r.cast.alice.address, commitment, amount: A.deposit, kind: "private" } as const
+			await payRequest(r.s.gate, r.s.wallet, tokenAddress(r), p, { list, fee: sponsoredFee(r.s.m) })
+			if ((await completionCount(r.s.node, tokenAddress(r), commitment)) !== 1)
+				throw new Error("the request is not completed exactly once")
+		}
+		const stored = Fr.fromHexString(r.state.commitment)
+		await payReplacingStale(r.s.gate, tokenAddress(r), stored, payInto, () => reopenRequest(r))
 		return aztecEntry(r, "pay")
 	},
 	refund: async (r) => {
@@ -280,6 +284,20 @@ async function settleJournal(r: Run, step: SmokeStep): Promise<TourStep | undefi
 		r.state.exit = encodeTicket("exit", t)
 	}
 	return aztecEntry(r, step)
+}
+
+/**
+ * Runs the request step again, journaled and recorded as itself, so the tour shows the request the payment completes;
+ * returns its commitment.
+ */
+async function reopenRequest(r: Run): Promise<Fr> {
+	r.log("the stored request is too old to pay without marking the payment: opening a new one")
+	r.state.done = r.state.done.filter((s) => s !== "request")
+	save(r)
+	r.state.tour.request = await STEPS.request(r)
+	r.state.done.push("request")
+	save(r)
+	return Fr.fromHexString(r.state.commitment!)
 }
 
 async function runSteps(r: Run): Promise<void> {

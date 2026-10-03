@@ -1,27 +1,35 @@
 /**
- * Payment requests on the merchant token: open one, check its stamp, and pay it at most once from one client.
+ * Payment requests on the merchant token: open one, find its stamp, and pay it at most once from one client.
  *
- * A request is a partial note's commitment. Completion is not single-use, and a stock wallet discovers only the first
- * completion (aztec-nr `uint_note.nr`), so a second payment into one request lands as a note nothing finds. `payRequest`
- * therefore refuses a request completed on chain, or one this client has paid or is paying, through one
- * {@link PaymentRecord} per request in an injected {@link PaymentStore}:
+ * A request is a partial note's commitment. The token takes one payment into it, refusing a second only once it reaches
+ * the chain, after its proof (and, publicly, its fee). `payRequest` therefore refuses a request completed on chain, or
+ * one this client has paid or is paying, through one {@link PaymentRecord} per request in an injected
+ * {@link PaymentStore}:
  * - `reserved`, under the store's lock before anything is simulated; a failure before the send releases it;
  * - `sent`, written by the {@link PaymentGate}, whose node the payer's wallet must be built on, between proving and the
  *   node receiving the tx, with the tx's hash and expiry. Only finalized chain state moves it on: to `paid` with the
  *   tx, or released once the tx's revert, or the chain passing its expiry without it, is final. So an uncertain send
  *   never allows a second one;
- * - `paid`.
- * Clients that share no store (two devices) can still both pay; the on-chain check only narrows that window.
+ * - `paid`;
+ * - `replaced`, by the request opened in place of a stale one ({@link payReplacingStale}); every later attempt on
+ *   the stale one is refused as `replaced`, and only {@link payReplacingStale} follows it.
+ * Clients that share no store (two devices) can still both prove a payment; the token lands one.
+ *
+ * A private payment through a stamp caps the tx's expiry at the stamp's deadline. While the stamp is fresh that cap is
+ * above the expiry every tx commits; later, the shorter expiry would tell an observer the request's age. So a user's
+ * private payment through a stamp no longer fresh is refused as `stale`: before proving, and at the gate on the proven
+ * tx's committed expiry, which is the guarantee.
  */
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Contract, NO_WAIT } from "@aztec-labs/aztec.js/contracts"
 import type { FeePaymentMethod } from "@aztec-labs/aztec.js/fee"
-import type { Fr } from "@aztec-labs/aztec.js/fields"
+import { Fr } from "@aztec-labs/aztec.js/fields"
 import { type AztecNode, waitForTx } from "@aztec-labs/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { poseidon2HashWithSeparator } from "@aztec-labs/foundation/crypto/sync"
 import { FunctionSelector } from "@aztec-labs/stdlib/abi"
+import { siloNullifier } from "@aztec-labs/stdlib/hash"
 import { SiloedTag, Tag } from "@aztec-labs/stdlib/logs"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import type { OffchainEffect, Tx } from "@aztec-labs/stdlib/tx"
@@ -29,12 +37,17 @@ import { tokenArtifact } from "./artifacts"
 import { L2_DONE, type L2Wait } from "./claim"
 import { type MerchantList, merchantSide, paymentSide, Side, sideCapsule, withFreshList } from "./merchants"
 import { TOKEN_REFUSALS } from "./rules"
-import { REQUEST_OPENED_EFFECT, siloedRequestMarks } from "./stamp"
+import { bucketCapsule, liveBuckets, REQUEST_OPENED_EFFECT, type RequestStamp, requestStampAt, stamp } from "./stamp"
 
 /** aztec-nr's DOM_SEP__NOTE_COMPLETION_LOG_TAG (`note/partial_note.nr`): tags the log every completion emits. */
 const DOM_SEP__NOTE_COMPLETION_LOG_TAG = 3372669888
 /** The kernel's cap on a tx's lifetime (MAX_TX_LIFETIME): no tx outlives its anchor by more. */
 const MAX_TX_LIFETIME = 86_400n
+/**
+ * The expiry the PXE commits for a tx the kernel caps at its default update horizon (anchor + 86 399 s): rounded down
+ * to whole hours. Every tx that reads no shorter-lived state commits it, so it marks nothing.
+ */
+export const STANDARD_TX_LIFETIME = 82_800n
 /** How long a reservation blocks other clients before it counts as abandoned; the gate refuses a superseded one. */
 export const RESERVATION_TTL_MS = 10 * 60_000
 
@@ -42,6 +55,7 @@ export type PaymentRecord =
 	| { state: "reserved"; owner: string; since: number }
 	| { state: "sent"; owner: string; txHash: string; expiresAt: string }
 	| { state: "paid"; txHash: string }
+	| { state: "replaced"; by: string }
 
 /** One record per request, shared by every tab or process that pays from this client. */
 export interface PaymentStore {
@@ -72,12 +86,14 @@ export function memoryPaymentStore(): PaymentStore {
 	}
 }
 
-export type PaymentRefusal = "paid" | "in-flight" | "completed-on-chain"
+export type PaymentRefusal = "paid" | "in-flight" | "completed-on-chain" | "stale" | "replaced"
 
 const REFUSAL_TEXT: Record<PaymentRefusal, string> = {
 	paid: "This request is already paid.",
-	"in-flight": "This request is already being paid; wait for that payment, or open a new request.",
-	"completed-on-chain": "This request was already paid on chain; a second payment would never reach its recipient.",
+	"in-flight": "This request is already being paid; wait for that payment to settle.",
+	"completed-on-chain": "This request was already paid on chain; it takes no second payment.",
+	stale: "This request is too old to pay without marking the payment; ask for a new one.",
+	replaced: "This request was replaced by a newer one; pay that one instead.",
 }
 
 /** `payRequest` refused before anything was sent. */
@@ -119,11 +135,22 @@ export async function completionCount(
 	return (privateLogs?.length ?? 0) + (publicLogs?.length ?? 0)
 }
 
-/** Whether `commitment` was opened for a merchant (its stamp exists) by the node's latest block. */
-export async function isStamped(node: Pick<AztecNode, "findLeavesIndexes">, token: AztecAddress, commitment: Fr): Promise<boolean> {
-	const { stamp } = await siloedRequestMarks(token, commitment)
-	const [found] = await node.findLeavesIndexes("latest", MerkleTreeId.NULLIFIER_TREE, [stamp])
-	return found !== undefined
+/**
+ * The newest stamp of `commitment` live at the node's latest block, its candidates checked in one node call; undefined
+ * when none is live (the request was not opened for a merchant, or more than a day ago).
+ */
+export async function requestStamp(
+	node: Pick<AztecNode, "findLeavesIndexes" | "getBlockData">,
+	token: AztecAddress,
+	commitment: Fr,
+): Promise<RequestStamp | undefined> {
+	const at = await timestampAt(node, "latest")
+	if (at === undefined) throw new Error("The node has no latest block.")
+	const buckets = liveBuckets(at)
+	const leaves = await Promise.all(buckets.map((b) => siloNullifier(token, stamp(commitment, b))))
+	const found = await node.findLeavesIndexes("latest", MerkleTreeId.NULLIFIER_TREE, leaves)
+	const i = found.findIndex((f) => f !== undefined)
+	return i < 0 ? undefined : requestStampAt(buckets[i]!, at)
 }
 
 /** The commitment an opening handed its sender as `[REQUEST_OPENED_EFFECT, c]`; throws unless the tx opened exactly one. */
@@ -200,6 +227,8 @@ interface Expected {
 	token: AztecAddress
 	commitment: Fr
 	siloedTag: Fr
+	/** A private payment through the stamp: refused unless it commits the standard expiry. */
+	unmarked: boolean
 }
 
 let publicPaySelector: Promise<Fr> | undefined
@@ -232,6 +261,10 @@ async function pays(tx: Tx, e: Expected): Promise<boolean> {
 async function timestampAt(node: Pick<AztecNode, "getBlockData">, tag: "latest" | "finalized"): Promise<bigint | undefined> {
 	return (await node.getBlockData(tag))?.header.globalVariables.timestamp
 }
+
+/** Whether `tx` commits an expiry under the standard one, which only state it read can cause. */
+const shortLived = (tx: Tx): boolean =>
+	tx.data.expirationTimestamp < tx.data.constants.anchorBlockHeader.globalVariables.timestamp + STANDARD_TX_LIFETIME
 
 /**
  * What the chain proves about a sent tx expiring at `expiresAt`: "gone" once it reverted in a finalized block or a
@@ -267,6 +300,7 @@ async function refreshed(r: PaymentRecord | undefined, node: PaymentNode, now: n
 
 function refusalFor(r: PaymentRecord | undefined): PaymentRefusedError {
 	if (r?.state === "paid") return new PaymentRefusedError("paid", r.txHash)
+	if (r?.state === "replaced") return new PaymentRefusedError("replaced")
 	return new PaymentRefusedError("in-flight", r?.state === "sent" ? r.txHash : undefined)
 }
 
@@ -337,13 +371,48 @@ export class PaymentGate {
 	}
 
 	/**
-	 * Runs `send` with `owner`'s payment into `commitment` expected at the node. One attempt per request at a time: a
-	 * second one, possible once the first's reservation lapsed, is refused rather than sharing the expectation.
+	 * Refuses `owner`'s attempt as `stale` while it still holds the request's reservation, so nothing is in flight or
+	 * paid for the request from this client; otherwise as whatever holds the request now.
 	 */
-	async sending(key: string, owner: string, token: AztecAddress, commitment: Fr, send: () => Promise<TxHash>): Promise<TxHash> {
+	refuseStale(key: string, owner: string): Promise<never> {
+		return this.store.locked(key, async () => {
+			const r = await this.store.get(key)
+			throw r?.state === "reserved" && r.owner === owner ? new PaymentRefusedError("stale") : refusalFor(r)
+		})
+	}
+
+	/**
+	 * The request that replaces `key`'s stale one: the one already recorded, else the one `reopen` opens now, recorded
+	 * under the lock it held throughout, so attempts that meet the same stale request pay one replacement. Refused, as
+	 * {@link PaymentGate.reserve} would, while another attempt holds the stale request.
+	 */
+	replacing(key: string, reopen: () => Promise<Fr>): Promise<Fr> {
+		return this.store.locked(key, async () => {
+			const r = await refreshed(await this.store.get(key), this.node, this.now())
+			if (r?.state === "replaced") return Fr.fromHexString(r.by)
+			if (r) throw refusalFor(r)
+			const by = await reopen()
+			await this.store.put(key, { state: "replaced", by: by.toString() })
+			return by
+		})
+	}
+
+	/**
+	 * Runs `send` with `owner`'s payment into `commitment` expected at the node. One attempt per request at a time: a
+	 * second one, possible once the first's reservation lapsed, is refused rather than sharing the expectation. An
+	 * `unmarked` payment is refused as {@link PaymentGate.refuseStale} unless it commits the standard expiry.
+	 */
+	async sending(
+		key: string,
+		owner: string,
+		token: AztecAddress,
+		commitment: Fr,
+		send: () => Promise<TxHash>,
+		unmarked = false,
+	): Promise<TxHash> {
 		const siloedTag = await siloedCompletionTag(token, commitment)
 		if (this.expected.has(key)) throw new PaymentRefusedError("in-flight")
-		this.expected.set(key, { owner, token, commitment, siloedTag })
+		this.expected.set(key, { owner, token, commitment, siloedTag, unmarked })
 		try {
 			const txHash = await send()
 			if (!this.recorded.has(owner)) await this.recordMissed(key, owner, txHash)
@@ -356,7 +425,9 @@ export class PaymentGate {
 
 	private async recordThenSend(target: AztecNode, tx: Tx): Promise<void> {
 		for (const [key, e] of this.expected) {
-			if (await pays(tx, e)) await this.recordSent(key, e.owner, tx.getTxHash().toString(), tx.data.expirationTimestamp)
+			if (!(await pays(tx, e))) continue
+			if (e.unmarked && shortLived(tx)) await this.refuseStale(key, e.owner)
+			await this.recordSent(key, e.owner, tx.getTxHash().toString(), tx.data.expirationTimestamp)
 		}
 		return target.sendTx(tx)
 	}
@@ -396,17 +467,19 @@ export interface PaymentIntent {
 	kind: "private" | "public"
 }
 
-function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side: Side) {
+/** A private payment through the stamp names its bucket, sparing the token's search. */
+function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side: Side, bucket: bigint | undefined) {
 	const methods = Contract.at(token, tokenArtifact, wallet).methods
 	if (p.kind === "public") return methods.transfer_public_to_commitment!(p.from, p.commitment, p.amount, 0)
-	return methods.transfer_private_to_commitment!(p.from, p.commitment, p.amount, 0).with({ capsules: [sideCapsule(token, side)] })
+	const capsules = [sideCapsule(token, side), ...(bucket === undefined ? [] : [bucketCapsule(token, bucket)])]
+	return methods.transfer_private_to_commitment!(p.from, p.commitment, p.amount, 0).with({ capsules })
 }
 
 /**
  * Pays `amount` into a request with a wallet built by `gate.bindWallet`. Refused before anything is proven when the
- * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), or neither stamped nor
- * paid by a merchant. Returns once the payment reaches `opts.wait` (a checkpoint by default); its record turns `paid`
- * when finalized
+ * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), has no live stamp and
+ * a user pays it, or, for a user's private payment, its stamp is no longer fresh (`stale`: open a new request). Returns
+ * once the payment reaches `opts.wait` (a checkpoint by default); its record turns `paid` when finalized
  * ({@link PaymentGate.status}).
  */
 export async function payRequest(
@@ -421,18 +494,15 @@ export async function payRequest(
 	const owner = await gate.reserve(key)
 	try {
 		if ((await completionCount(gate.node, token, p.commitment)) > 0) throw new PaymentRefusedError("completed-on-chain")
-		const stamped = await isStamped(gate.node, token, p.commitment)
-		const txHash = await withFreshList(opts.list, opts.resync, (list) => {
-			const side = paymentSide(list, stamped, p.from)
+		const found = await requestStamp(gate.node, token, p.commitment)
+		const txHash = await withFreshList(opts.list, opts.resync, async (list) => {
+			const side = paymentSide(list, found?.state ?? "none", p.from)
 			if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.payment)
-			const call = paymentCall(wallet, token, p, side)
-			return gate.sending(
-				key,
-				owner,
-				token,
-				p.commitment,
-				async () => (await call.send({ from: p.from, fee: opts.fee, wait: NO_WAIT })).txHash,
-			)
+			const throughStamp = p.kind === "private" && side === Side.First
+			if (throughStamp && found?.state === "live") await gate.refuseStale(key, owner)
+			const call = paymentCall(wallet, token, p, side, throughStamp ? found?.bucket : undefined)
+			const send = async () => (await call.send({ from: p.from, fee: opts.fee, wait: NO_WAIT })).txHash
+			return gate.sending(key, owner, token, p.commitment, send, throughStamp)
 		})
 		const receipt = await waitForTx(gate.node, txHash, { ...(opts.wait ?? L2_DONE), dontThrowOnRevert: true })
 		if (receipt.hasExecutionReverted()) {
@@ -443,5 +513,35 @@ export async function payRequest(
 		return txHash
 	} finally {
 		await gate.releaseUnsent(key, owner)
+	}
+}
+
+/**
+ * Pays into `stored`, or, when and only when {@link payRequest} refuses it as `stale` or `replaced`, into its
+ * replacement: the one another attempt already opened, else the one `reopen` opens ({@link PaymentGate.replacing}),
+ * following replacements that went stale in turn and opening at most one. `stale` means nothing is in flight or paid for a request from this
+ * client, and every attempt shares one replacement, so it is not a second payment; any other refusal is thrown as is.
+ */
+export async function payReplacingStale<T>(
+	gate: PaymentGate,
+	token: AztecAddress,
+	stored: Fr,
+	pay: (commitment: Fr) => Promise<T>,
+	reopen: () => Promise<Fr>,
+): Promise<T> {
+	let commitment = stored
+	let opened = false
+	const open = () => {
+		opened = true
+		return reopen()
+	}
+	for (;;) {
+		try {
+			return await pay(commitment)
+		} catch (e) {
+			const replaceable = e instanceof PaymentRefusedError && (e.reason === "stale" || e.reason === "replaced")
+			if (!replaceable || opened) throw e
+			commitment = await gate.replacing(paymentKey(token, commitment), open)
+		}
 	}
 }

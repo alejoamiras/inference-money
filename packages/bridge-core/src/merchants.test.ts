@@ -57,10 +57,10 @@ describe("the side a call proves", () => {
 		expect(merchantSide(firstPending, m1, m2, true)).toBe(Side.First)
 	})
 
-	it("proves a payment's stamp before its payer, and refuses a user paying an unstamped request", () => {
-		expect(paymentSide(one, true, alice)).toBe(Side.First)
-		expect(paymentSide(one, false, m1)).toBe(Side.Second)
-		expect(paymentSide(one, false, alice)).toBe(Side.Neither)
+	it("proves a fresh stamp, else a merchant payer, else a live stamp, and refuses a user with no live stamp", () => {
+		expect([paymentSide(one, "fresh", m1), paymentSide(one, "fresh", alice)]).toEqual([Side.First, Side.First])
+		expect([paymentSide(one, "live", m1), paymentSide(one, "live", alice)]).toEqual([Side.Second, Side.First])
+		expect([paymentSide(one, "none", m1), paymentSide(one, "none", alice)]).toEqual([Side.Second, Side.Neither])
 	})
 
 	it("is carried in the token's capsule slot", () => {

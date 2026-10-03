@@ -8,7 +8,7 @@ describe("L2 artifacts derive their pinned class ids", () => {
 	it.each([
 		["TokenBridge", tokenBridgeArtifact, "0x0115c9fc1641120594b5722ee56f9aecb7abbefbca2130125036311a1299e0e6"],
 		["TokenMinterProxy", tokenMinterProxyArtifact, "0x0d218cb0d087edd630903d41a8a963c56ec7f46a852ee1a6e31d7e9943d0d2e6"],
-		["Token (merchant fork)", tokenArtifact, "0x0a1c52d7c23324567f60e817022467335af1c77d52c69e7751109411f73b87a5"],
+		["Token (merchant fork)", tokenArtifact, "0x2ce01e06458ad6ca41db9c0640fe015970fe253af97d1e8af75397a636e08b3e"],
 	] as const)("%s", async (_, artifact, classId) => {
 		expect((await getContractClassFromArtifact(artifact)).id.toString()).toBe(classId)
 	})

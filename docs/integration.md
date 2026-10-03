@@ -12,10 +12,16 @@ Every Aztec account is either a **merchant** (on the token's list, curated by th
 | Claim a deposit | Only the recipient itself may submit a private claim. | Anyone may submit a public claim; the tokens always land with the merchant the deposit names. |
 | Send privately | Only to a merchant. | To anyone. |
 | Open a payment request | Only with a merchant as the recipient. | With any recipient. |
-| Pay a request | Only one whose recipient is a merchant (stamped). | Any request. |
+| Pay a request | Only one opened for a merchant (stamped), until its stamp expires a day later. | Any request. |
 | Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address. |
 
-A stamp outlives its merchant's switch-off. A switched-off merchant is a user from then on, but a request stamped for it before the switch-off landed stays payable by the payer it names, in any amount, with no end date.
+A stamp carries the hour its opening anchored in and expires 24 h to 25 h after that anchor (`stampDeadline`), and a switch-off does not end it sooner: a switched-off merchant is a user from then on, but a request stamped for it before the switch-off landed stays payable by the payer it names until the stamp expires, so under 25 h after the switch-off. A merchant payer can pay any request without a stamp, so no stamp's expiry binds it.
+
+Every request takes one payment, privately or publicly: the first positive completion, in whatever amount the payer sent. The recipient checks the amount; a private payment of zero is refused.
+
+The payer is the completer the opening named, which is the caller of the payment, not necessarily the account debited. A contract named as completer must decide who may call it: one that lets anyone through lets anyone spend the request's one payment with one unit.
+
+Integrations written against upstream keep every signature and lose four behaviours: a second completion of one commitment, a private completion of zero, a user's payment into a commitment stamped more than a day ago, and a shared relay as completer without an access rule of its own.
 
 A deposit that can't be claimed (a public deposit to a user, or a private one from another address than the recipient's funding address) is **returned**: anyone holding its claim data consumes it on Aztec, nothing is minted, and the depositor is paid back on Ethereum once the epoch is proven. A merchant's public deposit is never returned, only claimed.
 
@@ -27,7 +33,10 @@ Each refusal is one exact string, exported from `bridge-core/src/rules.ts` (`TOK
 |---|---|---|
 | token | `Transfer refused: neither sender nor recipient is a merchant` | a private transfer between two users |
 | token | `Request refused: neither creator nor recipient is a merchant` | a request with no merchant on either side |
-| token | `Payment refused: users may only pay into requests opened for a merchant` | a user paying an unstamped request |
+| token | `Payment refused: users may only pay into requests opened for a merchant` | a user paying a request with no live stamp: opened for a user, or more than a day ago |
+| token | `Payment refused: the request's stamp has expired` | a private payment whose capsule names a stamp past its deadline |
+| token | `Payment refused: the request is already paid` | a second payment into one request, through either path |
+| token | `Payment refused: the amount is zero` | a private payment of zero |
 | bridge | `Public claims are for merchants only` | a public deposit to a user: return it |
 | bridge | `Only the recipient can claim privately` | a relayed private claim |
 | bridge | `Deposit is not from this account's funding address` | a private deposit from another address than the bound one: return it |
@@ -47,7 +56,8 @@ bridge-core raises typed errors before any signature or proof: `PublicDepositToU
 - **A claim that reports `consumed-unknown`** found its message already consumed, by an earlier claim or by a return. It is never a mint: `depositFate(ticket, node, manifest)` finds the consuming tx and whether it emitted a withdrawal to the depositor.
 - **Returns**: `waitReturnable`, then `returnDeposit(ticket, …)` gives an exit ticket for the depositor; `finishWithdrawal` pays it out on Ethereum, from any account. A depositor whose deposit someone else returned needs only the deposit ticket: `depositFate` names the return's tx, and `exitTicketFromTx(tx, depositor, amount, …)` builds the withdrawal. A tx that batches a claim with another return or exit of the same amount to the same address also reads as a withdrawal; finishing it pays the depositor either way.
 - **Merchant exits** pass `asMerchant: true`; the bridge proves the sender's listing at the tx's anchor block.
-- **Paying a request twice loses the second payment to a stock wallet.** Upstream completion is not single-use: each payment lands as a valid note, and the recipient's wallet discovers only the first. `payRequest` refuses a request it has paid or is paying; a facilitator that pays without `payments.ts` needs the same guard.
+- **A request takes one payment, and the token refuses a second only on chain**, after its proof (and, publicly, its fee). `payRequest` refuses before proving a request it has paid or is paying, or that was paid on chain; a facilitator that pays without `payments.ts` needs the same guard.
+- **A stale request.** A private payment through a stamp caps the tx's expiry at the stamp's deadline. Within about an hour of the opening that cap is above the 23 h every tx gets; later, the shorter expiry would tell an observer the request's age. So `payRequest` refuses a user's private payment through a stamp no longer fresh as `PaymentRefusedError` `"stale"`, before proving and again on the proven tx; replace it through `payReplacingStale`, never by hand. It acts only on `stale`, which is told only to the attempt holding the request's reservation, and records the replacement on the stale request: every later attempt on that request is refused as `replaced`, and `payReplacingStale` follows it to the one replacement, so attempts sharing a store pay once between them. Never replace a request refused as in flight, uncertain, paid or replaced: its payment can still land, or already has. A public payment sets no cap and is not refused.
 
 ## Messages between the chains
 
@@ -70,7 +80,7 @@ The bridge, in turn, refuses an exit no Ethereum call could pay: to the portal i
 ## What each action makes public
 
 - **Visible.** Ethereum shows who deposited and who withdrew, with amounts. Aztec shows claim and withdrawal amounts (total-supply writes) and payment-request amounts (completion logs). A return shows no amount on Aztec, but its payout on Ethereum shows recipient and amount, which a public deposit links back to. The merchant list is public. The pause checks a bridge call enqueues reveal bridge use, and an account's first claim is distinguishable from later ones.
-- **Inferable from the rules.** A private↔public transfer whose public side isn't a listed merchant has a merchant on its hidden side. An Ethereum withdrawal to an address that never deposited is a merchant's. Whoever knows a request's commitment can tell whether it was opened for a merchant.
-- **Linkable.** A merchant with a change pending is recognisable by its txs' expiry until the change lands, and so are all merchants proven under a 1 h delay.
+- **Inferable from the rules.** A private↔public transfer whose public side isn't a listed merchant has a merchant on its hidden side. An Ethereum withdrawal to an address that never deposited is a merchant's. Whoever knows a request's commitment can tell whether it was opened for a merchant, in which hour, and whether it is paid.
+- **Linkable.** A merchant with a change pending is recognisable by its txs' expiry until the change lands, and so are all merchants proven under a 1 h delay. So is a private payment through a stamp more than about an hour old, which bridge-core never sends.
 - **Your node** learns which merchant each proof reads, and a paid request's stamp; with bridge-core's capsule it learns nothing about your own address. Run your own node to keep this from third parties.
 - **Hidden.** Direct private transfers show only counts; with a 24 h delay their expiry equals any other tx's.
