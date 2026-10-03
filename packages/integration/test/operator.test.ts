@@ -137,18 +137,19 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			const next = await l2Actor()
 			const proposed = await nextBlock()
 			await proposeAdmin(wallet, m, owner, next, sponsored())
+			const handover = { owner: owner.toString(), pending_owner: next.toString() }
 			let cancelled: TxReceipt | undefined
 			let withdrawn: TxReceipt | undefined
 			try {
 				expect(await failing()).toEqual(["bridge: no ownership transfer pending", "no merchant admin handover pending"])
+				// `proposed` is open-ended: read it before the withdrawal below emits a second proposal (of zero).
+				expect(await emitted("bridge", "OwnershipTransferStarted", proposed)).toEqual([handover])
+				expect(await emitted("token", "MerchantAdminProposed", proposed)).toEqual([{ pending_admin: next.toString() }])
 			} finally {
 				cancelled = (await bridgeAt().methods.cancel_ownership_transfer!().send(asAdmin())).receipt
 				withdrawn = (await tokenAt().methods.propose_merchant_admin!(AztecAddress.ZERO).send(asAdmin())).receipt
 			}
 			expect(await failing()).toEqual([])
-			const handover = { owner: owner.toString(), pending_owner: next.toString() }
-			expect(await emitted("bridge", "OwnershipTransferStarted", proposed)).toEqual([handover])
-			expect(await emitted("token", "MerchantAdminProposed", proposed)).toEqual([{ pending_admin: next.toString() }])
 			expect(await emitted("bridge", "OwnershipTransferCancelled", { txHash: cancelled!.txHash })).toEqual([handover])
 			expect(await emitted("token", "MerchantAdminProposed", { txHash: withdrawn!.txHash })).toEqual([
 				{ pending_admin: AztecAddress.ZERO.toString() },
