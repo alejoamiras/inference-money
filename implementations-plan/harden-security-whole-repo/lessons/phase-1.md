@@ -21,4 +21,5 @@ Gate (2026-10-02, on `9f84cdb` plus the fixes): `bun run lint`, `bun run typeche
 ## Decisions
 
 - The guardian check replaces "no deploy key is the guardian" with a pin to an expected guardian (none by default): stricter, and it catches a guardian planted by any key. The integration test's expected check name changed with it; the integration suite runs at Phase 2's gate.
-- `wrangler` joins `apps/showcase` as an exact devDependency. It adds two paths to advisories already present (`undici`, `ws` through `miniflare`); the audit workflow is advisory.
+- `wrangler` joins the root as an exact devDependency. It adds two paths to advisories already present (`undici`, `ws` through `miniflare`); the audit workflow is advisory.
+- **First placed in `apps/showcase`, it broke Workers Builds on every PR.** The dashboard's deploy command runs `npx wrangler@4.138.0 … --config apps/showcase/wrangler.jsonc` from the root. Under the isolated linker, npx saw the version satisfied in the workspace and fetched nothing, yet no root `node_modules/.bin/wrangler` existed: exit 127, `wrangler: not found`. Reproduced keylessly with `--dry-run`. At the root, the dashboard's command and the package scripts both run the locked copy, with no dashboard change.

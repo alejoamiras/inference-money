@@ -41,7 +41,8 @@
 		"husky": "9.1.7",
 		"lint-staged": "17.5.1",
 		"sort-package-json": "4.0.0",
-		"typescript": "6.0.3"
+		"typescript": "6.0.3",
+		"wrangler": "4.138.0"
 	},
 	"packageManager": "bun@1.4.0",
 	"engines": {
