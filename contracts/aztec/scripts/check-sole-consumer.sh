@@ -11,13 +11,15 @@
 #                           first claim binds `depositor`, every later one must match it; mints to `recipient`.
 #   return_deposit_private: the same consumption; pays `depositor` on L1, once, and mints nothing.
 #   exit_to_l1_public needs a merchant sender; exit_to_l1_private holds a merchant to try_prove_merchant and a user to
-#   its funding address.
+#   its funding address. Each exit pays `recipient` on L1 once, unconditionally (at function scope), through one binding
+#   whose whole initializer is withdraw_content_hash(recipient, amount, caller_on_l1), none of those names rebound.
+# Each of the six reads config once, from storage, so config.portal is the stored portal.
 # No lower-level messaging/nullifier primitive may exist anywhere to consume around these checks. A stray site, raw
 # secret, foreign sender or misdirected payout turns a deposit into something whoever holds (salt, amount, leaf) can
 # redirect, or lets an attacker's L1 contract mint unbacked tokens.
 #
 # Counts are occurrences across every non-test source the bridge executes (its crate plus the local claim_secret and
-# portal_messages libs), after stripping comments; bodies are analysed on a newline-flattened copy because signatures
+# portal_messages libs), after stripping comments and emptying string literals; bodies are analysed on a newline-flattened copy because signatures
 # span lines.
 # `--self-test` mutates the real source one rule at a time and requires each mutant to fail for its own reason.
 set -euo pipefail
@@ -27,10 +29,10 @@ bridge_main="$aztec_root/token_bridge/src/main.nr"
 lib_src="$aztec_root/claim_secret/src"
 messages_src="$aztec_root/portal_messages/src"
 
-# Drops block and line comments but keeps string literals (matched first in one alternation), so neither a
-# commented-out shape nor a comment opener inside a string can hide or fake live code.
+# Drops block and line comments and empties string literals (matched first in one alternation, so a comment opener
+# inside a string is never read as one): no check can match commented-out or quoted text as code.
 strip_comments() {
-  LC_ALL=C perl -0pe 's{("(?:[^"\\]|\\.)*")|/\*.*?\*/|//[^\n]*}{defined $1 ? $1 : ""}gse'
+  LC_ALL=C perl -0pe 's{("(?:[^"\\]|\\.)*")|/\*.*?\*/|//[^\n]*}{defined $1 ? q("") : ""}gse'
 }
 
 violation() {
@@ -40,6 +42,8 @@ violation() {
 
 S='[[:space:]]*'
 config_read="let config${S}=${S}self\\.storage\\.config\\.read\\(\\)"
+# The context's own call: a lookalike (`not_message_portal(...)`) would pass a bare `message_portal(` match.
+pay_portal="(^|[^A-Za-z0-9_.])self\\.context\\.message_portal${S}\\(${S}config\\.portal${S},${S}"
 token_view="self\\.view\\(${S}Token::at\\(${S}config\\.token${S}\\)"
 
 # fn_body <flat source> <name>: the text from `fn <name>` up to the next ` fn `.
@@ -95,12 +99,11 @@ consumes_derived() {
 # flow_is <fn> <body> <conditions>: the body branches only on the rule conditions given (space-separated, in order) and
 # has no loop, match or closure: `if false { assert(…) }` keeps exactly the text the other checks match, but never runs.
 flow_is() {
-  local code ifs
-  code=$(printf '%s' "$2" | sed -E 's/"([^"\\]|\\.)*"//g')
-  if printf '%s' "$code" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
+  local ifs
+  if printf '%s' "$2" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
     violation "$1 has a loop, match or closure" || return 1
   fi
-  ifs=$(printf '%s' "$code" | grep -oE "(^|[^A-Za-z0-9_])if[^A-Za-z0-9_{][^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
+  ifs=$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])if[^A-Za-z0-9_{][^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
     tr '\n' ' ' | sed -E 's/ $//')
   [ "$ifs" = "$3" ] || violation "$1 branches on [$ifs], not exactly on the rule conditions [$3]"
 }
@@ -115,7 +118,7 @@ no_portal_message() {
 # pays_depositor <fn> <body>: one withdraw, to the depositor the consumed content names, and no mint.
 pays_depositor() {
   need "$1" "$2" \
-    "message_portal${S}\\(${S}config\\.portal${S},${S}withdraw_content_hash${S}\\(${S}depositor${S},${S}amount${S},${S}EthAddress::zero\\(\\)${S}\\)${S}\\)" \
+    "${pay_portal}withdraw_content_hash${S}\\(${S}depositor${S},${S}amount${S},${S}EthAddress::zero\\(\\)${S}\\)${S}\\)" \
     "does not pay the depositor" || return 1
   [ "$(printf '%s' "$2" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
     violation "$1 messages the portal more than once" || return 1
@@ -124,9 +127,41 @@ pays_depositor() {
   fi
 }
 
+# config_once <fn> <body>: one binding of `config`, read from storage; a second (say, a Config with another portal)
+# would redirect every config.portal after it.
+config_once() {
+  [ "$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]config([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
+    violation "$1 binds config more than once" || return 1
+  need "$1" "$2" "${config_read}${S};" "does not read config from storage"
+}
+
+# pays_recipient <fn> <body>: one withdraw of (recipient, amount, caller_on_l1) to config.portal, at function scope. The
+# hash names its parameters by text, so none may be rebound; and `flow_is` only lists branch conditions, so a payout
+# moved into one branch would pass without the depth check.
+pays_recipient() {
+  local content prefix depth
+  content=$(bound_to "$2" "withdraw_content_hash${S}\\(${S}recipient${S},${S}amount${S},${S}caller_on_l1${S}\\)")
+  [ -n "$content" ] || violation "$1 does not hash withdraw(recipient, amount, caller_on_l1)" || return 1
+  need "$1" "$2" \
+    "let ${content}${S}=${S}withdraw_content_hash${S}\\(${S}recipient${S},${S}amount${S},${S}caller_on_l1${S}\\)${S};" \
+    "alters its withdraw hash" || return 1
+  [ "$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]${content}([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
+    violation "$1 rebinds $content" || return 1
+  if printf '%s' "$2" | grep -qE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_](recipient|amount|caller_on_l1)([^A-Za-z0-9_]|$)"; then
+    violation "$1 rebinds a parameter its withdraw hashes" || return 1
+  fi
+  need "$1" "$2" "${pay_portal}${content}${S}\\)" "does not pay the hashed withdraw to config.portal" || return 1
+  [ "$(printf '%s' "$2" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
+    violation "$1 messages the portal more than once" || return 1
+  prefix=$(printf '%s' "$2" | sed -E 's/message_portal.*//')
+  depth=$(($(printf '%s' "$prefix" | tr -cd '{' | wc -c) - $(printf '%s' "$prefix" | tr -cd '}' | wc -c)))
+  [ "$depth" -eq 1 ] || violation "$1 pays out inside a branch"
+}
+
 check_claim_public() {
   local body
   body=$(fn_body "$1" claim_public)
+  config_once claim_public "$body" || return 1
   consumes_public claim_public "$body" || return 1
   need claim_public "$body" "assert${S}\\(${S}${token_view}\\.is_merchant\\(${S}to${S}\\)${S}\\)${S}," \
     "does not require a merchant recipient" || return 1
@@ -139,6 +174,7 @@ check_claim_public() {
 check_claim_private() {
   local body
   body=$(fn_body "$1" claim_private)
+  config_once claim_private "$body" || return 1
   consumes_derived claim_private "$body" || return 1
   need claim_private "$body" "assert${S}\\(${S}self\\.msg_sender\\(\\)${S}==${S}recipient${S}," \
     "does not require the recipient to submit it" || return 1
@@ -158,10 +194,12 @@ check_claim_private() {
 check_returns() {
   local body
   body=$(fn_body "$1" return_deposit_private)
+  config_once return_deposit_private "$body" || return 1
   consumes_derived return_deposit_private "$body" || return 1
   pays_depositor return_deposit_private "$body" || return 1
   flow_is return_deposit_private "$body" "" || return 1
   body=$(fn_body "$1" return_deposit_public)
+  config_once return_deposit_public "$body" || return 1
   consumes_public return_deposit_public "$body" || return 1
   need return_deposit_public "$body" "assert${S}\\(${S}!${S}${token_view}\\.is_merchant\\(${S}to${S}\\)${S}\\)${S}," \
     "does not refuse a merchant's deposit" || return 1
@@ -172,17 +210,21 @@ check_returns() {
 check_exits() {
   local body
   body=$(fn_body "$1" exit_to_l1_public)
+  config_once exit_to_l1_public "$body" || return 1
   need exit_to_l1_public "$body" "assert${S}\\(${S}${token_view}\\.is_merchant\\(${S}sender${S}\\)${S}\\)${S}," \
     "does not require a merchant sender" || return 1
   flow_is exit_to_l1_public "$body" "" || return 1
+  pays_recipient exit_to_l1_public "$body" || return 1
   body=$(fn_body "$1" exit_to_l1_private)
+  config_once exit_to_l1_private "$body" || return 1
   need exit_to_l1_private "$body" \
     "if${S}as_merchant${S}\\{${S}assert${S}\\(${S}${token_view}\\.try_prove_merchant\\(${S}sender${S}\\)${S}\\)${S}," \
     "does not require try_prove_merchant for a merchant exit" || return 1
   need exit_to_l1_private "$body" \
     "\\}${S}else${S}\\{.*assert${S}\\(${S}self\\.storage\\.funding_address\\.at\\(${S}sender${S}\\)\\.get_note\\(\\)\\.address${S}==${S}recipient${S}," \
     "does not hold a user to its funding address" || return 1
-  flow_is exit_to_l1_private "$body" as_merchant
+  flow_is exit_to_l1_private "$body" as_merchant || return 1
+  pays_recipient exit_to_l1_private "$body"
 }
 
 # check_file <main.nr> [extra source dir...]: 0 when the invariant holds, 1 with a reason on stderr otherwise.
@@ -329,6 +371,41 @@ true,"
   mutant public_exit_for_users "exit_to_l1_public does not require a merchant sender" main \
     'assert(self.view(Token::at(config.token).is_merchant(sender)), "Public exits are for merchants only");' ""
 
+  # Exits: each pays its own recipient on L1, once, unconditionally, through the stored portal.
+  local exit_hash='withdraw_content_hash(recipient, amount, caller_on_l1)'
+  local exit_pay='self.context.message_portal(config.portal, content);'
+  local funding_tail='"Withdrawals from a user account go only to its funding address",
+);
+}
+let content ='
+  mutant exit_public_unpaid "exit_to_l1_public does not pay the hashed withdraw to config.portal" main "$exit_pay" ""
+  mutant exit_private_unpaid "exit_to_l1_private does not pay the hashed withdraw to config.portal" main "$exit_pay" "" 2
+  mutant exit_lookalike_payout "exit_to_l1_public does not pay the hashed withdraw to config.portal" main "$exit_pay" \
+    "not_message_portal(config.portal, content);"
+  mutant exit_quoted_hash "exit_to_l1_public does not hash withdraw(recipient, amount, caller_on_l1)" main \
+    "let content = $exit_hash;" "let content = 0; assert(true, \"let content = $exit_hash;\");"
+  mutant exit_quoted_config "exit_to_l1_private does not read config from storage" main \
+    "let config = self.storage.config.read();
+assert(recipient != config.portal, \"Recipient cannot be the portal\");
+if as_merchant" \
+    "let config = Config { token_minter_proxy: config.token_minter_proxy, token: config.token, portal: caller_on_l1 };
+assert(true, \"let config = self.storage.config.read();\");
+assert(recipient != config.portal, \"Recipient cannot be the portal\");
+if as_merchant"
+  mutant exit_pays_twice "exit_to_l1_public messages the portal more than once" main "$exit_pay" "$exit_pay $exit_pay"
+  mutant exit_pays_portal "exit_to_l1_public does not hash withdraw(recipient, amount, caller_on_l1)" main \
+    "$exit_hash" "withdraw_content_hash(config.portal, amount, caller_on_l1)"
+  mutant exit_drops_caller "exit_to_l1_private does not hash withdraw(recipient, amount, caller_on_l1)" main \
+    "$exit_hash" "withdraw_content_hash(recipient, amount, EthAddress::zero())" 2
+  mutant exit_altered_hash "exit_to_l1_public alters its withdraw hash" main "$exit_hash;" "$exit_hash + 1;"
+  mutant exit_shadowed_hash "exit_to_l1_private rebinds content" main "$exit_pay" "let content = 0; $exit_pay" 2
+  mutant exit_rebinds_recipient "exit_to_l1_private rebinds a parameter its withdraw hashes" main "$funding_tail" \
+    "${funding_tail%let content =}let recipient = caller_on_l1; let content ="
+  mutant exit_paid_in_branch "exit_to_l1_private pays out inside a branch" main "$funding_tail $exit_hash;
+$exit_pay" "${funding_tail%\}*}let content = $exit_hash; $exit_pay }"
+  mutant exit_redirected "exit_to_l1_private binds config more than once" main "$funding_tail" \
+    "${funding_tail%let content =}let config = Config { token_minter_proxy: config.token_minter_proxy, token: config.token, portal: caller_on_l1 }; let content ="
+
   # Control flow: a rule's text kept behind a branch or loop that never runs it.
   mutant dead_branch "exit_to_l1_private branches on [as_merchant false]" main \
     "assert(
@@ -354,5 +431,6 @@ if [ "${1:-}" = "--self-test" ]; then
 fi
 check_file "$bridge_main" "$lib_src" "$messages_src" || exit 1
 echo "✅ sole-consumer invariant holds: four consume sites, each bound to its own message type from config.portal;" \
-  "the private ones consume only the recipient-derived secret; returns pay their depositor and never mint; the" \
-  "merchant, binding and exit rules are in place, behind no control flow but their own branches"
+  "the private ones consume only the recipient-derived secret; returns pay their depositor and never mint; exits pay" \
+  "their recipient, unconditionally; the merchant, binding and exit rules are in place, behind no control flow but" \
+  "their own branches"

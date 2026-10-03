@@ -71,6 +71,8 @@ Each L1↔L2 message content is `sha256ToField(abi.encodeWithSignature(signature
 
 The depositor is the address the USDC came from: a direct deposit's caller, or the Permit2 signer when the deposit goes through the router. Vectors for all three formats are pinned in Solidity, Noir and TypeScript (`docs/architecture.md`).
 
+USDC's blocklist, pause and upgrades reach the bridge as `docs/architecture.md` describes under "USDC's own controls": a withdrawal to a blocklisted recipient waits, unconsumed, until Circle clears it.
+
 The portal refuses two deposits that no Aztec call could consume: an amount above u128 (`AmountExceedsL2Max`), and a public recipient above the largest field element (`RecipientExceedsFieldMax`), since an Aztec address is a field element. Encoding an `AztecAddress` (`toString()`, as bridge-core does) always fits.
 
 It cannot check a secret hash. A private deposit is claimed or returned only with the secret `prepareDeposit` derives from a claim salt and the recipient, so one made with any other hash stays escrowed for good, with no rescue path. The portal shares the canonical Aztec portal's function names and nothing else: Aztec's own portal tooling draws a plain secret and does not read this portal's events, so deposit through bridge-core, never with it.
