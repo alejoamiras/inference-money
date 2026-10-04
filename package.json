@@ -28,6 +28,7 @@
 		"test:evm": "bun run --cwd contracts/evm test:evm",
 		"test:evm:fork": "bun run --cwd contracts/evm test:evm:fork",
 		"test:evm:formal": "bun run --cwd contracts/evm test:evm:formal",
+		"test:evm:fuzz": "bun run --cwd contracts/evm test:evm:fuzz",
 		"test:evm:gas": "bun run --cwd contracts/evm test:evm:gas",
 		"test:evm:slither": "bun run --cwd contracts/evm test:evm:slither",
 		"test:integration": "bun run --cwd packages/integration test:integration",

@@ -1,0 +1,407 @@
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.8.27 <0.9.0;
+
+import {Actor} from "./Actor.sol";
+import {Clamp} from "./utils/Clamp.sol";
+import {DecimalPrinter} from "./utils/DecimalPrinter.sol";
+import {Deployer} from "./utils/Deployer.sol";
+import {vm} from "./utils/Hevm.sol";
+import {Logger} from "./utils/Logger.sol";
+import {Math} from "./utils/Math.sol";
+import {StringUtils} from "./utils/StringUtils.sol";
+import {EnumerableSet} from "./utils/EnumerableSet.sol";
+
+import {Outbox} from "@aztec/core/messagebridge/Outbox.sol";
+import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
+import {Hash} from "@aztec/core/libraries/crypto/Hash.sol";
+import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
+import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
+
+import {TokenPortal} from "../../src/TokenPortal.sol";
+import {Permit2DepositRouter} from "../../src/Permit2DepositRouter.sol";
+import {ISignatureTransfer} from "../../src/interfaces/ISignatureTransfer.sol";
+import {ITokenPortal} from "../../src/interfaces/ITokenPortal.sol";
+
+import {CapturingInbox, FakeRegistry, FakeRollup} from "../mocks/AztecFakes.sol";
+import {MockPermit2} from "../mocks/MockPermit2.sol";
+import {ModalUsdc} from "./mocks/ModalUsdc.sol";
+import {RealOutboxStack} from "./mocks/RealOutboxStack.sol";
+
+/// @notice Base contract with state variables and setup functions
+abstract contract Base is StringUtils, Clamp, Deployer, Math {
+    using DecimalPrinter for uint256;
+
+    string[] internal ACTOR_LABELS = ["Alice", "Bob", "Charlie"];
+    uint256 internal constant BLOCK_INTERVAL = 12 seconds;
+    uint256 internal constant INITIAL_ETH_BALANCE = 1_000 ether;
+    /// 1B USDC (6 decimals) per actor: no realistic clamp ever runs a funded actor dry.
+    uint256 internal constant INITIAL_TOKEN_BALANCE = 1e15;
+    /// Upper clamp for "realistic" deposits and exits: 1M USDC.
+    uint256 internal constant MAX_REALISTIC_AMOUNT = 1e12;
+    /// Cap on the USDC actors can ever hold (setup balances plus `_ensureFunds` mints; donations aside). Real USDC
+    /// (about 2^57 base units) never nears the L2's u128 amount type, so an uncapped mock would only show GL-26
+    /// breaking on a supply no real deposit can reach.
+    uint256 internal constant MOCK_SUPPLY_CAP = type(uint128).max;
+
+    bytes32 internal constant L2_BRIDGE = bytes32(uint256(0xB41D6E));
+    uint256 internal constant ROLLUP_VERSION = 4242;
+    /// Outbox trees the model proves hold at most 4 leaves (height 2).
+    uint256 internal constant MAX_LEAVES_PER_EPOCH = 4;
+    uint256 internal constant MAX_CHECKPOINTS_PER_EPOCH = 32;
+
+    // ―――――――――――――――――――――――――― Ghosts ――――――――――――――――――――――――――
+
+    struct Ghosts {
+        // L1 flows, moved only by successful calls
+        uint256 deposited; // Σ successful deposit amounts (direct + router)
+        uint256 depositCount; // successful deposits; each must have sent exactly one Inbox message
+        uint256 portalDonated; // tokens minted straight to the portal
+        uint256 routerDonated; // tokens minted straight to the router
+        uint256 withdrawn; // Σ successful withdraw payouts
+        uint256 withdrawCount;
+        // L2 model (the bridge on Aztec, reduced to its accounting)
+        uint256 pendingDepositAmount; // Σ deposit messages not yet consumed by a claim or a return
+        uint256 claimed; // Σ deposits claimed (minted on L2)
+        uint256 returned; // Σ deposits returned to their depositor (no mint, one exit)
+        uint256 l2Supply; // claimed − Σ exits burned from L2 balances
+        uint256 exited; // Σ L2→L1 withdraw messages created (exits + returns)
+        uint256 unpaidExitAmount; // Σ withdraw messages not yet paid on L1 (proven or not)
+        // Violations recorded by handlers; properties assert these stay zero.
+        uint256 unbackedPayouts; // a withdraw succeeded that matches no proven, unpaid modelled exit
+        uint256 replayedPayouts; // a paid exit paid again
+        uint256 tamperedPayouts; // a proven exit paid with an altered recipient / amount / caller / position
+        uint256 wrongCallerPayouts; // a caller-bound exit delivered by someone else
+        uint256 strangerNamedDepositor; // a `...For` deposit succeeded from someone other than the router
+        uint256 reinitialized; // a second initialize succeeded
+        uint256 misnamedMessages; // a deposit's Inbox content hash did not match the independent model
+        uint256 permit2RejectBypassed; // a router deposit succeeded although Permit2 refused the pull
+        uint256 boundaryAccepted; // an out-of-range deposit (amount > u128, `_to` > field) succeeded
+        uint256 selfPayoutAccepted; // a proven exit to the portal itself paid out
+        uint256 misboundRouter; // a fresh portal/router accepted a stranger's init, a foreign router or a code-less dependency
+        // Flow splits and liveness counters
+        uint256 l2OffAccount; // claimed L2 balance sitting on field elements outside L2_ACCOUNTS
+        uint256 directDeposited; // Σ successful direct portal deposits
+        uint256 routerDeposited; // Σ successful router deposits
+        uint256 actorMinted; // Σ USDC minted to actors by `_ensureFunds`
+        uint256 payableExitStuck; // a healthy-environment withdraw of a proven, unpaid, caller-satisfied exit reverted
+        uint256 depositLivenessBroken; // a Normal-environment 1..MAX_REALISTIC_AMOUNT deposit by a funded caller reverted
+        uint256 inexactAccepted; // a FeeOnTransfer deposit or SenderSurcharge withdraw of >= 100 units succeeded
+        uint256 foreignDomainPaid; // a foreign-domain Outbox leaf paid out of the portal
+        // A transfer hook re-entering the portal or router is read straight from `usdc.hookReentrySucceeded()`.
+    }
+
+    Ghosts internal ghosts;
+
+    /// One L1→L2 deposit message as the L2 bridge would see it.
+    struct DepositMsg {
+        address depositor;
+        bytes32 to; // zero for private deposits (the recipient is bound inside the secret)
+        uint256 amount;
+        bool isPrivate;
+        bool consumed;
+    }
+
+    /// One L2→L1 withdraw message (an exit or a return) and, once proven, where it sits in the Outbox.
+    struct ExitMsg {
+        address recipient;
+        uint256 amount;
+        address caller; // zero: anyone may deliver it
+        bool proven;
+        bool paid;
+        uint256 epoch;
+        uint256 numCheckpoints;
+        uint256 leafIndex;
+        uint256 pathLen;
+        bytes32[2] path;
+    }
+
+    DepositMsg[] internal depositMsgs;
+    uint256[] internal pendingDeposits; // indexes into depositMsgs, unconsumed
+    ExitMsg[] internal exitMsgs;
+    uint256[] internal unprovenExits; // indexes into exitMsgs, FIFO
+    uint256[] internal provenUnpaidExits; // indexes into exitMsgs
+    uint256[] internal paidExits; // indexes into exitMsgs
+    mapping(bytes32 => uint256) internal l2Balance;
+    bytes32[3] internal L2_ACCOUNTS = [bytes32(uint256(0xA11CE)), bytes32(uint256(0xB0B)), bytes32(uint256(0xCA401))];
+    uint256 internal nextEpoch;
+
+    // ―――――――――――――――――――――――――― Actors ――――――――――――――――――――――――――
+
+    address[] internal actors;
+    address internal actor;
+    address internal admin;
+
+    modifier asActor() virtual {
+        vm.startPrank(actor);
+        _;
+        vm.stopPrank();
+    }
+
+    modifier asAdmin() virtual {
+        vm.startPrank(admin);
+        _;
+        vm.stopPrank();
+    }
+
+    // ―――――――――――――――――――――――― Contracts ―――――――――――――――――――――――――
+
+    ModalUsdc internal usdc;
+    MockPermit2 internal permit2;
+    CapturingInbox internal inbox;
+    Outbox internal outbox;
+    FakeRollup internal rollup;
+    FakeRegistry internal registry;
+    TokenPortal internal portal;
+    Permit2DepositRouter internal router;
+
+    // ―――――――――――――――――――――――――― Setup ―――――――――――――――――――――――――――
+
+    /// Mirrors the project's deploy order (test/mocks/RouterFixture.sol): portal (this contract is its initializer),
+    /// router naming portal + token, then the portal's one `initialize` binding registry, token, L2 bridge and router.
+    /// The Aztec side is the capturing Inbox and the REAL Outbox, as in PortalWithdrawRealOutbox.t.sol; Permit2 is the
+    /// project's recording mock (signature validity is Permit2's domain, pinned by the Sepolia fork suite).
+    function setup() internal {
+        usdc = new ModalUsdc();
+        permit2 = new MockPermit2();
+        inbox = new CapturingInbox();
+        RealOutboxStack stack = new RealOutboxStack(address(inbox));
+        outbox = stack.outbox();
+        rollup = stack.rollup();
+        registry = new FakeRegistry(address(rollup));
+
+        portal = new TokenPortal();
+        router = new Permit2DepositRouter(ISignatureTransfer(address(permit2)), ITokenPortal(address(portal)), usdc);
+        portal.initialize(address(registry), address(usdc), L2_BRIDGE, address(router));
+
+        nextEpoch = 1;
+
+        vm.label(address(usdc), "USDC");
+        vm.label(address(permit2), "Permit2");
+        vm.label(address(inbox), "Inbox");
+        vm.label(address(outbox), "Outbox");
+        vm.label(address(rollup), "Rollup");
+        vm.label(address(portal), "TokenPortal");
+        vm.label(address(router), "Router");
+
+        setupActors();
+    }
+
+    function setupActors() internal {
+        admin = address(this);
+        vm.label(admin, "Admin");
+
+        for (uint256 i; i < ACTOR_LABELS.length; i++) {
+            address _actor = address(new Actor{value: INITIAL_ETH_BALANCE}());
+            actors.push(_actor);
+            if (ACTOR_LABELS.length > i) {
+                vm.label(_actor, ACTOR_LABELS[i]);
+            }
+            // Real holders approve both spenders once: the portal for direct deposits, Permit2 for signed ones.
+            usdc.mint(_actor, INITIAL_TOKEN_BALANCE);
+            vm.startPrank(_actor);
+            usdc.approve(address(portal), type(uint256).max);
+            usdc.approve(address(permit2), type(uint256).max);
+            vm.stopPrank();
+        }
+        actor = actors[0];
+    }
+
+    // ――――――――――――――――――――――――― Helpers ――――――――――――――――――――――――――
+
+    // Maps an arbitrary address to an actor address
+    function toActor(address addy) internal view returns (address) {
+        return actors[uint256(uint160(addy)) % actors.length];
+    }
+
+    // Maps an arbitrary address to an actor address that is different from the current actor
+    function toActorNotCurrent(address addy) internal view returns (address) {
+        address _actor = actors[uint256(uint160(addy)) % actors.length];
+        if (_actor == actor) {
+            _actor = actors[(uint256(uint160(addy)) + 1) % actors.length];
+        }
+        return _actor;
+    }
+
+    function toL2Account(uint256 seed) internal view returns (bytes32) {
+        return L2_ACCOUNTS[seed % L2_ACCOUNTS.length];
+    }
+
+    /// An actor other than `not`, chosen by `seed`.
+    function _otherActor(address not, uint256 seed) internal view returns (address other) {
+        other = actors[seed % actors.length];
+        if (other == not) other = actors[(seed + 1) % actors.length];
+    }
+
+    /// Mints the shortfall (plus room for a 1% surcharge) within `MOCK_SUPPLY_CAP`; false once the cap leaves `who`
+    /// unable to pay `amount`.
+    function _ensureFunds(address who, uint256 amount) internal returns (bool funded) {
+        uint256 need = amount + amount / 50 + 1;
+        uint256 bal = usdc.balanceOf(who);
+        if (bal < need) {
+            uint256 actorSide = usdc.totalSupply() - ghosts.portalDonated - ghosts.routerDonated;
+            uint256 room = MOCK_SUPPLY_CAP > actorSide ? MOCK_SUPPLY_CAP - actorSide : 0;
+            uint256 mint = need - bal < room ? need - bal : room;
+            usdc.mint(who, mint);
+            ghosts.actorMinted += mint;
+            bal += mint;
+        }
+        return bal >= amount;
+    }
+
+    /// The largest deposit `who` can fund up to the L2's u128 ceiling, once `MOCK_SUPPLY_CAP` binds.
+    function _largestFundable(address who) internal returns (uint256 amount) {
+        _ensureFunds(who, type(uint128).max);
+        amount = usdc.balanceOf(who);
+        if (amount > type(uint128).max) amount = type(uint128).max;
+    }
+
+    /// Normal token mode, nothing armed, and neither the current actor nor the portal blacklisted.
+    function _cleanEnv() internal view returns (bool) {
+        return usdc.mode() == ModalUsdc.Mode.Normal && usdc.hookPayload().length == 0 && !usdc.blacklisted(actor)
+            && !usdc.blacklisted(address(portal));
+    }
+
+    /// Whether the real Outbox has consumed the leaf of a proven exit; false if the view reverts.
+    function _leafConsumed(ExitMsg storage e) internal view returns (bool consumed) {
+        try outbox.hasMessageBeenConsumedAtEpoch(Epoch.wrap(e.epoch), (1 << e.pathLen) + e.leafIndex) returns (bool c) {
+            consumed = c;
+        } catch {}
+    }
+
+    function _toField(bytes32 value) internal pure returns (bytes32) {
+        return bytes32(uint256(value) % (Constants.MAX_FIELD_VALUE + 1));
+    }
+
+    // Sums the native token balances of all actors
+    function sumActorsBalances() internal view returns (uint256 sumOfBalances) {
+        for (uint256 i; i < actors.length; i++) {
+            sumOfBalances += actors[i].balance;
+        }
+    }
+
+    // Sums the ERC-20 token balances of all actors for a given token
+    function sumActorsERC20Balances(address _token) internal view returns (uint256 sumOfBalances) {
+        for (uint256 i; i < actors.length; i++) {
+            bytes memory data = abi.encodeWithSignature("balanceOf(address)", actors[i]);
+            (bool success, bytes memory result) = _token.staticcall(data);
+            require(success, "sumActorsERC20Balances: failed to get balance");
+            sumOfBalances += abi.decode(result, (uint256));
+        }
+    }
+
+    function skipBlocks(uint256 blocks) internal {
+        vm.roll(block.number + blocks);
+        vm.warp(block.timestamp + blocks * BLOCK_INTERVAL);
+    }
+
+    function skipTime(uint256 time) internal {
+        uint256 blocks = (time + BLOCK_INTERVAL - 1) / BLOCK_INTERVAL;
+        vm.roll(block.number + blocks);
+        vm.warp(block.timestamp + time);
+    }
+
+    // ――――――――――――――――――――――― Message model ――――――――――――――――――――――――
+
+    /// Independent model of Aztec's `sha256ToField` (top byte dropped), so a portal encoding drift shows up as a
+    /// failed proof or a misnamed message instead of being hashed away by the same library.
+    function _fieldHash(bytes memory preimage) internal pure returns (bytes32) {
+        return bytes32(uint256(sha256(preimage)) >> 8);
+    }
+
+    function _depositContent(DepositMsg memory d) internal pure returns (bytes32) {
+        return d.isPrivate
+            ? _fieldHash(abi.encodeWithSignature("mint_to_private(uint256,address)", d.amount, d.depositor))
+            : _fieldHash(
+                abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", d.to, d.amount, d.depositor)
+            );
+    }
+
+    function _exitLeaf(address recipient, uint256 amount, address caller) internal view returns (bytes32) {
+        bytes32 content =
+            _fieldHash(abi.encodeWithSignature("withdraw(address,uint256,address)", recipient, amount, caller));
+        return Hash.sha256ToField(
+            DataStructures.L2ToL1Msg({
+                sender: DataStructures.L2Actor(L2_BRIDGE, ROLLUP_VERSION),
+                recipient: DataStructures.L1Actor(address(portal), block.chainid),
+                content: content
+            })
+        );
+    }
+
+    function _parent(bytes32 left, bytes32 right) internal pure returns (bytes32) {
+        return Hash.sha256ToField(bytes.concat(left, right));
+    }
+
+    /// Records a successful deposit as a pending L1→L2 message and checks the Inbox saw the modelled content.
+    function _recordDeposit(address depositor, bytes32 to, uint256 amount, bool isPrivate) internal {
+        DepositMsg memory d = DepositMsg(depositor, isPrivate ? bytes32(0) : to, amount, isPrivate, false);
+        if (inbox.lastContentHash() != _depositContent(d) || inbox.lastSender() != address(portal)) {
+            ghosts.misnamedMessages++;
+        }
+        pendingDeposits.push(depositMsgs.length);
+        depositMsgs.push(d);
+        ghosts.deposited += amount;
+        ghosts.depositCount++;
+        ghosts.pendingDepositAmount += amount;
+    }
+
+    /// Removes and returns the pending deposit at `seed`, or `type(uint256).max` when none is pending.
+    function _takePendingDeposit(uint256 seed) internal returns (uint256 idx) {
+        uint256 n = pendingDeposits.length;
+        if (n == 0) return type(uint256).max;
+        uint256 pos = seed % n;
+        idx = pendingDeposits[pos];
+        pendingDeposits[pos] = pendingDeposits[n - 1];
+        pendingDeposits.pop();
+        depositMsgs[idx].consumed = true;
+        ghosts.pendingDepositAmount -= depositMsgs[idx].amount;
+    }
+
+    function _createExit(address recipient, uint256 amount, address caller) internal {
+        ExitMsg storage e = exitMsgs.push();
+        e.recipient = recipient;
+        e.amount = amount;
+        e.caller = caller;
+        unprovenExits.push(exitMsgs.length - 1);
+        ghosts.exited += amount;
+        ghosts.unpaidExitAmount += amount;
+    }
+
+    function _removeProvenUnpaid(uint256 pos) internal returns (uint256 idx) {
+        uint256 n = provenUnpaidExits.length;
+        idx = provenUnpaidExits[pos];
+        provenUnpaidExits[pos] = provenUnpaidExits[n - 1];
+        provenUnpaidExits.pop();
+    }
+
+    /// Marks the proven, unpaid exit matching a successful withdraw as paid. Returns false when nothing matches.
+    function _settleWithdraw(
+        address recipient,
+        uint256 amount,
+        address caller,
+        uint256 epoch,
+        uint256 numCheckpoints,
+        uint256 leafIndex
+    ) internal returns (bool matched) {
+        for (uint256 pos; pos < provenUnpaidExits.length; pos++) {
+            ExitMsg storage e = exitMsgs[provenUnpaidExits[pos]];
+            if (
+                e.recipient == recipient && e.amount == amount && e.caller == caller && e.epoch == epoch
+                    && e.numCheckpoints == numCheckpoints && e.leafIndex == leafIndex
+            ) {
+                uint256 idx = _removeProvenUnpaid(pos);
+                exitMsgs[idx].paid = true;
+                paidExits.push(idx);
+                ghosts.unpaidExitAmount -= amount;
+                return true;
+            }
+        }
+    }
+
+    function _exitPath(ExitMsg storage e) internal view returns (bytes32[] memory path) {
+        path = new bytes32[](e.pathLen);
+        for (uint256 i; i < e.pathLen; i++) {
+            path[i] = e.path[i];
+        }
+    }
+}

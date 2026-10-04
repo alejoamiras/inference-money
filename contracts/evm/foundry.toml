@@ -38,3 +38,16 @@ ignore = ["test/**"]
 [fmt]
 line_length = 120
 tab_width = 4
+
+
+# Medusa's build only (`test:evm:fuzz` sets FOUNDRY_PROFILE for that one process): an ambient leak would change the
+# bytecode `verify` compares, never pass silently.
+[profile.fuzz]
+out = "out-fuzz"
+cache_path = "cache-fuzz"
+via_ir = true
+optimizer = false
+optimizer_runs = 0
+# Medusa identifies deployed contracts by their metadata hash; without one, every contract with immutables
+# (TokenPortal, the router, the Outbox) gets no coverage attribution. The default profile keeps "none" for `verify`.
+bytecode_hash = "ipfs"

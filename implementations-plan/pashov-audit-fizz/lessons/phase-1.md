@@ -1,0 +1,14 @@
+# Phase 1: fizz committed, hygiene, nightly (2026-10-04)
+
+| Attempt | Result | Consequence |
+|---|---|---|
+| GL-26 bound at `2^64` (the plan's first text) | Rejected before writing. The max-amount handlers deposit up to `type(uint128).max`; a `2^64` actor supply would never reach the per-call cap's edge. | `MOCK_SUPPLY_CAP = type(uint128).max` over the actor side (donations excluded); `_largestFundable` feeds the max handlers what is left. Plan text updated. |
+| Property-count check against every `function property_*()` | 34 declared, 31 registered: three `property_*` helpers are `internal` and never registered. | `fuzz.sh` counts only `public` ones. |
+| `bun run lint` | Biome flagged `medusa.json` and two `fizz_data` JSON inputs (two-space indent). | `biome format --write` on the three; Medusa reads either. |
+| `bun run test` without Node on PATH | Showcase vitest: 12 "Failed to start forks worker … 'addEventListener' called on an object that is not a valid instance of EventTarget". `vitest`'s `#!/usr/bin/env node` falls back to Bun when no `node` is on PATH, and jsdom's window does not run under it. | Not a code failure: with `~/.nvm/versions/node/v24.18.0/bin` first on PATH, `bun run test` exits 0 (all workspaces). CI's runner has Node. Gate runs on this host put Node on PATH. |
+| `bun run lint` after staging | `lint:shell` runs shellcheck over `git ls-files`, so the staged `reaudit/setup-noir.sh` surfaced two SC2129 notes an untracked-tree lint never saw. | Grouped the redirects. Lint the staged tree before committing new `.sh` files. |
+| `toolchain.json` `cryticCompile` | Added (0.4.2) with a drift check: the setup step requires the Slither lock to pin exactly that version. | One source of truth stays `toolchain.json`; a Slither bump that moves crytic-compile fails setup. |
+| `test_results` scan in `fuzz.sh` | Dropped: Medusa exits 7 on any failed test (S1), and a restored local corpus can hold old reproducers. | Exit code + registered-property count are the failure signals. |
+| Gate: bounded run (`test:evm:fuzz 600`) | Pass: about 2.07M calls in 10 min, `66 test(s) passed, 0 test(s) failed`, exit 0, all 31 public properties registered. | |
+| Gate: broken property (scratch, restored byte-identical) | `property_noReentry` flipped to expect 1: `[FAILED] Assertion Test: FuzzTester.property_noReentry()`, `fuzz: Medusa exited 7`. | The failure path names the property and fails the script. |
+| Corpus `restore-keys` fallback to any older corpus | Kept per plan; whether Medusa 1.5.1 replays a corpus recorded against an older ABI without erroring is checked at P5, whose local run starts from this phase's corpus after the ABI change. | If it errors, the fallback key goes. |

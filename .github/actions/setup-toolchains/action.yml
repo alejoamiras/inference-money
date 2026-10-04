@@ -16,6 +16,10 @@ inputs:
     description: Install Slither at toolchain.json's pin (implies Foundry, whose build it reads).
     required: false
     default: "false"
+  medusa:
+    description: Medusa at toolchain.json's pin, with crytic-compile from the Slither lock (implies Foundry).
+    required: false
+    default: "false"
   aztec:
     description: Node, the pinned nargo release and contracts/aztec/toolchain (compile, TXE).
     required: false
@@ -32,7 +36,7 @@ runs:
       id: pins
       shell: bash
       run: |
-        for key in bun foundry halmos nargo node slither; do
+        for key in bun cryticCompile foundry halmos medusa nargo node slither; do
           echo "$key=$(jq -er --arg k "$key" '.[$k]' toolchain.json)" >> "$GITHUB_OUTPUT"
         done
 
@@ -50,7 +54,7 @@ runs:
       run: bun install --frozen-lockfile
 
     # A newer Foundry routes test-contract creation through a cheatcode halmos 0.3.3 lacks: bump both together.
-    - if: inputs.foundry == 'true' || inputs.halmos == 'true' || inputs.slither == 'true'
+    - if: inputs.foundry == 'true' || inputs.halmos == 'true' || inputs.slither == 'true' || inputs.medusa == 'true'
       uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
       with:
         version: v${{ steps.pins.outputs.foundry }}
@@ -80,6 +84,30 @@ runs:
         "$RUNNER_TEMP/slither/bin/pip" install --require-hashes --no-deps --only-binary :all: -r "$LOCK"
         mkdir -p "$RUNNER_TEMP/bin"
         ln -s "$RUNNER_TEMP/slither/bin/slither" "$RUNNER_TEMP/bin/slither"
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+    # Medusa is the release binary, checked against its pin before extraction; its compile front end, crytic-compile,
+    # comes from the Slither hash lock, which already pins it as a Slither dependency. A `medusa` bump without a matching
+    # medusa-<version>.sha256, or a Slither lock whose crytic-compile is not `cryticCompile`, fails here.
+    - if: inputs.medusa == 'true'
+      shell: bash
+      env:
+        MEDUSA_VERSION: ${{ steps.pins.outputs.medusa }}
+        CRYTIC_VERSION: ${{ steps.pins.outputs.cryticCompile }}
+        PINS: ${{ github.action_path }}/medusa-${{ steps.pins.outputs.medusa }}.sha256
+        LOCK: ${{ github.action_path }}/slither-${{ steps.pins.outputs.slither }}.requirements.txt
+      run: |
+        grep -qxF "crytic-compile==${CRYTIC_VERSION} \\" "$LOCK"
+        dir="$RUNNER_TEMP/medusa"
+        asset=medusa-linux-x64.tar.gz
+        mkdir -p "$dir" "$RUNNER_TEMP/bin"
+        curl -fsSL "https://github.com/crytic/medusa/releases/download/v${MEDUSA_VERSION}/$asset" -o "$dir/$asset"
+        (cd "$dir" && grep -v '^#' "$PINS" | sha256sum -c -)
+        tar -xzf "$dir/$asset" -C "$dir" medusa
+        ln -s "$dir/medusa" "$RUNNER_TEMP/bin/medusa"
+        python3 -m venv "$RUNNER_TEMP/crytic"
+        "$RUNNER_TEMP/crytic/bin/pip" install --require-hashes --no-deps --only-binary :all: -r "$LOCK"
+        ln -s "$RUNNER_TEMP/crytic/bin/crytic-compile" "$RUNNER_TEMP/bin/crytic-compile"
         echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
     # The aztec CLI, the TXE server and the node run on node.

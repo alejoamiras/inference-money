@@ -18,6 +18,20 @@ contracts/evm/out/
 contracts/evm/cache/
 contracts/evm/broadcast/
 
+# Medusa campaign output (corpus, logs, crytic-compile export) and auditor scratch; the fizz suite, its config and
+# its written report are committed.
+contracts/evm/fizz_data/corpus_medusa/
+contracts/evm/fizz_data/logs_medusa/
+contracts/evm/fizz_data/crytic-export/
+contracts/evm/fizz_data/last-run.json
+contracts/evm/fizz_data/last-campaign.log
+contracts/evm/out-fuzz/
+contracts/evm/cache-fuzz/
+contracts/evm/crytic-export/
+contracts/evm/x-ray/
+.solidity-auditor/
+.aztec-auditor/
+
 # Playwright
 playwright-report/
 test-results/
