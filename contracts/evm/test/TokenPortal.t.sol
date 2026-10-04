@@ -64,15 +64,16 @@ contract TokenPortalTest is Test {
         return Hash.sha256ToField(abi.encodeWithSignature("mint_to_private(uint256,address)", amount, depositor));
     }
 
-    function test_depositPublic_namesTheCaller() public {
+    /// The caller pays; the message and the event name the refund address it passes.
+    function test_depositPublic_namesItsRefundAddress() public {
         (TokenPortal portal, PlainERC20 token) = _funded(1_000);
-        bytes32 content = _publicContent(TO, 1_000, alice);
+        bytes32 content = _publicContent(TO, 1_000, signer);
         vm.expectEmit(address(portal));
         emit TokenPortal.DepositToAztecPublic(
-            alice, TO, 1_000, SECRET_HASH, keccak256(abi.encode(content, SECRET_HASH)), 0
+            signer, TO, 1_000, SECRET_HASH, keccak256(abi.encode(content, SECRET_HASH)), 0
         );
         vm.prank(alice);
-        (bytes32 key, uint256 index) = portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
+        (bytes32 key, uint256 index) = portal.depositToAztecPublic(signer, TO, 1_000, SECRET_HASH);
 
         assertEq(key, keccak256(abi.encode(content, SECRET_HASH)), "key is the inbox's");
         assertEq(index, 0, "index is the inbox's");
@@ -100,13 +101,13 @@ contract TokenPortalTest is Test {
     function test_deposits_returnTheInboxKeyAndIndex() public {
         (TokenPortal portal,) = _funded(30);
         vm.startPrank(alice);
-        portal.depositToAztecPublic(TO, 10, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, 10, SECRET_HASH);
 
         (bytes32 key, uint256 index) = portal.depositToAztecPrivate(10, SECRET_HASH);
         assertEq(key, keccak256(abi.encode(_privateContent(10, alice), SECRET_HASH)), "private key");
         assertEq(index, 1, "private index");
 
-        (key, index) = portal.depositToAztecPublic(TO, 10, SECRET_HASH);
+        (key, index) = portal.depositToAztecPublic(alice, TO, 10, SECRET_HASH);
         assertEq(key, keccak256(abi.encode(_publicContent(TO, 10, alice), SECRET_HASH)), "public key");
         assertEq(index, 2, "public index");
         vm.stopPrank();
@@ -206,7 +207,7 @@ contract TokenPortalTest is Test {
     function test_withdraw_consumesAndDebitsExactly() public {
         (TokenPortal portal, PlainERC20 token) = _funded(500);
         vm.prank(alice);
-        portal.depositToAztecPublic(TO, 500, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, 500, SECRET_HASH);
 
         vm.expectEmit(address(portal));
         emit TokenPortal.Withdraw(alice, 200, address(this));
@@ -236,7 +237,7 @@ contract TokenPortalTest is Test {
         (TokenPortal portal,) = _funded(max);
         vm.startPrank(alice);
         vm.expectRevert(TokenPortal.AmountExceedsL2Max.selector);
-        portal.depositToAztecPublic(TO, max + 1, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, max + 1, SECRET_HASH);
         vm.expectRevert(TokenPortal.AmountExceedsL2Max.selector);
         portal.depositToAztecPrivate(max + 1, SECRET_HASH);
         portal.depositToAztecPrivate(max, SECRET_HASH);
@@ -251,10 +252,10 @@ contract TokenPortalTest is Test {
         bytes32 over = bytes32(Constants.MAX_FIELD_VALUE + 1);
         vm.startPrank(alice);
         vm.expectRevert(TokenPortal.RecipientExceedsFieldMax.selector);
-        portal.depositToAztecPublic(over, 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(alice, over, 1_000, SECRET_HASH);
         vm.expectRevert(TokenPortal.RecipientExceedsFieldMax.selector);
-        portal.depositToAztecPublic(bytes32(type(uint256).max), 1_000, SECRET_HASH);
-        portal.depositToAztecPublic(bytes32(Constants.MAX_FIELD_VALUE), 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(alice, bytes32(type(uint256).max), 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(alice, bytes32(Constants.MAX_FIELD_VALUE), 1_000, SECRET_HASH);
         vm.stopPrank();
 
         token.mint(address(router), 1_000);
@@ -268,6 +269,50 @@ contract TokenPortalTest is Test {
         assertEq(token.balanceOf(address(portal)), 1_000, "only the in-field deposit moved funds");
     }
 
+    /// A zero deposit is refused on every path before anything moves.
+    function test_deposit_refusesZero() public {
+        (TokenPortal portal,) = _funded(1);
+        vm.startPrank(alice);
+        vm.expectRevert(TokenPortal.ZeroAmount.selector);
+        portal.depositToAztecPublic(alice, TO, 0, SECRET_HASH);
+        vm.expectRevert(TokenPortal.ZeroAmount.selector);
+        portal.depositToAztecPrivate(0, SECRET_HASH);
+        vm.stopPrank();
+        vm.startPrank(address(router));
+        vm.expectRevert(TokenPortal.ZeroAmount.selector);
+        portal.depositToAztecPublicFor(signer, TO, 0, SECRET_HASH);
+        vm.expectRevert(TokenPortal.ZeroAmount.selector);
+        portal.depositToAztecPrivateFor(signer, 0, SECRET_HASH);
+        vm.stopPrank();
+        assertEq(inbox.sent(), 0, "no message");
+    }
+
+    /// Once governance names another rollup canonical, every deposit path refuses, and a proven exit still pays
+    /// through the Outbox bound at initialize.
+    function test_staleRollup_refusesDepositsButStillPays() public {
+        (TokenPortal portal, PlainERC20 token) = _funded(100);
+        vm.prank(alice);
+        portal.depositToAztecPublic(alice, TO, 50, SECRET_HASH);
+        registry.setCanonicalRollup(address(new FakeRollup(address(new CapturingInbox()), address(outbox))));
+
+        vm.startPrank(alice);
+        vm.expectRevert(TokenPortal.RollupNotCanonical.selector);
+        portal.depositToAztecPublic(alice, TO, 50, SECRET_HASH);
+        vm.expectRevert(TokenPortal.RollupNotCanonical.selector);
+        portal.depositToAztecPrivate(50, SECRET_HASH);
+        vm.stopPrank();
+        vm.startPrank(address(router));
+        vm.expectRevert(TokenPortal.RollupNotCanonical.selector);
+        portal.depositToAztecPublicFor(signer, TO, 50, SECRET_HASH);
+        vm.expectRevert(TokenPortal.RollupNotCanonical.selector);
+        portal.depositToAztecPrivateFor(signer, 50, SECRET_HASH);
+        vm.stopPrank();
+        assertEq(inbox.sent(), 1, "only the deposit before the switch sent a message");
+
+        portal.withdraw(alice, 50, false, Epoch.wrap(3), 9, 5, new bytes32[](0));
+        assertEq(token.balanceOf(alice), 100, "the exit paid after the switch");
+    }
+
     /// A token that delivers less than `amount` would mint more on L2 than the portal holds.
     function test_deposit_rejectsFeeOnTransfer() public {
         FeeOnTransferERC20 tax = new FeeOnTransferERC20(100);
@@ -276,7 +321,7 @@ contract TokenPortalTest is Test {
         vm.startPrank(alice);
         tax.approve(address(portal), 1_000);
         vm.expectRevert(TokenPortal.InexactTransfer.selector);
-        portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, 1_000, SECRET_HASH);
         vm.expectRevert(TokenPortal.InexactTransfer.selector);
         portal.depositToAztecPrivate(1_000, SECRET_HASH);
         vm.stopPrank();
@@ -292,7 +337,7 @@ contract TokenPortalTest is Test {
         vm.startPrank(alice);
         gen.approve(address(portal), 1_000);
         vm.expectRevert(TokenPortal.InexactTransfer.selector);
-        portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, 1_000, SECRET_HASH);
         vm.expectRevert(TokenPortal.InexactTransfer.selector);
         portal.depositToAztecPrivate(1_000, SECRET_HASH);
         vm.stopPrank();
@@ -307,7 +352,7 @@ contract TokenPortalTest is Test {
         sur.mint(alice, 1_010);
         vm.startPrank(alice);
         sur.approve(address(portal), 1_000);
-        portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, 1_000, SECRET_HASH);
         vm.stopPrank();
         assertEq(sur.balanceOf(address(portal)), 1_000, "the deposit itself is exact");
 
@@ -334,7 +379,7 @@ contract TokenPortalTest is Test {
         hook.arm(address(portal), address(portal), abi.encodeCall(TokenPortal.depositToAztecPrivate, (1, SECRET_HASH)));
 
         vm.prank(alice);
-        portal.depositToAztecPublic(TO, 100, SECRET_HASH);
+        portal.depositToAztecPublic(alice, TO, 100, SECRET_HASH);
 
         assertEq(hook.innerResult(), ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector, "re-entry allowed");
         assertEq(inbox.sent(), 1, "only the outer deposit sent a message");

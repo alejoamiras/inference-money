@@ -12,8 +12,9 @@ import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
 
 /// Content-hash ROUNDTRIP fuzzing for the real portal: for arbitrary inputs, the hash committed into the L1<>L2
 /// message must equal an INDEPENDENT model (`sha256(preimage) >> 8`, computed without the Aztec Hash library the
-/// portal itself uses, which would make the assertion a tautology). Deposits name their depositor both ways the
-/// portal allows: as the caller of a direct deposit, and as the router's argument. The keystone pins five points;
+/// portal itself uses, which would make the assertion a tautology). Deposits name their depositor every way the
+/// portal allows: as a direct private deposit's caller, as a direct public deposit's refund address, and as the
+/// router's argument. The keystone pins five points;
 /// this covers every address and the whole u128 amount range the L2 side accepts.
 contract PortalRoundtripFuzzTest is Test {
     bytes32 internal constant BRIDGE = bytes32(uint256(0x1111));
@@ -56,10 +57,11 @@ contract PortalRoundtripFuzzTest is Test {
     ) public {
         amount = bound(amount, 1, type(uint128).max);
         to = bytes32(bound(uint256(to), 0, Constants.MAX_FIELD_VALUE));
+        vm.assume(depositor != address(0) && depositor != address(portal) && depositor != address(router));
         address payer = _payer(viaRouter, depositor, amount);
         vm.prank(payer);
         if (viaRouter) portal.depositToAztecPublicFor(depositor, to, amount, secret);
-        else portal.depositToAztecPublic(to, amount, secret);
+        else portal.depositToAztecPublic(depositor, to, amount, secret);
 
         bytes memory preimage =
             abi.encodeWithSignature("mint_to_public(bytes32,uint256,address)", to, amount, depositor);

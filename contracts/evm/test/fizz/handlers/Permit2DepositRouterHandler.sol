@@ -70,7 +70,7 @@ abstract contract Permit2DepositRouterHandler is Properties {
         }
         if (usdc.balanceOf(address(portal)) != portalBefore || inbox.sent() != sentBefore) ghosts.boundaryAccepted++;
         _noopEnd(consumed);
-        if (kind == 0) property_zeroAmountSafe(true);
+        if (kind == 0) property_zeroAmountSafe();
     }
 
     function permit2DepositRouter_secondary(uint256 amount, bool isPrivate) public {

@@ -3,8 +3,10 @@
 // Modified 2026 by the inference-money contributors. Derived from the canonical Aztec TokenPortal
 // (aztec-packages l1-contracts/test/portals/TokenPortal.sol), with these changes:
 //   - Deposit messages name their depositor: `mint_to_public(bytes32,uint256,address)` and
-//     `mint_to_private(uint256,address)`. A direct deposit names `msg.sender`; the bound router's `...For` deposits
+//     `mint_to_private(uint256,address)`. A public deposit names the refund address its caller passes (never zero,
+//     this portal or the router); a direct private deposit names `msg.sender`; the bound router's `...For` deposits
 //     name the Permit2 signer it pulled from. `withdraw`'s message is the canonical one.
+//   - Deposits refuse a zero amount, and refuse once the registry's canonical rollup is no longer the bound one.
 //   - `initialize` is deployer-only and init-once, and binds the router, which must name this portal and token. The
 //     L2 bridge address is derived from this contract's address, so the binding cannot move into the constructor.
 //   - Deposits cap `amount` at u128 (the L2 amount type), public deposits require `_to` to be a field element (an
@@ -44,6 +46,11 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
     error RecipientExceedsFieldMax();
     /// @notice The token moved a different amount than requested (fee-on-transfer, surcharge, upgrade).
     error InexactTransfer();
+    error ZeroAmount();
+    /// @notice The registry's canonical rollup moved on; a deposit to the old one's Inbox might never be consumed.
+    error RollupNotCanonical();
+    /// @notice A public refund address of zero, this portal or the router: a returned deposit could never leave it.
+    error InvalidDepositor();
 
     event DepositToAztecPublic(
         address indexed depositor, bytes32 to, uint256 amount, bytes32 secretHash, bytes32 key, uint256 index
@@ -118,18 +125,19 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
 
     /**
      * @notice Deposit funds into the portal and adds an L2 message which can only be consumed publicly on Aztec
+     * @param _depositor - The L1 address a returned deposit pays; no exit reads it. Unsigned, so it names no identity.
      * @param _to - The aztec address of the recipient
-     * @param _amount - The amount to deposit
+     * @param _amount - The amount to deposit, pulled from `msg.sender`
      * @param _secretHash - The hash of the secret consumable message. The hash should be 254 bits (so it can fit in a
      * Field element)
      * @return The key of the entry in the Inbox and its leaf index
      */
-    function depositToAztecPublic(bytes32 _to, uint256 _amount, bytes32 _secretHash)
+    function depositToAztecPublic(address _depositor, bytes32 _to, uint256 _amount, bytes32 _secretHash)
         external
         nonReentrant
         returns (bytes32, uint256)
     {
-        return _depositPublic(msg.sender, _to, _amount, _secretHash);
+        return _depositPublic(_depositor, _to, _amount, _secretHash);
     }
 
     /// @notice `depositToAztecPublic` for the router, naming the signer it pulled the funds from as the depositor.
@@ -212,8 +220,11 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
         private
         returns (bytes32, uint256)
     {
+        _requireNonZero(_amount);
         _requireDeposit(_amount);
         _requireRecipient(_to);
+        _requireDepositor(_depositor);
+        _requireCanonical();
 
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
         // The signature only tags the action; nothing calls it.
@@ -232,7 +243,9 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
         private
         returns (bytes32, uint256)
     {
+        _requireNonZero(_amount);
         _requireDeposit(_amount);
+        _requireCanonical();
 
         DataStructures.L2Actor memory actor = DataStructures.L2Actor(l2Bridge, rollupVersion);
         // The signature only tags the action; nothing calls it.
@@ -267,6 +280,24 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient {
     /// @dev The Inbox range-checks the content hash, never the fields hashed into it.
     function _requireRecipient(bytes32 _to) internal pure virtual {
         if (uint256(_to) > Constants.MAX_FIELD_VALUE) revert RecipientExceedsFieldMax();
+    }
+
+    function _requireNonZero(uint256 _amount) internal pure virtual {
+        if (_amount == 0) revert ZeroAmount();
+    }
+
+    /// @dev A withdraw to the portal never debits it, so it always reverts; the router is ownerless and must settle
+    /// to its starting balance on every deposit, so nothing could ever move a refund out of it.
+    function _requireDepositor(address _depositor) internal view virtual {
+        if (_depositor == address(0) || _depositor == address(this) || _depositor == router) {
+            revert InvalidDepositor();
+        }
+    }
+
+    /// @dev Deposits only: `withdraw` keeps consuming the Outbox bound at initialize, so every proven exit still pays
+    /// after an upgrade.
+    function _requireCanonical() internal view virtual {
+        if (address(registry.getCanonicalRollup()) != address(rollup)) revert RollupNotCanonical();
     }
 
     /// @dev A short pull would mint more on L2 than the reserve holds (silent insolvency), so it reverts.

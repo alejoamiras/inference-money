@@ -207,7 +207,7 @@ abstract contract RoundTripHandler is AztecL2Handler, Permit2DepositRouterHandle
                 ok = true;
             } catch {}
         } else {
-            try portal.depositToAztecPublic(to, amount, secret) {
+            try portal.depositToAztecPublic(who, to, amount, secret) {
                 ok = true;
             } catch {}
         }

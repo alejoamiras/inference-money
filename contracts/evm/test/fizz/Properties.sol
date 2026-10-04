@@ -646,8 +646,8 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
         neq(uint256(hashOther), uint256(hashDirect), "SP-21: another actor's deposit carries the first actor's hash");
     }
 
-    /// @notice SP-22: a zero direct deposit moves no USDC and no claimable value; a zero router deposit moves nothing
-    function property_zeroAmountSafe(bool routerLeg) internal {
+    /// @notice SP-22: a zero deposit is refused on every path and moves nothing: no USDC, no message, no claimable value
+    function property_zeroAmountSafe() internal {
         eq(stateAfter.portalBal, stateBefore.portalBal, "SP-22: zero deposit moved portal USDC");
         eq(
             stateAfter.actorTokenBalance,
@@ -659,6 +659,6 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
             stateBefore.pendingDepositAmount,
             "SP-22: zero deposit created claimable value"
         );
-        eq(stateAfter.inboxSent, stateBefore.inboxSent + (routerLeg ? 0 : 1), "SP-22: zero deposit message count wrong");
+        eq(stateAfter.inboxSent, stateBefore.inboxSent, "SP-22: zero deposit sent a message");
     }
 }

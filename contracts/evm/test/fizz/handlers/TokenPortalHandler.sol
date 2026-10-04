@@ -69,11 +69,26 @@ abstract contract TokenPortalHandler is Properties {
         tokenPortal_depositToAztecPrivate(amount, _toField(_secretHash));
     }
 
-    /// The portal (unlike the router) accepts a zero amount: a value-less message.
     function tokenPortal_deposit_zeroAmount(uint256 _accountSeed, bool _isPrivate) public {
-        if (_isPrivate) tokenPortal_depositToAztecPrivate(0, bytes32(0));
-        else tokenPortal_depositToAztecPublic(toL2Account(_accountSeed), 0, bytes32(0));
-        property_zeroAmountSafe(false);
+        bytes32 to = toL2Account(_accountSeed);
+        uint256 consumed = _noopBegin();
+        vm.startPrank(actor);
+        if (_isPrivate) {
+            try portal.depositToAztecPrivate(0, bytes32(0)) {
+                ghosts.boundaryAccepted++;
+            } catch (bytes memory reason) {
+                _requireRefusal(reason, TokenPortal.ZeroAmount.selector);
+            }
+        } else {
+            try portal.depositToAztecPublic(actor, to, 0, bytes32(0)) {
+                ghosts.boundaryAccepted++;
+            } catch (bytes memory reason) {
+                _requireRefusal(reason, TokenPortal.ZeroAmount.selector);
+            }
+        }
+        vm.stopPrank();
+        _noopEnd(consumed);
+        property_zeroAmountSafe();
     }
 
     /// Unfunded, so only the cap's own selector counts as a refusal: without the cap the pull would revert instead.
@@ -88,7 +103,7 @@ abstract contract TokenPortalHandler is Properties {
                 _requireRefusal(reason, TokenPortal.AmountExceedsL2Max.selector);
             }
         } else {
-            try portal.depositToAztecPublic(L2_ACCOUNTS[0], amount, bytes32(0)) {
+            try portal.depositToAztecPublic(actor, L2_ACCOUNTS[0], amount, bytes32(0)) {
                 ghosts.boundaryAccepted++;
             } catch (bytes memory reason) {
                 _requireRefusal(reason, TokenPortal.AmountExceedsL2Max.selector);
@@ -108,7 +123,7 @@ abstract contract TokenPortalHandler is Properties {
         }
         uint256 consumed = _noopBegin();
         vm.prank(actor);
-        try portal.depositToAztecPublic(bytes32(Constants.MAX_FIELD_VALUE + 1), _amount, bytes32(0)) {
+        try portal.depositToAztecPublic(actor, bytes32(Constants.MAX_FIELD_VALUE + 1), _amount, bytes32(0)) {
             ghosts.boundaryAccepted++;
         } catch (bytes memory reason) {
             _requireRefusal(reason, TokenPortal.RecipientExceedsFieldMax.selector);
@@ -228,7 +243,7 @@ abstract contract TokenPortalHandler is Properties {
 
     function tokenPortal_depositToAztecPublic(bytes32 _to, uint256 _amount, bytes32 _secretHash) public asActor {
         snapshotBefore();
-        (, uint256 index) = portal.depositToAztecPublic(_to, _amount, _secretHash);
+        (, uint256 index) = portal.depositToAztecPublic(actor, _to, _amount, _secretHash);
         _afterDirectDeposit(actor, _to, _amount, false);
         snapshotAfter();
         _directDepositProperties(_amount, _secretHash, index);

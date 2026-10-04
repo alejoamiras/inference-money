@@ -69,7 +69,7 @@ contract FakeRollup {
 }
 
 contract FakeRegistry {
-    address public immutable rollup;
+    address public rollup;
 
     constructor(address rollup_) {
         rollup = rollup_;
@@ -77,5 +77,10 @@ contract FakeRegistry {
 
     function getCanonicalRollup() external view returns (address) {
         return rollup;
+    }
+
+    /// A governance upgrade: the portal stays bound to the old rollup, which is no longer canonical.
+    function setCanonicalRollup(address rollup_) external {
+        rollup = rollup_;
     }
 }

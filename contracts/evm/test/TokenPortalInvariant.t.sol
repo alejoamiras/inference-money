@@ -144,7 +144,7 @@ contract PortalHandler is StdUtils {
         usdc.approve(address(portal), amount);
         if (payer == depositor) {
             if (isPrivate) portal.depositToAztecPrivate(amount, bytes32(0));
-            else portal.depositToAztecPublic(to, amount, bytes32(0));
+            else portal.depositToAztecPublic(depositor, to, amount, bytes32(0));
         } else {
             if (isPrivate) portal.depositToAztecPrivateFor(depositor, amount, bytes32(0));
             else portal.depositToAztecPublicFor(depositor, to, amount, bytes32(0));

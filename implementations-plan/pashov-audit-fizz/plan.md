@@ -534,7 +534,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 2: L1 deposit rules (`pashov-audit-fizz-l1`)
 
-**P2. Portal guards.**
+**P2. Portal guards.** ✓
 - `_requireNonZero`, `_requireCanonical`, `_requireDepositor`, and the new public signature.
 - The `FakeRegistry` setter; every call site moved, fizz's public-deposit handlers included, and fizz's zero-deposit handler now expects `ZeroAmount`.
 - Halmos `proveRejectsZero` (public direct + private `...For`), `proveRejectsStaleRollup` and `proveRejectsBadRefund`, each with its mutant, canary, gate pair and self-test log.

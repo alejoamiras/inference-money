@@ -34,6 +34,18 @@ contract PortalWithoutRecipientCheck is TokenPortal {
     function _requireRecipient(bytes32) internal pure override {}
 }
 
+contract PortalWithoutZeroCheck is TokenPortal {
+    function _requireNonZero(uint256) internal pure override {}
+}
+
+contract PortalWithoutCanonicalCheck is TokenPortal {
+    function _requireCanonical() internal view override {}
+}
+
+contract PortalWithoutDepositorCheck is TokenPortal {
+    function _requireDepositor(address) internal view override {}
+}
+
 contract RouterWithoutZeroCheck is Permit2DepositRouter {
     constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 
