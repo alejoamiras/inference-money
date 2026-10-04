@@ -171,6 +171,18 @@ contract TokenPortalTest is Test {
         portal.initialize(address(registry), address(token), BRIDGE, makeAddr("eoa"));
         assertEq(address(portal.registry()), address(0), "a refused initialize bound a registry");
 
+        FakeRollup rollup = FakeRollup(registry.rollup());
+        vm.expectEmit(address(portal));
+        emit TokenPortal.PortalInitialized(
+            address(registry),
+            address(token),
+            BRIDGE,
+            address(bound),
+            address(rollup),
+            address(inbox),
+            address(outbox),
+            rollup.VERSION()
+        );
         portal.initialize(address(registry), address(token), BRIDGE, address(bound));
         assertEq(portal.router(), address(bound), "router");
     }
@@ -196,6 +208,8 @@ contract TokenPortalTest is Test {
         vm.prank(alice);
         portal.depositToAztecPublic(TO, 500, SECRET_HASH);
 
+        vm.expectEmit(address(portal));
+        emit TokenPortal.Withdraw(alice, 200, address(this));
         portal.withdraw(alice, 200, true, Epoch.wrap(3), 9, 5, new bytes32[](0));
 
         DataStructures.L2ToL1Msg memory m = outbox.lastMsg();
@@ -209,6 +223,11 @@ contract TokenPortalTest is Test {
         );
         assertEq(token.balanceOf(alice), 200);
         assertEq(token.balanceOf(address(portal)), 300);
+
+        // Without a caller the message, and so the event, names nobody: anyone could have executed it.
+        vm.expectEmit(address(portal));
+        emit TokenPortal.Withdraw(alice, 100, address(0));
+        portal.withdraw(alice, 100, false, Epoch.wrap(3), 9, 6, new bytes32[](0));
     }
 
     /// u128 is the L2 amount type; one past it could never be claimed, and exactly the max still deposits.

@@ -12,7 +12,13 @@ import { getPublicEvents } from "@aztec-labs/aztec.js/events"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { BlockNumber } from "@aztec-labs/foundation/branded-types"
-import { type AbiType, decodeFunctionSignature, type EventMetadataDefinition, EventSelector } from "@aztec-labs/stdlib/abi"
+import {
+	type AbiType,
+	type ContractArtifact,
+	decodeFunctionSignature,
+	type EventMetadataDefinition,
+	EventSelector,
+} from "@aztec-labs/stdlib/abi"
 import { DelayedPublicMutableValues, type ScheduledDelayChange } from "@aztec-labs/stdlib/delayed-public-mutable"
 import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
 import { Capsule } from "@aztec-labs/stdlib/tx"
@@ -52,17 +58,19 @@ export type MerchantNode = Pick<AztecNode, "getBlockNumber" | "getBlockData" | "
 
 type StructType = Extract<AbiType, { kind: "struct" }>
 
-/** A token event's decoding definition, its selector derived the way aztec's codegen derives it. */
-export async function tokenEvent(name: string): Promise<EventMetadataDefinition> {
-	const path = `Token::${name}`
-	const abiType = (tokenArtifact.outputs.structs.events as StructType[] | undefined)?.find((e) => e.path === path)
-	if (!abiType) throw new Error(`the token artifact has no ${path} event`)
+/** A contract event's decoding definition, its selector derived the way aztec's codegen derives it. */
+export async function contractEvent(artifact: ContractArtifact, name: string): Promise<EventMetadataDefinition> {
+	const path = `${artifact.name}::${name}`
+	const abiType = (artifact.outputs.structs.events as StructType[] | undefined)?.find((e) => e.path === path)
+	if (!abiType) throw new Error(`the ${artifact.name} artifact has no ${path} event`)
 	const signature = decodeFunctionSignature(
 		name,
 		abiType.fields.map((f) => ({ ...f, visibility: "private" as const })),
 	)
 	return { eventSelector: await EventSelector.fromSignature(signature), abiType, fieldNames: abiType.fields.map((f) => f.name) }
 }
+
+export const tokenEvent = (name: string): Promise<EventMetadataDefinition> => contractEvent(tokenArtifact, name)
 
 async function listedAccounts(node: MerchantNode, token: AztecAddress, block: number): Promise<AztecAddress[]> {
 	const added = await tokenEvent("MerchantAdded")

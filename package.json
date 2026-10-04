@@ -29,6 +29,7 @@
 		"test:evm:fork": "bun run --cwd contracts/evm test:evm:fork",
 		"test:evm:formal": "bun run --cwd contracts/evm test:evm:formal",
 		"test:evm:gas": "bun run --cwd contracts/evm test:evm:gas",
+		"test:evm:slither": "bun run --cwd contracts/evm test:evm:slither",
 		"test:integration": "bun run --cwd packages/integration test:integration",
 		"test:noir": "bun run --cwd contracts/aztec test:noir",
 		"typecheck": "bun run --filter './packages/*' --filter './apps/*' --filter './contracts/*' --if-present typecheck",

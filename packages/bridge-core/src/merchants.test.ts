@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
+import { tokenBridgeArtifact } from "./artifacts"
 import {
+	contractEvent,
 	type MerchantEntry,
 	type MerchantList,
 	merchantSide,
@@ -71,10 +73,16 @@ describe("the side a call proves", () => {
 	})
 })
 
-describe("token events", () => {
+describe("contract events", () => {
 	// aztec-standards' codegen pins Transfer's selector; deriving it the same way proves the method for MerchantAdded.
 	it("derive the selector aztec's codegen pins", async () => {
 		expect((await tokenEvent("Transfer")).eventSelector.toString()).toBe("0x70a1894e")
 		await expect(tokenEvent("Missing")).rejects.toThrow(/no Token::Missing event/)
+	})
+
+	// No independent source pins a bridge event's selector; the integration spec reads them off a real node.
+	it("are found by their contract's name", async () => {
+		expect((await contractEvent(tokenBridgeArtifact, "OwnershipTransferred")).fieldNames).toEqual(["previous_owner", "new_owner"])
+		await expect(contractEvent(tokenBridgeArtifact, "Missing")).rejects.toThrow(/no TokenBridge::Missing event/)
 	})
 })

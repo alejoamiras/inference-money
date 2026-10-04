@@ -1,6 +1,6 @@
 name: Setup toolchains
 description: >
-  Bun (+ frozen install) always; Foundry, halmos, the Aztec CLI and the Aztec node on request. Every
+  Bun (+ frozen install) always; Foundry, halmos, Slither, the Aztec CLI and the Aztec node on request. Every
   version is read from toolchain.json. Callers check out the repo first.
 
 inputs:
@@ -10,6 +10,10 @@ inputs:
     default: "false"
   halmos:
     description: Install halmos at toolchain.json's pin (implies Python).
+    required: false
+    default: "false"
+  slither:
+    description: Install Slither at toolchain.json's pin (implies Foundry, whose build it reads).
     required: false
     default: "false"
   aztec:
@@ -28,7 +32,7 @@ runs:
       id: pins
       shell: bash
       run: |
-        for key in bun foundry halmos nargo node; do
+        for key in bun foundry halmos nargo node slither; do
           echo "$key=$(jq -er --arg k "$key" '.[$k]' toolchain.json)" >> "$GITHUB_OUTPUT"
         done
 
@@ -46,7 +50,7 @@ runs:
       run: bun install --frozen-lockfile
 
     # A newer Foundry routes test-contract creation through a cheatcode halmos 0.3.3 lacks: bump both together.
-    - if: inputs.foundry == 'true' || inputs.halmos == 'true'
+    - if: inputs.foundry == 'true' || inputs.halmos == 'true' || inputs.slither == 'true'
       uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
       with:
         version: v${{ steps.pins.outputs.foundry }}
@@ -63,6 +67,19 @@ runs:
         "$RUNNER_TEMP/halmos/bin/pip" install --require-hashes --no-deps --only-binary :all: -r "$LOCK"
         mkdir -p "$RUNNER_TEMP/bin"
         ln -s "$RUNNER_TEMP/halmos/bin/halmos" "$RUNNER_TEMP/bin/halmos"
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+    # CI fails on any Slither finding, so Slither installs the same way: its whole tree from a hash lock, wheels only,
+    # in a venv of its own, and only `slither` joins PATH.
+    - if: inputs.slither == 'true'
+      shell: bash
+      env:
+        LOCK: ${{ github.action_path }}/slither-${{ steps.pins.outputs.slither }}.requirements.txt
+      run: |
+        python3 -m venv "$RUNNER_TEMP/slither"
+        "$RUNNER_TEMP/slither/bin/pip" install --require-hashes --no-deps --only-binary :all: -r "$LOCK"
+        mkdir -p "$RUNNER_TEMP/bin"
+        ln -s "$RUNNER_TEMP/slither/bin/slither" "$RUNNER_TEMP/bin/slither"
         echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
     # The aztec CLI, the TXE server and the node run on node.

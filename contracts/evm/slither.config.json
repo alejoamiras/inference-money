@@ -1,0 +1,4 @@
+{
+	"detectors_to_exclude": "naming-convention,pragma",
+	"exclude_dependencies": true
+}

@@ -17,6 +17,7 @@ jobs:
         with:
           foundry: "true"
           halmos: "true"
+          slither: "true"
       - name: Remapping check (unit)
         run: bun run --cwd contracts/evm test
       # fmt, lint (src), unit, fuzz and invariant suites; the Sepolia fork suite runs locally in the phase gate.
@@ -24,6 +25,9 @@ jobs:
         run: bun run test:evm
       - name: Gas snapshot
         run: bun run test:evm:gas
+      # Any finding fails: docs/ci-pipeline.md gives each excluded detector's reason, the source each inline suppression's.
+      - name: Slither
+        run: bun run test:evm:slither
       # Exact proof names and per-contract counts: a renamed, deleted or failing proof fails the job.
       - name: Halmos (strict)
         run: bun run test:evm:formal
