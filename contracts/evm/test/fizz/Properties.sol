@@ -246,9 +246,9 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
         eq(ghosts.misnamedMessages, 0, "GL-23: misnamed deposit message");
     }
 
-    /// @notice GL-24: a token-hook re-entry into the portal or router never succeeds
+    /// @notice GL-24: a token-hook re-entry into the portal or router is refused by the reentrancy guard itself
     function property_noReentry() public {
-        eq(usdc.hookReentrySucceeded(), 0, "GL-24: hook re-entry succeeded");
+        eq(usdc.hookReentrySucceeded(), 0, "GL-24: a hook re-entry was not refused by the guard");
     }
 
     /// @notice GL-25: round-tripping the bridge never pays out more than was put in

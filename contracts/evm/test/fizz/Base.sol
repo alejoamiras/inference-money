@@ -38,9 +38,9 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
     uint256 internal constant INITIAL_TOKEN_BALANCE = 1e15;
     /// Upper clamp for "realistic" deposits and exits: 1M USDC.
     uint256 internal constant MAX_REALISTIC_AMOUNT = 1e12;
-    /// Cap on the USDC actors can ever hold (setup balances plus `_ensureFunds` mints; donations aside). Real USDC
-    /// (about 2^57 base units) never nears the L2's u128 amount type, so an uncapped mock would only show GL-26
-    /// breaking on a supply no real deposit can reach.
+    /// Cap on the actor-originated supply: setup balances plus `_ensureFunds` mints, wherever they sit now (actors,
+    /// the portal's escrow, the fee sink); donations excluded. Real USDC (about 2^57 base units) never nears the L2's
+    /// u128 amount type, so an uncapped mock would only show GL-26 breaking on a supply no real deposit can reach.
     uint256 internal constant MOCK_SUPPLY_CAP = type(uint128).max;
 
     bytes32 internal constant L2_BRIDGE = bytes32(uint256(0xB41D6E));
@@ -208,12 +208,10 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     // ――――――――――――――――――――――――― Helpers ――――――――――――――――――――――――――
 
-    // Maps an arbitrary address to an actor address
     function toActor(address addy) internal view returns (address) {
         return actors[uint256(uint160(addy)) % actors.length];
     }
 
-    // Maps an arbitrary address to an actor address that is different from the current actor
     function toActorNotCurrent(address addy) internal view returns (address) {
         address _actor = actors[uint256(uint160(addy)) % actors.length];
         if (_actor == actor) {
@@ -230,6 +228,11 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
     function _otherActor(address not, uint256 seed) internal view returns (address other) {
         other = actors[seed % actors.length];
         if (other == not) other = actors[(seed + 1) % actors.length];
+    }
+
+    /// A boundary probe's revert is a refusal only with its rule's own selector; any other revert could hide the rule.
+    function _requireRefusal(bytes memory reason, bytes4 selector) internal {
+        if (bytes4(reason) != selector) ghosts.boundaryAccepted++;
     }
 
     /// Mints the shortfall (plus room for a 1% surcharge) within `MOCK_SUPPLY_CAP`; false once the cap leaves `who`

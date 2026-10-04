@@ -145,16 +145,19 @@ abstract contract AztecL2Handler is Properties {
         usdc.setBlacklisted(toActor(who), seed % 4 == 0);
     }
 
-    /// Arms one transfer hook that re-enters the portal (a deposit or a withdraw) or the router mid-transfer.
+    /// Arms one transfer hook that re-enters the portal (a deposit or a withdraw) or the router mid-transfer. The
+    /// portal moves tokens only inside its guarded calls, and Permit2 only inside the router's, so the hook never fires
+    /// on a donation, where no guard is held.
     function _env_armReentry(uint256 targetSeed, uint256 payloadSeed) internal {
         if (targetSeed % 2 == 0) {
             bytes memory payload = payloadSeed % 2 == 0
                 ? abi.encodeCall(TokenPortal.depositToAztecPrivate, (1, bytes32(0)))
                 : abi.encodeCall(TokenPortal.withdraw, (actors[0], 1, false, Epoch.wrap(0), 1, 0, new bytes32[](0)));
-            usdc.arm(address(portal), address(portal), payload);
+            usdc.arm(address(portal), address(portal), address(portal), payload);
         } else {
             usdc.arm(
                 address(router),
+                address(permit2),
                 address(router),
                 abi.encodeCall(Permit2DepositRouter.deposit, (1, bytes32(0), bytes32(0), true, 0, 1, ""))
             );

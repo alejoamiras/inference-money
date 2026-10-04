@@ -106,9 +106,21 @@ contract FoundryTester is Test, Handlers {
         assertEq(ghosts.replayedPayouts, 0, "replay");
     }
 
-    /// GL-26: the portal caps each deposit at u128, not the running total; only a token supply past u128 could
-    /// overflow the L2 side. Medusa's former shrunk violation (a max-amount deposit, then any other) now finds the mock
-    /// supply spent, so the second deposit cannot be funded and the liabilities stay within u128.
+    /// GL-24 is not vacuous: an armed re-entry skips a donation, then fires inside a guarded deposit and is refused by
+    /// the guard itself, for the portal and for the router.
+    function test_harness_reentryRefusedByTheGuard() public {
+        env_secondary(4, 0, 0, address(0));
+        env_secondary(0, 1e6, 0, address(0));
+        assertEq(usdc.hookFired(), 0, "fired on an unguarded donation");
+        tokenPortal_depositToAztecPrivate_clamped(1e6, bytes32(uint256(1)));
+        env_secondary(4, 1, 0, address(0));
+        permit2DepositRouter_deposit_clamped(1e6, 0, bytes32(uint256(2)), true, 0);
+        assertEq(usdc.hookFired(), 2, "both hooks fired");
+        assertEq(usdc.hookReentrySucceeded(), 0, "a re-entry was not refused by the guard");
+    }
+
+    /// GL-26: the portal caps each deposit at u128, not the running total, so only the mock supply cap keeps a
+    /// max-amount deposit followed by any other within u128.
     function test_harness_mockSupplyKeepsLiabilitiesInU128() public {
         tokenPortal_depositToAztecPublic_maxAmount(0, bytes32(uint256(1)));
         assertGt(ghosts.pendingDepositAmount, type(uint128).max / 2, "the max-amount deposit landed");

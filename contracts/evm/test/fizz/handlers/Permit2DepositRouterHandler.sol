@@ -37,21 +37,27 @@ abstract contract Permit2DepositRouterHandler is Properties {
     function permit2DepositRouter_deposit_malformed(uint8 kind, uint256 amount, bytes32 recipient) public {
         kind = uint8(kind % 4);
         bool isPrivate;
+        bytes4 refusal;
         if (kind == 0) {
             amount = 0;
             recipient = L2_ACCOUNTS[0];
+            refusal = Permit2DepositRouter.ZeroAmount.selector;
         } else if (kind == 1) {
             amount = uint256(type(uint128).max) + 1 + (amount % 1e18);
             recipient = L2_ACCOUNTS[0];
+            refusal = Permit2DepositRouter.AmountExceedsL2Max.selector;
         } else if (kind == 2) {
             amount = clampBetween(amount, 1, MAX_REALISTIC_AMOUNT);
             isPrivate = true;
             if (recipient == bytes32(0)) recipient = L2_ACCOUNTS[1];
+            refusal = Permit2DepositRouter.PrivateDepositNamesRecipient.selector;
         } else {
             amount = clampBetween(amount, 1, MAX_REALISTIC_AMOUNT);
             recipient = bytes32(0);
+            refusal = Permit2DepositRouter.PublicDepositNeedsRecipient.selector;
         }
-        // Over u128 the router refuses before any pull; funding it would only drain the capped mock supply.
+        // Over u128 stays unfunded (funding it would only drain the capped mock supply), so a missing cap would revert
+        // on the pull; the exact selector is what proves the rule refused.
         if (kind != 1) _ensureFunds(actor, amount);
         uint256 portalBefore = usdc.balanceOf(address(portal));
         uint256 sentBefore = inbox.sent();
@@ -59,7 +65,9 @@ abstract contract Permit2DepositRouterHandler is Properties {
         vm.prank(actor);
         try router.deposit(amount, recipient, bytes32(0), isPrivate, 0, block.timestamp + 1, "") {
             ghosts.boundaryAccepted++;
-        } catch {}
+        } catch (bytes memory reason) {
+            _requireRefusal(reason, refusal);
+        }
         if (usdc.balanceOf(address(portal)) != portalBefore || inbox.sent() != sentBefore) ghosts.boundaryAccepted++;
         _noopEnd(consumed);
         if (kind == 0) property_zeroAmountSafe(true);

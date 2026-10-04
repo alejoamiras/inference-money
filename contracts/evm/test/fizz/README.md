@@ -8,7 +8,7 @@
 - `handlers/`: protocol actions exposed to the fuzzers
 - `harness/`: (optional) harness contracts that inherit from target contracts to expose private/internal state needed by properties
 - `utils/`: shared helper libraries, assertions, clamping logic, math helpers, deploy helpers, logging, and mocks
-- `FuzzTester.sol`: main Echidna/Medusa fuzzing entry point
+- `FuzzTester.sol`: the Medusa entry point
 - `FoundryTester.sol`: Foundry harness for quick debugging and local repros
 
 ## Inheritance Chain
@@ -19,30 +19,29 @@ Base (is StringUtils, Clamp, Deployer, Math)
               └─► Properties (is PropertiesAsserts, Snapshots)
                     └─► <Contract>Handler (is Properties)   — one per target contract
                           └─► Handlers (is <all handlers>)  — aggregator + actor switching
-                                ├─► FuzzTester (is Handlers)       — Echidna/Medusa entry point
+                                ├─► FuzzTester (is Handlers)       — Medusa entry point
                                 └─► FoundryTester (is Test, Handlers) — Foundry quick debug/PoC entry point
 ```
 
 ## Related Paths Outside This Directory
 
-- `../../fizz_data/`: extracted ABI inventory, entry-point selection, protocol-understanding notes, corpora, logs, and coverage outputs
-- `../../echidna.yaml`: Echidna config
+- `../../fizz_data/`: extracted ABI inventory, entry-point selection, protocol-understanding notes and the report
+  (committed); corpora, logs and coverage outputs (ignored)
 - `../../medusa.json`: Medusa config
+- `../../PROPERTIES.md`: every property, with its guarantee and source
 
 ## How To Run
 
-From the project root:
+From the repo root:
 
 ```bash
-forge build
-forge test --match-contract FoundryTester
-echidna . --contract FuzzTester --config echidna.yaml
-medusa fuzz --config medusa.json
+bun run test:evm:fuzz [-- <seconds>]   # Medusa, default 3600 s; nightly in CI (fuzz-contracts.yml)
+forge test --root contracts/evm --match-contract FoundryTester
 ```
 
-Run Medusa with `FOUNDRY_PROFILE=fuzz` (fizz's `run_medusa.js` sets it): that profile restores a metadata hash
-(`bytecode_hash = "ipfs"`), without which Medusa attributes no coverage to any contract with immutables. Echidna was
-not installed when this suite was generated, so `echidna.yaml` is untested.
+`test:evm:fuzz` sets `FOUNDRY_PROFILE=fuzz` for Medusa alone: that profile restores a metadata hash
+(`bytecode_hash = "ipfs"`), without which Medusa attributes no coverage to any contract with immutables, and builds
+into `out-fuzz/`, away from the default profile's `out/`.
 
 ## This Suite's Model
 

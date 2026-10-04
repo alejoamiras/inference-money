@@ -9,9 +9,10 @@ seconds="${1:-3600}"
 log=fizz_data/last-campaign.log
 mkdir -p fizz_data
 
-# medusa.json's testLimit bounds local runs; here the timeout alone ends the campaign.
+# medusa.json's testLimit bounds local runs; here the timeout alone ends the campaign. pipefail makes `status`
+# Medusa's exit (or tee's), and the foreground pipeline has finished writing the log before it is parsed.
 status=0
-FOUNDRY_PROFILE=fuzz medusa fuzz --config medusa.json --timeout "$seconds" --test-limit 0 > >(tee "$log") 2>&1 ||
+FOUNDRY_PROFILE=fuzz medusa fuzz --config medusa.json --timeout "$seconds" --test-limit 0 2>&1 | tee "$log" ||
 	status=$?
 echo "fuzz: the campaign ran ${SECONDS}s"
 

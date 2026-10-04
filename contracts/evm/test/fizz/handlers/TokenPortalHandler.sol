@@ -76,7 +76,7 @@ abstract contract TokenPortalHandler is Properties {
         property_zeroAmountSafe(false);
     }
 
-    /// Unfunded on purpose: the cap refuses before any pull, so an acceptance here is a cap failure, never a balance one.
+    /// Unfunded, so only the cap's own selector counts as a refusal: without the cap the pull would revert instead.
     function tokenPortal_deposit_overU128(bool _isPrivate) public {
         uint256 amount = uint256(type(uint128).max) + 1;
         uint256 consumed = _noopBegin();
@@ -84,11 +84,15 @@ abstract contract TokenPortalHandler is Properties {
         if (_isPrivate) {
             try portal.depositToAztecPrivate(amount, bytes32(0)) {
                 ghosts.boundaryAccepted++;
-            } catch {}
+            } catch (bytes memory reason) {
+                _requireRefusal(reason, TokenPortal.AmountExceedsL2Max.selector);
+            }
         } else {
             try portal.depositToAztecPublic(L2_ACCOUNTS[0], amount, bytes32(0)) {
                 ghosts.boundaryAccepted++;
-            } catch {}
+            } catch (bytes memory reason) {
+                _requireRefusal(reason, TokenPortal.AmountExceedsL2Max.selector);
+            }
         }
         vm.stopPrank();
         _noopEnd(consumed);
@@ -106,7 +110,9 @@ abstract contract TokenPortalHandler is Properties {
         vm.prank(actor);
         try portal.depositToAztecPublic(bytes32(Constants.MAX_FIELD_VALUE + 1), _amount, bytes32(0)) {
             ghosts.boundaryAccepted++;
-        } catch {}
+        } catch (bytes memory reason) {
+            _requireRefusal(reason, TokenPortal.RecipientExceedsFieldMax.selector);
+        }
         _noopEnd(consumed);
     }
 
