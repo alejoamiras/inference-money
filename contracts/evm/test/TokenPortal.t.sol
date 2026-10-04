@@ -12,7 +12,13 @@ import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {CapturingInbox, CapturingOutbox, FakeRegistry, FakeRollup} from "./mocks/AztecFakes.sol";
 import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
-import {FeeOnTransferERC20, HookERC20, PlainERC20, SenderSurchargeERC20} from "./mocks/TestTokens.sol";
+import {
+    FeeOnTransferERC20,
+    HookERC20,
+    OverDeliveringERC20,
+    PlainERC20,
+    SenderSurchargeERC20
+} from "./mocks/TestTokens.sol";
 
 /// Direct calls into the portal, bypassing the router: the message formats and the guards hold for anyone who calls
 /// it, and only the bound router may name a depositor other than the caller.
@@ -90,6 +96,22 @@ contract TokenPortalTest is Test {
         assertEq(inbox.lastSecretHash(), SECRET_HASH);
     }
 
+    /// Both deposits return the Inbox's own key and index, read past index 0 so a constant cannot pass.
+    function test_deposits_returnTheInboxKeyAndIndex() public {
+        (TokenPortal portal,) = _funded(30);
+        vm.startPrank(alice);
+        portal.depositToAztecPublic(TO, 10, SECRET_HASH);
+
+        (bytes32 key, uint256 index) = portal.depositToAztecPrivate(10, SECRET_HASH);
+        assertEq(key, keccak256(abi.encode(_privateContent(10, alice), SECRET_HASH)), "private key");
+        assertEq(index, 1, "private index");
+
+        (key, index) = portal.depositToAztecPublic(TO, 10, SECRET_HASH);
+        assertEq(key, keccak256(abi.encode(_publicContent(TO, 10, alice), SECRET_HASH)), "public key");
+        assertEq(index, 2, "public index");
+        vm.stopPrank();
+    }
+
     /// The router pays, and the message and the event name the signer it passes, never the router.
     function test_depositFor_namesTheRoutersDepositor() public {
         PlainERC20 token = new PlainERC20("Tok", "TOK");
@@ -151,6 +173,22 @@ contract TokenPortalTest is Test {
 
         portal.initialize(address(registry), address(token), BRIDGE, address(bound));
         assertEq(portal.router(), address(bound), "router");
+    }
+
+    /// Each binding is checked on its own: with the other right, any wrong portal or token is refused. Random values
+    /// fall on both sides of the right address, so a comparison weakened to `<` or `>` fails here.
+    function testFuzz_initialize_refusesAMismatchedRouter(address other) public {
+        PlainERC20 token = new PlainERC20("Tok", "TOK");
+        TokenPortal wrongPortal = new TokenPortal();
+        TokenPortal wrongToken = new TokenPortal();
+        vm.assume(other != address(wrongPortal) && other != address(token));
+        address namesOtherPortal = address(new StubRouter(other, address(token)));
+        address namesOtherToken = address(new StubRouter(address(wrongToken), other));
+
+        vm.expectRevert(TokenPortal.RouterMismatch.selector);
+        wrongPortal.initialize(address(registry), address(token), BRIDGE, namesOtherPortal);
+        vm.expectRevert(TokenPortal.RouterMismatch.selector);
+        wrongToken.initialize(address(registry), address(token), BRIDGE, namesOtherToken);
     }
 
     function test_withdraw_consumesAndDebitsExactly() public {
@@ -218,6 +256,22 @@ contract TokenPortalTest is Test {
         tax.mint(alice, 1_000);
         vm.startPrank(alice);
         tax.approve(address(portal), 1_000);
+        vm.expectRevert(TokenPortal.InexactTransfer.selector);
+        portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
+        vm.expectRevert(TokenPortal.InexactTransfer.selector);
+        portal.depositToAztecPrivate(1_000, SECRET_HASH);
+        vm.stopPrank();
+        assertEq(inbox.sent(), 0);
+    }
+
+    /// The credit must be exact, not merely enough: a token that moves more than asked is refused like one that moves
+    /// less.
+    function test_deposit_rejectsOverDelivery() public {
+        OverDeliveringERC20 gen = new OverDeliveringERC20();
+        TokenPortal portal = _portal(gen);
+        gen.mint(alice, 1_001);
+        vm.startPrank(alice);
+        gen.approve(address(portal), 1_000);
         vm.expectRevert(TokenPortal.InexactTransfer.selector);
         portal.depositToAztecPublic(TO, 1_000, SECRET_HASH);
         vm.expectRevert(TokenPortal.InexactTransfer.selector);

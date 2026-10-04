@@ -197,6 +197,13 @@ unconstrained fn the_delay_setting_is_admin_only() {
     w.env.call_public(w.m1, Token::at(w.token).set_merchant_delay(HOUR));
 }
 
+// On a listed merchant, so the registration check cannot be what refuses it.
+#[test(should_fail_with = "Only the merchant admin")]
+unconstrained fn sync_merchant_delay_is_admin_only() {
+    let w = utils::setup_merchant_world(false);
+    w.env.call_public(w.bob, Token::at(w.token).sync_merchant_delay(w.m1));
+}
+
 #[test]
 unconstrained fn a_delay_decrease_waits_the_difference_and_an_increase_applies_at_once() {
     let w = utils::setup_merchant_world(false);
@@ -269,6 +276,12 @@ unconstrained fn the_former_admin_loses_the_role_on_acceptance() {
     w.env.call_public(w.admin, Token::at(w.token).propose_merchant_admin(w.bob));
     w.env.call_public(w.bob, Token::at(w.token).accept_merchant_admin());
     w.env.call_public(w.admin, Token::at(w.token).add_merchant(w.alice));
+}
+
+#[test(should_fail_with = "Only the merchant admin")]
+unconstrained fn propose_merchant_admin_is_admin_only() {
+    let w = utils::setup_merchant_world(false);
+    w.env.call_public(w.bob, Token::at(w.token).propose_merchant_admin(w.bob));
 }
 
 #[test(should_fail_with = "Only the pending merchant admin")]
