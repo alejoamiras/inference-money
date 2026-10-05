@@ -737,7 +737,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 4: consent, onboarding, remaining docs (`pashov-audit-fizz-sdk`)
 
-**P14. `allowBind`.**
+**P14. `allowBind`.** ✓
 - `claim`, `waitClaimable`, `claimCall`, `BindConsentRequiredError`; the `castClaim` opts; the showcase confirm.
 - Tests:
   - `claim.test.ts`: with `allowBind`, a first claim binds (arg `1n`); without it, it throws with zero simulations and zero sends; a bound account never prompts.
