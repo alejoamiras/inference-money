@@ -60,11 +60,13 @@ export interface RequestStamp {
 	expiresAt: bigint
 	/** At that block: "fresh" before `unmarkedUntil`, else "live" (it was found among the live buckets). */
 	state: "fresh" | "live"
+	/** That block's timestamp, the anchor a payment proven now reads at. */
+	at: bigint
 }
 
 export function requestStampAt(bucket: bigint, at: bigint): RequestStamp {
 	const unmarkedUntil = stampUnmarkedUntil(bucket)
-	return { bucket, unmarkedUntil, expiresAt: stampDeadline(bucket), state: at < unmarkedUntil ? "fresh" : "live" }
+	return { bucket, unmarkedUntil, expiresAt: stampDeadline(bucket), state: at < unmarkedUntil ? "fresh" : "live", at }
 }
 
 /** The buckets whose stamps are live at `timestamp`, newest first. */

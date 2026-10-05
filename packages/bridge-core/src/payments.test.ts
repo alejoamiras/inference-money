@@ -8,7 +8,7 @@ import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { siloNullifier } from "@aztec-labs/stdlib/hash"
 import type { ExecutionPayload, Tx } from "@aztec-labs/stdlib/tx"
 import { L2_PROPOSED } from "./claim"
-import { MERCHANT_MAX_DELAY, type MerchantList } from "./merchants"
+import { MERCHANT_MAX_DELAY, MERCHANT_MIN_DELAY, type MerchantList } from "./merchants"
 import {
 	memoryPaymentStore,
 	openedCommitment,
@@ -393,6 +393,19 @@ describe("payRequest", () => {
 		expect(await store.get(paymentKey(token, c))).toBeUndefined()
 		await t.pay(c, alice, "public")
 		expect(w.chain.included).toHaveLength(1)
+	})
+
+	it("refuses as stale a merchant's payment whose own read, its switch-off pending, would cap earlier than a live stamp", async () => {
+		const w = fakeChain()
+		const c = await stampedRequest(w)
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const t = await tab(memoryPaymentStore(), w)
+		const settled = LIST.entries.get(merchant.toString())!
+		const switchingOff = { ...settled, scheduledOff: true, changeAt: w.chain.ts + MERCHANT_MIN_DELAY }
+		const list = { ...LIST, entries: new Map([[merchant.toString(), switchingOff]]) }
+		const intent = { from: merchant, commitment: c, amount: 5n, kind: "private" as const }
+		await expect(payRequest(t.gate, t.wallet, token, intent, { list })).rejects.toEqual(refusal("stale"))
+		expect(w.chain.payloads).toEqual([])
 	})
 
 	it("refuses at the gate a payment through the stamp whose proof came out marked, releasing the request", async () => {

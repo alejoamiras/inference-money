@@ -351,7 +351,11 @@ pub contract Token {
         _nonce: Field,
     ) {
         let side = self.internal._prove_merchant_side(from, to, true);
-        assert(side != NEITHER, "Transfer refused: neither sender nor recipient is a merchant");
+        // A shield to oneself moves value between no two accounts, so a user or an ex-merchant may make one.
+        assert(
+            (side != NEITHER) | (from == to),
+            "Transfer refused: neither sender nor recipient is a merchant",
+        );
 
         self.internal._call_auth_private(from, amount);
 

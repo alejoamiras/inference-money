@@ -20,7 +20,7 @@ if [ "${1:-}" = "--crate" ]; then
   shift 2
 fi
 case "$crate" in
-  token) floor=178 ;;
+  token) floor=179 ;;
   token_bridge) floor=85 ;;
   keystone) floor=20 ;;
   *)

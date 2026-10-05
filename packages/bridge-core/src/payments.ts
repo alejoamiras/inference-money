@@ -478,7 +478,7 @@ function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side
 /**
  * Pays `amount` into a request with a wallet built by `gate.bindWallet`. Refused before anything is proven when the
  * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), has no live stamp and
- * a user pays it, or, for a user's private payment, its stamp is no longer fresh (`stale`: open a new request). Returns
+ * a user pays it, or a private payment would prove a stamp no longer fresh (`stale`: open a new request). Returns
  * once the payment reaches `opts.wait` (a checkpoint by default); its record turns `paid` when finalized
  * ({@link PaymentGate.status}).
  */
@@ -496,7 +496,7 @@ export async function payRequest(
 		if ((await completionCount(gate.node, token, p.commitment)) > 0) throw new PaymentRefusedError("completed-on-chain")
 		const found = await requestStamp(gate.node, token, p.commitment)
 		const txHash = await withFreshList(opts.list, opts.resync, async (list) => {
-			const side = paymentSide(list, found?.state ?? "none", p.from)
+			const side = paymentSide(list, found, p.from)
 			if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.payment)
 			const throughStamp = p.kind === "private" && side === Side.First
 			if (throughStamp && found?.state === "live") await gate.refuseStale(key, owner)

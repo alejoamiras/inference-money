@@ -15,6 +15,7 @@ import { type FeeChoice, feeFor, L2_DONE, type L2Wait, type SponsorUnavailableEr
 import { withdrawContentHash } from "./content-hash"
 import type { BridgeManifest } from "./manifest"
 import type { OutboxReader } from "./outbox"
+import { randomSecret } from "./random"
 import { MAX_L2_AMOUNT } from "./types"
 
 export interface ExitIntent {
@@ -125,7 +126,8 @@ export class ExitRevertedError extends Error {
 
 async function sendExit(e: ExitIntent, wallet: Wallet, m: BridgeManifest, fee: ReturnType<typeof feeFor>): Promise<TxHash> {
 	const proxy = AztecAddress.fromStringUnsafe(m.l2.proxy.address)
-	const { exit, burn } = exitCall(e, wallet, m, Fr.random())
+	// The burn authwit's nullifier hashes the sender with public data and this nonce, so a guessable nonce names it.
+	const { exit, burn } = exitCall(e, wallet, m, randomSecret())
 	if (e.kind === "private") {
 		const witness = await wallet.createAuthWit(e.from, { caller: proxy, call: await burn.getFunctionCall() })
 		return (await exit.send({ from: e.from, authWitnesses: [witness], fee, wait: NO_WAIT })).txHash

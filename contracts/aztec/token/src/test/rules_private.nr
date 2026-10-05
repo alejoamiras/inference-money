@@ -1,4 +1,5 @@
-// The transfer rule: a private transfer needs a merchant on at least one side, judged on `from` and `to`.
+// The transfer rule: a private transfer needs a merchant on at least one side, judged on `from` and `to`, unless it
+// shields an account's own public tokens.
 use crate::{test::utils::{self, mint_amount}, Token};
 use aztec::test::helpers::authwit as authwit_cheatcodes;
 use generic_proxy::GenericProxy;
@@ -42,13 +43,18 @@ unconstrained fn user_to_user_private_to_public_with_commitment_is_refused() {
     );
 }
 
-#[test(should_fail_with = "Transfer refused: neither sender nor recipient is a merchant")]
-unconstrained fn a_user_cannot_shield_its_own_funds() {
+// A shield to another user is refused above; to oneself it needs no merchant, so an ex-merchant's public float is not
+// stranded.
+#[test]
+unconstrained fn a_user_and_an_ex_merchant_shield_their_own_funds() {
     let w = utils::setup_merchant_world(false);
-    w.env.call_private(
-        w.alice,
-        Token::at(w.token).transfer_public_to_private(w.alice, w.alice, AMOUNT, 0),
-    );
+    utils::anchor_at(w.env, utils::switch_off(w, w.m1));
+    let token = Token::at(w.token);
+    for holder in [w.alice, w.m1] {
+        w.env.call_private(holder, token.transfer_public_to_private(holder, holder, AMOUNT, 0));
+        utils::check_public_balance(w.env, w.token, holder, mint_amount - AMOUNT);
+        utils::check_private_balance(w.env, w.token, holder, mint_amount + AMOUNT);
+    }
 }
 
 #[test(should_fail_with = "Transfer refused: neither sender nor recipient is a merchant")]

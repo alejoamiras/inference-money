@@ -170,17 +170,16 @@ export function merchantSide(list: MerchantList, first: AztecAddress, second: Az
 	return a.merchant ? Side.First : Side.Neither
 }
 
-/** A request's stamp as a payment sees it: still unmarked, live but no longer fresh, or none live. */
-export type StampState = RequestStamp["state"] | "none"
-
 /**
- * The side a payment into a request proves, by the token hint's order: a fresh stamp, which caps no expiry; else a
- * merchant payer; else a live stamp, whose proof shortens the tx's expiry; else neither.
+ * The side a payment into a request (its live stamp, if any) proves, by the token hint's order: a fresh stamp, which
+ * caps no expiry; else whichever of a merchant payer and a live stamp caps the tx's expiry later, the payer on a tie,
+ * its horizon taken when the stamp was read; else neither.
  */
-export function paymentSide(list: MerchantList, stamp: StampState, from: AztecAddress): Side {
-	if (stamp === "fresh") return Side.First
-	if (merchantStatus(list, from).merchant) return Side.Second
-	return stamp === "live" ? Side.First : Side.Neither
+export function paymentSide(list: MerchantList, stamp: RequestStamp | undefined, from: AztecAddress): Side {
+	if (stamp?.state === "fresh") return Side.First
+	const payer = merchantStatus(list, from).merchant
+	if (payer && (!stamp || merchantHorizon(list, from, stamp.at) >= stamp.expiresAt)) return Side.Second
+	return stamp ? Side.First : Side.Neither
 }
 
 /** The capsule that tells the token which side to prove; one serves every restricted call in its tx. */

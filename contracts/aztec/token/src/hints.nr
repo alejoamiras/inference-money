@@ -9,8 +9,8 @@
 //      is stamped, never padded;
 //   3. otherwise, of two merchants, prove the one whose read caps the tx's expiry latest (its horizon).
 // A payment into a request has its own order, by what each proof costs the tx's expiry: a stamp still unmarked (it
-// caps nothing a tx would not have anyway), else a merchant payer, else a live stamp (it shortens the expiry), else
-// NEITHER.
+// caps nothing a tx would not have anyway), else whichever of a merchant payer and a live stamp caps the tx later
+// (the payer on a tie), else NEITHER.
 use aztec::{
     oracle::{capsules, nullifiers::check_nullifier_exists, storage::raw_storage_read},
     protocol::{
@@ -23,7 +23,8 @@ use aztec::{
     state_vars::{Map, PublicImmutable, StateVariable},
 };
 use merchant_stamp::{
-    MERCHANT_SIDE_SLOT, stamp, stamp_bucket, STAMP_BUCKET_SLOT, STAMP_LIVE_BUCKETS, stamp_unmarked_until,
+    MERCHANT_SIDE_SLOT, stamp, stamp_bucket, STAMP_BUCKET_SLOT, stamp_deadline, STAMP_LIVE_BUCKETS,
+    stamp_unmarked_until,
 };
 
 // The switch-off delay's bounds. The floor is DelayedPublicMutable's minimum. Above the ceiling a delay changes nothing:
@@ -93,12 +94,16 @@ pub unconstrained fn payment_side_hint(
             & (list.anchor.timestamp() < stamp_unmarked_until(bucket.unwrap_unchecked()));
         if unmarked {
             FIRST
-        } else if probe(list, from).merchant {
-            SECOND
-        } else if bucket.is_some() {
-            FIRST
         } else {
-            NEITHER
+            let payer = probe(list, from);
+            let stamp_cap = bucket.map(|b| stamp_deadline(b)).unwrap_or(0);
+            if payer.merchant & (payer.horizon >= stamp_cap) {
+                SECOND
+            } else if bucket.is_some() {
+                FIRST
+            } else {
+                NEITHER
+            }
         }
     });
     (side, bucket.unwrap_or(0))
