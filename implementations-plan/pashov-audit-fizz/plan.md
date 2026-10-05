@@ -621,7 +621,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `bun run --cwd contracts/evm test:evm:fuzz` with a 30-minute timeout, zero failures, and signed private deposits actually exercised;
 - `bun run test:integration`.
 
-**P6. L1 docs.**
+**P6. L1 docs.** ✓
 - `docs/architecture.md:3,5,7,21-25`: deposits, the funding identity, the residuals, and a rollup upgrade stops deposits.
 - `docs/integration.md:42,50,68-78,90-93`:
   - the typed errors;

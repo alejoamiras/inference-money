@@ -24,4 +24,5 @@ Open work lifted out of closed plans, one line each with a pointer; delete a lin
 - A mainnet fee path and sponsor strategy: mainnet has no SponsoredFPC, and the public sponsor pays every private claim and exit on testnet. [plan: Security](archive/galactica-compliant-usdc/plan.md#security--adversarial-considerations)
 - A relayer, if wanted: each recipient must `registerSender(relayer)` for note discovery. [plan: Security](archive/usdc-bridge/plan.md#security--adversarial-considerations)
 - An external audit of the final contracts. `/harden security` (P14) ran before the P15 fixes; its finding and the two the arc-6 review found are fixed. [Arc 6](archive/galactica-compliant-usdc/plan.md#arc-6-hardening)
+- An SDK flow for the portal's signed path (smart-contract wallets, 7702 wallets without ERC-1271): today it is documented in `docs/integration.md` with typed data in bridge-core, and integrators build the submit themselves (owner, 2026-10-04).
 - Revisit the unlimited USDC approval to Permit2 (`ensurePermit2Allowance`) against EIP-2612 exact permits. [D7](archive/usdc-bridge/plan.md#decision-ledger)

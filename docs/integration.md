@@ -47,7 +47,9 @@ Each refusal is one exact string, exported from `bridge-core/src/rules.ts` (`TOK
 
 The merchant admin's own refusals (`Only the merchant admin`, `Merchant already added`, …) are in `TOKEN_REFUSALS` too.
 
-bridge-core raises typed errors before any signature or proof: `PublicDepositToUserError` (`assertPublicRecipient`), `NotFundingAddressError` (`claimBinding`, and inside `claim`) and `ExitDestinationError` (inside `exitToL1`).
+bridge-core raises typed errors before any signature or proof: `PublicDepositToUserError` (`assertPublicRecipient`), `NotFundingAddressError` (`claimBinding`, and inside `claim`) and `ExitDestinationError` (inside `exitToL1`). `KeyHolderRequiredError` comes after the wallet signs a private deposit and before anything is sent: the signature is not the account's own key's in the form the router accepts (65 bytes, `v` 27 or 28, low `s`), which is what a contract wallet produces. A Permit2 approval made earlier stays.
+
+On Ethereum the router and the portal revert with typed errors, all in bridge-core's ABIs: `ZeroAmount`, `AmountExceedsL2Max`, `RollupNotCanonical` (an Aztec rollup upgrade stopped deposits; withdrawals still pay), `SignerIsNotTheCaller` (router: a private deposit signed by anyone but its caller), `InvalidDepositor`, `AuthorizationExpired`, `AuthorizationUsed`, `SignerIsNotTheDepositor`, and OpenZeppelin's `ECDSAInvalidSignature`, `ECDSAInvalidSignatureLength`, `ECDSAInvalidSignatureS`. Permit2 checks a 7702 account through its delegate's ERC-1271, and the router's private leg also needs the account key's raw signature, so only a delegate that accepts that raw signature passes both. A delegate with no ERC-1271 gets Permit2's `InvalidContractSignature` (`PERMIT2_SIGNATURE_ERRORS`) or an undecodable revert of its own, on both legs; one that wants a wrapped signature (ERC-7739) fails the private leg either way. Their way in is the portal's signed path below.
 
 ## Using bridge-core
 
@@ -69,13 +71,26 @@ Each L1↔L2 message content is `sha256ToField(abi.encodeWithSignature(signature
 | Private deposit | `mint_to_private(uint256,address)` | amount, depositor; the recipient is bound through the claim secret |
 | Withdraw (exits and returns) | `withdraw(address,uint256,address)` | L1 recipient, amount, L1 caller (zero: anyone may submit) |
 
-The depositor is the address the USDC came from: a direct deposit's caller, or the Permit2 signer when the deposit goes through the router. Vectors for all three formats are pinned in Solidity, Noir and TypeScript (`docs/architecture.md`).
+The depositor is the address a deposit names: the Permit2 signer through the router, which for a private deposit must be the caller itself; the signer of a `FundingAuthorization` on the portal's signed private path; an explicit refund address on a direct public deposit. Vectors for all three formats are pinned in Solidity, Noir and TypeScript (`docs/architecture.md`).
 
 USDC's blocklist, pause and upgrades reach the bridge as `docs/architecture.md` describes under "USDC's own controls": a withdrawal to a blocklisted recipient waits, unconsumed, until Circle clears it.
 
-The portal refuses two deposits that no Aztec call could consume: an amount above u128 (`AmountExceedsL2Max`), and a public recipient above the largest field element (`RecipientExceedsFieldMax`), since an Aztec address is a field element. Encoding an `AztecAddress` (`toString()`, as bridge-core does) always fits.
+The portal refuses two deposits that no Aztec call could consume: an amount above u128 (`AmountExceedsL2Max`), and a public recipient above the largest field element (`RecipientExceedsFieldMax`), since an Aztec address is a field element. Encoding an `AztecAddress` (`toString()`, as bridge-core does) always fits. The cap is per deposit; the L2 supply is a u128 as well, so deposits summing past it could not all be claimed, which USDC's own supply keeps out of reach.
 
-It cannot check a secret hash. A private deposit is claimed or returned only with the secret `prepareDeposit` derives from a claim salt and the recipient, so one made with any other hash stays escrowed for good, with no rescue path. The portal shares the canonical Aztec portal's function names and nothing else: Aztec's own portal tooling draws a plain secret and does not read this portal's events, so deposit through bridge-core, never with it.
+It cannot check a secret hash. A private deposit is claimed or returned only with the secret `prepareDeposit` derives from a claim salt and the recipient, so one made with any other hash stays escrowed for good, with no rescue path. Aztec's own portal tooling draws a plain secret and does not read this portal's events, and its `bridgeTokens{Public,Private}` now revert (both direct deposits take different arguments), so deposit through bridge-core or the signed path below.
+
+### Depositing without the router
+
+`depositToAztecPrivate(depositor, amount, secretHash, deadline, signature)` is for an integrator (a smart-account bundler, a custodian's periphery) that funds a deposit in someone else's name. The depositor signs EIP-712 `FundingAuthorization(address depositor,address submitter,uint256 amount,bytes32 secretHash,uint256 deadline)` in the domain `InferenceMoneyTokenPortal`, version `1`, this chain, this portal: bridge-core's `fundingAuthorizationTypedData` builds it, and `fundingAuthorizationDigest` on the portal returns its digest. bridge-core has no flow for this path.
+- **The submitter** is the only caller the portal accepts it from (a 4337 account: the smart account), once (`AuthorizationUsed`), until `deadline` (`AuthorizationExpired`). Nothing cancels it sooner, so sign a short deadline.
+- **The submitter pays**: the portal pulls `amount` from its caller with `transferFrom`, so the submitter approves the portal first, two txs unless batched.
+- **The signature** is 65 bytes with `v` 27 or 28 and a low `s`; OpenZeppelin refuses yParity 0/1 and high `s`. It must recover to `depositor` (`SignerIsNotTheDepositor`).
+- **The depositor derives its own claim salt** (`prepareDeposit`), and the secret hash it signs commits to it. Whoever holds the salt claims, binding that account to the depositor. Claim the message your own deposit sent, by its leaf index and depositor, never by secret hash: anyone can copy a published secret hash into a deposit of their own, and claiming that copy binds the account to them.
+- **A return pays the depositor**, never the submitter.
+
+`depositToAztecPublic(depositor, to, amount, secretHash)` names `depositor` as the refund address a return pays; it is unsigned, and zero, the portal and the router are refused (`InvalidDepositor`). So on this path `DepositToAztecPublic.depositor` is whatever the caller named, not proof of who paid.
+
+**Smart-contract wallets** have no SDK private deposit: the router recovers its caller's key, which a contract does not have. They use the signed path above, with an owner EOA as the depositor. That one owner then holds the deposit outside the wallet's threshold: it derives the claim salt, a return pays it, and the funded account's exits go only to it. Their public deposits through the router are unchanged.
 
 The bridge, in turn, refuses an exit no Ethereum call could pay: to the portal itself (`Recipient cannot be the portal`; its payout must lower its own balance), or naming a recipient or caller wider than 20 bytes, which the ABI would otherwise decode into an `EthAddress`.
 
