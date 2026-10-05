@@ -119,12 +119,17 @@ abstract contract Permit2DepositRouterHandler is Properties {
     function _permit2DepositRouter_rejectedPermit(uint256 amount, bool isPrivate) internal {
         amount = clampBetween(amount, 1, MAX_REALISTIC_AMOUNT);
         _ensureFunds(actor, amount);
+        bytes32 recipient = isPrivate ? bytes32(0) : L2_ACCOUNTS[0];
+        bytes memory signature = _permitSignature(actor, amount, recipient, bytes32(0), isPrivate, 0, 1);
         permit2.setReject(true);
         uint256 consumed = _noopBegin();
         vm.prank(actor);
-        try router.deposit(amount, isPrivate ? bytes32(0) : L2_ACCOUNTS[0], bytes32(0), isPrivate, 0, 1, "") {
+        try router.deposit(amount, recipient, bytes32(0), isPrivate, 0, 1, signature) {
             ghosts.permit2RejectBypassed++;
-        } catch {}
+        } catch (bytes memory reason) {
+            // Any other refusal came before the pull, so the probe never reached Permit2.
+            if (bytes4(reason) != MockPermit2.MockRejected.selector) ghosts.permit2RejectBypassed++;
+        }
         permit2.setReject(false);
         _noopEnd(consumed);
     }

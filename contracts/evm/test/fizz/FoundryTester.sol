@@ -60,6 +60,7 @@ contract FoundryTester is Test, Handlers {
         tokenPortal_secondary(3, 0, bytes32(uint256(9)), address(0));
         tokenPortal_secondary(4, 0, bytes32(0), address(1));
         permit2DepositRouter_secondary(1e6, false);
+        permit2DepositRouter_secondary(1e6, true);
         permit2DepositRouter_deposit_malformed(0, 1, bytes32(0));
         permit2DepositRouter_deposit_malformed(1, 1, bytes32(0));
         permit2DepositRouter_deposit_malformed(2, 1, bytes32(0));

@@ -195,7 +195,7 @@ contract SepoliaForkTest is Test {
         _expectPrivateRefused(sig, 3, deadline, "");
     }
 
-    /// F-02 against the real Permit2: an account delegated to a permissive ERC-1271 submits someone else's signature.
+    /// Against the real Permit2: an account delegated to a permissive ERC-1271 submits someone else's signature.
     /// The router refuses it; a router without its key-holder check lets the real Permit2 admit it.
     function test_7702_permissiveDelegateWithAForeignSignature() public {
         uint256 deadline = block.timestamp + 30 minutes;

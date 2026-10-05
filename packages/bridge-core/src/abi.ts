@@ -34,6 +34,9 @@ export const PERMIT2_SIGNATURE_ERRORS = [
 	{ type: "error", name: "InvalidSigner", inputs: [] },
 ] as const
 
+/** The portal's refusals a router deposit bubbles that the router never raises itself; abi.test.ts pins them to the portal. */
+export const PORTAL_BUBBLED_ERRORS = [{ type: "error", name: "RollupNotCanonical", inputs: [] }] as const
+
 export const PERMIT2_DEPOSIT_ROUTER_ABI = [
 	{
 		type: "function",
@@ -72,6 +75,7 @@ export const PERMIT2_DEPOSIT_ROUTER_ABI = [
 	{ type: "function", name: "TOKEN", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
 	...PERMIT2_DEPOSIT_ROUTER_ERRORS,
 	...PERMIT2_SIGNATURE_ERRORS,
+	...PORTAL_BUBBLED_ERRORS,
 ] as const
 
 const view = <const N extends string, const T extends string>(name: N, type: T) =>
@@ -278,7 +282,7 @@ export const TOKEN_PORTAL_ABI = [
 	{ type: "error", name: "InexactTransfer", inputs: [] },
 	{ type: "error", name: "ReentrancyGuardReentrantCall", inputs: [] },
 	{ type: "error", name: "ZeroAmount", inputs: [] },
-	{ type: "error", name: "RollupNotCanonical", inputs: [] },
+	...PORTAL_BUBBLED_ERRORS,
 	{ type: "error", name: "InvalidDepositor", inputs: [] },
 	{ type: "error", name: "NotRouter", inputs: [] },
 	{ type: "error", name: "AuthorizationExpired", inputs: [{ name: "deadline", type: "uint256" }] },

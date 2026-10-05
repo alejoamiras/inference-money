@@ -121,9 +121,7 @@ contract Permit2DepositRouter is ReentrancyGuardTransient {
         return keccak256(abi.encode(DEPOSIT_WITNESS_TYPEHASH, aztecRecipient, secretHash, isPrivate));
     }
 
-    /// @notice The digest Permit2 verifies for this deposit. A derivation bug refuses every honest private deposit
-    /// (the signature recovers to someone else); only one that drops a field could pass a stale signature, which the
-    /// per-field tamper tests and the fork suite's equality with the real Permit2 rule out.
+    /// @notice The digest Permit2 verifies for this deposit.
     function permitDigest(
         uint256 amount,
         bytes32 aztecRecipient,

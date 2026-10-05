@@ -19,7 +19,7 @@ contract HonestWallet {
     }
 }
 
-/// A wallet (or 7702 delegate) that approves every signature, the F-02 shape.
+/// A wallet (or 7702 delegate) that approves every signature.
 contract PermissiveWallet {
     function isValidSignature(bytes32, bytes calldata) external pure returns (bytes4) {
         return ERC1271_MAGIC;

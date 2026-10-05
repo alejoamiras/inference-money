@@ -253,7 +253,7 @@ contract Permit2DepositRouterTest is RouterFixture {
         );
     }
 
-    /// F-02: a contract owner whose ERC-1271 approves anything is refused before Permit2 would consult it; no key
+    /// A contract owner whose ERC-1271 approves anything is refused before Permit2 would consult it; no key
     /// recovers to a contract address.
     function test_privateDeposit_refusesAPermissive1271Owner() public {
         address wallet = address(new PermissiveWallet());
@@ -278,7 +278,7 @@ contract Permit2DepositRouterTest is RouterFixture {
         assertTrue(lastMintWasPrivate(1e6), "the message names the key holder");
     }
 
-    /// The F-02 shape with a real delegation: a key-held account delegated to a permissive ERC-1271 submits another
+    /// The same with a real delegation: a key-held account delegated to a permissive ERC-1271 submits another
     /// key's signature, which Permit2 would accept through `isValidSignature`; the router refuses it first.
     function test_privateDeposit_a7702PermissiveDelegateCannotUseAForeignSignature() public {
         vm.signAndAttachDelegation(address(new PermissiveWallet()), userKey);
