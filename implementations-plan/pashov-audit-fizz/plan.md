@@ -657,7 +657,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 3: Aztec hints, mirror, tests, tripwire (`pashov-audit-fizz-aztec`)
 
-**P8. Hint horizons and call sites.**
+**P8. Hint horizons and call sites.** ✓
 - First, spikes S4 and S5 (Phase 0's table). Record them in `lessons/phase-0.md`.
 - The `Entry`/`probe`/`merchant_side_hint` rewrite, the two call sites, the rename, the moved globals and the comment fix.
 - Promote `switch_off` from `test/hints.nr:76-80` into `utils.nr`.

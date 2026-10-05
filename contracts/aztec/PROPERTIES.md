@@ -325,16 +325,15 @@
   Test goes in: token/src/test/hints.nr :: a_capsule_naming_a_user_fails_every_restricted_entry_point
 
 - [~] **GL-28** — Without a capsule, the probe mirrors the token's state at the anchor and picks by the documented
-  rules: keep a merchant side and answer NEITHER only when there is none; when opening, prove a merchant recipient;
-  between two merchants, prefer the one with no change scheduled ahead; when paying, check the stamp before the payer.
-  Its pending flag is set exactly while an entry's change time is after the anchor, including the marks a cancel or a
-  switch-on leave; a capsule, when present, overrides it. (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — archived plan
-  "The side hint": "The choice follows three rules, the same in the SDK and in the fallback probe"; Priority: LOW; Scope:
-  always-on; Sources: ST-20, SPEC-45)
+  rules: keep a merchant side and answer NEITHER only when there is none; keep a merchant first side the call publishes
+  or opens a request for; between two merchants, prefer the one whose read caps later (its horizon, which counts the
+  marks a cancel or a switch-on leave); when paying, check the stamp before the payer. A capsule, when present,
+  overrides it. (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — archived plan "The side hint": "The choice follows three
+  rules, the same in the SDK and in the fallback probe"; Priority: LOW; Scope: always-on; Sources: ST-20, SPEC-45)
   Coverage: PARTIAL by token/src/test/hints.nr: the_probe_finds_the_one_merchant_side_or_neither,
-  between_two_settled_merchants_the_probe_proves_the_recipient, the_probe_prefers_a_merchant_with_no_change_pending,
-  a_switched_off_merchant_is_never_picked, the_payment_probe_checks_the_stamp_before_the_payer,
-  a_capsule_overrides_the_probe — the pending flag on an entry marked by a cancel or a switch-on is untested.
+  between_two_settled_merchants_the_probe_proves_the_recipient, of_two_merchants_the_probe_proves_the_one_with_the_later_cap,
+  a_switched_off_merchant_is_never_picked, the_payment_probe_follows_its_order, a_capsule_overrides_the_probe — the
+  horizon of an entry marked by a cancel or a switch-on is untested.
   Test goes in: token/src/test/hints.nr :: a_cancelled_entry_reads_pending_until_its_mark_lands
 
 ### Token: privacy and expiry
@@ -856,8 +855,8 @@
   "How a check proves": "A wrong hint only makes the tx unprovable"; Priority: MEDIUM; Scope: after an opening between
   two merchants; Sources: SPEC-40; EXPECTED-FAIL today)
   Coverage: PARTIAL by token/src/test/rules_requests.nr:a_request_a_merchant_opens_for_a_merchant_is_stamped and
-  hints.nr:the_probe_prefers_a_merchant_with_no_change_pending (`assert_eq(side(w, w.m1, w.m2, true), FIRST);`) — honest
-  hint only.
+  hints.nr:of_two_merchants_the_probe_proves_the_one_with_the_later_cap (`assert_eq(side(w, w.m1, w.m2, true), FIRST);`)
+  — honest hint only.
   Test goes in: token/src/test/hints.nr :: a_capsule_naming_the_creator_still_stamps_a_merchants_request
 
 - [~] **SP-29** — `try_prove_merchant` returns true only after proving the account a merchant at the anchor, and its
@@ -871,53 +870,51 @@
   capsule, and no test makes its probe lie (an `OracleMock` on the nullifier-existence oracle could).
   Test goes in: token/src/test/hints.nr :: a_lying_probe_cannot_make_try_prove_merchant_grant
 
-- [ ] **SP-30** — Between two merchants, the capsule-less hint proves the one whose read keeps the tx's expiry longest,
-  the purpose its rule 3 states. It compares only pending value changes: it ignores each entry's delay (a 1 h recipient
-  is preferred to a 24 h sender) and pending delay decreases (whose read caps at t_s + D_old − 1), so it can prove the
-  merchant with the earlier expiry and fingerprint the tx. Quality, not soundness. (Category: HIGH_LEVEL; Guarantee:
-  EXPLORATORY — the archived plan's rule 3 says "the one whose entry has no change scheduled ahead, which keeps the tx's
-  expiry longest", and the code meets its letter; Priority: MEDIUM; Scope: after merchant_side_hint between two
-  merchants; Sources: RT-28, SYN (audit finding 3); EXPECTED-FAIL today)
-  Coverage: UNCOVERED — token/src/test/hints.nr:the_probe_prefers_a_merchant_with_no_change_pending covers a pending
-  value change only.
-  Test goes in: token/src/test/hints.nr :: of_two_merchants_the_probe_proves_the_one_with_the_later_cap
+- [x] **SP-30** — Between two merchants, the capsule-less hint proves the one whose read keeps the tx's expiry longest,
+  the purpose its rule 3 states: it compares each entry's horizon, the cap its read sets, so a shorter delay or a
+  pending delay decrease (whose read caps at t_s + D_old − 1) loses to a longer cap, and equal caps keep the first side.
+  Quality, not soundness. (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — hints.nr rule 3; Priority: MEDIUM; Scope:
+  after merchant_side_hint between two merchants; Sources: RT-28, SYN (audit finding 3))
+  Coverage: COVERED by token/src/test/hints.nr:of_two_merchants_the_probe_proves_the_one_with_the_later_cap (pending
+  switch-offs) and of_two_merchants_a_shortened_delay_is_proven_last (a decrease two hours in, then landed); the
+  bridge-core mirror (merchants.test.ts) asserts the same cases.
 
-- [~] **SP-31** — Without a capsule, if it's a user paying a merchant, the hint never asks the node about the user's
-  own entry, as hints.nr's header promises ("a merchant counterparty spares the sender's own address a query to the
-  node"). Today, while the merchant has a change pending (up to D), rule 3 probes the sender, so the user's node learns
-  its address. (Category: VALID_STATE — when the counterparty is a merchant; Guarantee: EXPLORATORY; Priority: MEDIUM;
-  Scope: after merchant_side_hint; Sources: ADV-40; EXPECTED-FAIL today)
-  Coverage: PARTIAL by token/src/test/hints.nr:the_probe_prefers_a_merchant_with_no_change_pending
+- [~] **SP-31** — Accepted: without a capsule, the hint asks the node about the second side unless the first is kept or
+  its read already allows the longest expiry, so a user paying a merchant whose cap is shorter than the longest has its
+  own address queried. The query buys the later expiry on chain; bridge-core always attaches a capsule, which queries
+  nothing. hints.nr's header and docs/integration.md ("Your node") say so. (Category: VALID_STATE — when the counterparty
+  is a merchant; Guarantee: EXPLORATORY; Priority: MEDIUM; Scope: after merchant_side_hint; Sources: ADV-40)
+  Coverage: PARTIAL by token/src/test/hints.nr:of_two_merchants_the_probe_proves_the_one_with_the_later_cap
   (`assert_eq(side(w, w.m1, w.m2, false), SECOND);`) — it checks the side picked, never which accounts were queried.
-  Test goes in: token/src/test/hints.nr :: a_merchant_counterparty_with_a_pending_change_spares_the_sender_a_query
 
 - [~] **SP-32** — Paying a stamped request proves only the stamp: the payer's own entry is not read, no expiry cap is
   added, and no witness is fetched for it, so merchant payers look like user payers. (Category: VALID_STATE — when the
   request is stamped; Guarantee: SHOULD-HOLD — archived plan "The side hint": "It probes the counterparty before the
   sender, and the stamp before `from` when paying a request"; Priority: LOW; Scope: after transfer_private_to_commitment
   into a stamped request; Sources: ADV-41)
-  Coverage: PARTIAL by token/src/test/hints.nr:the_payment_probe_checks_the_stamp_before_the_payer
+  Coverage: PARTIAL by token/src/test/hints.nr:the_payment_probe_follows_its_order
   (`assert_eq(payment_side(w, stamped, w.m2), FIRST);`) — the side, not the absence of a query for `from`.
   Test goes in: token/src/test/hints.nr :: paying_a_stamped_request_never_queries_the_payer
 
-- [ ] **SP-33** — SYN. In a public→private transfer the sender is already public (its balance write is enqueued) and the
-  recipient is hidden, so when the sender is a merchant the check should prove the sender, and the probe should ask
-  about it first. Today `transfer_public_to_private` passes `(to, from)` like the private transfers: it probes the
-  hidden recipient first and, when it is a merchant, proves it, so the node learns the recipient and the tx's expiry
-  depends on its entry. (Category: VALID_STATE — when the public sender is a merchant; Guarantee: EXPLORATORY; Priority:
-  MEDIUM; Scope: after transfer_public_to_private; Sources: SYN (audit finding 2); EXPECTED-FAIL today)
-  Coverage: UNCOVERED.
-  Test goes in: token/src/test/hints.nr :: public_to_private_proves_a_merchant_sender_not_the_hidden_recipient
+- [x] **SP-33** — SYN. In a public→private transfer the sender is already public (its balance write is enqueued) and the
+  recipient is hidden, so when the sender is a merchant the check proves the sender and the probe asks about it first;
+  its private→public twin keeps the published recipient the same way. Both calls pass the published side first, kept.
+  (Category: VALID_STATE — when the published side is a merchant; Guarantee: SHOULD-HOLD; Priority: MEDIUM; Scope:
+  after transfer_public_to_private, transfer_private_to_public; Sources: SYN (audit finding 2))
+  Coverage: COVERED by token/src/test/hints.nr:public_to_private_proves_a_merchant_sender_not_the_hidden_recipient and
+  private_to_public_proves_a_merchant_recipient_not_the_hidden_sender (the hint in each call's order, then the real
+  call), with scripts/check-stamp-constraint.sh pinning each call's argument order: TXE cannot see which entry a real
+  call read.
 
-- [ ] **SP-34** — A private merchant read caps the tx's in-circuit expiry exactly: anchor + D − 1 with nothing pending
+- [x] **SP-34** — A private merchant read caps the tx's in-circuit expiry exactly: anchor + D − 1 with nothing pending
   (D = 86400 or 3600), the change time − 1 with a value change pending, and t_s + D_old − 1 while a delay decrease
-  synced at t_s is pending. A payment proven by its stamp reads no entry and adds no cap, and two merchants settled at
-  the same D give the same cap. (Category: VARIABLE_TRANSITION — the private context's expiration timestamp; Guarantee:
-  SHOULD-HOLD — docs/architecture.md "Expiry": "Reading an entry caps the tx's expiry at `anchor + D − 1`, or at the
-  pending change − 1"; Priority: MEDIUM; Scope: after any private merchant read; Sources: RT-26, ST-45)
-  Coverage: UNCOVERED — no TXE test reads an expiry, though `private_context_at` around the entry read and
-  `ctx.finish().expiration_timestamp` can. docs/architecture.md and A21 omit the pending-decrease case.
-  Test goes in: token/src/test/hints.nr :: a_merchant_read_caps_expiry_at_the_entrys_horizon
+  synced at t_s is pending. A payment proven by its stamp reads no entry and caps the tx at the stamp's deadline
+  (`_prove_payment_side`), and two merchants settled at the same D give the same cap. (Category: VARIABLE_TRANSITION —
+  the private context's expiration timestamp; Guarantee: SHOULD-HOLD — docs/architecture.md "Expiry"; Priority:
+  MEDIUM; Scope: after any private merchant read; Sources: RT-26, ST-45)
+  Coverage: COVERED by token/src/test/hints.nr:a_merchant_read_caps_expiry_at_the_entrys_horizon, which reads the cap
+  an entry read sets (`private_context_at`, then `finish().expiration_timestamp`) and requires the hint's horizon to
+  equal it, settled, with a switch-off pending, two hours into a delay decrease and around its landing.
 
 ### Bridge: messages
 
