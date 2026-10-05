@@ -1150,14 +1150,13 @@
 3. **The side hint ignored entry delays and pending delay decreases** (`hints.probe` / `merchant_side_hint`). Fixed:
    the probe compares each entry's horizon. **SP-30** covers it; SP-34 pins the caps the pick compares; GL-31 is the
    expiry parity the pick protects.
-4. **A stamped request stays payable after its merchant's switch-off, for any amount and with no end date** (accepted
-   by the owner). **GL-12** pins the accepted behaviour (SHOULD-HOLD, passes); **GL-13** is its converse (EXPLORATORY,
-   EXPECTED-FAIL today), to implement only if the residual is revisited. GL-02 bounds the residual: every payment into
-   such a request is debited from its payer and lands only with the request's owner.
+4. **A stamped request stays payable after its merchant's switch-off** (accepted by the owner), until its stamp
+   expires, under 25 h after the switch-off lands, and for one payment (GL-02). **GL-12** pins the accepted behaviour
+   (SHOULD-HOLD, passes); **GL-13** is its converse (EXPLORATORY, EXPECTED-FAIL today), to implement only if the
+   residual is revisited.
 5. **A private completion of amount 0 was accepted, and the recipient's PXE discovers only the first completion.**
-   Fixed: `transfer_private_to_commitment` refuses a zero amount; **SP-07** covers it. GL-02 holds the "first
-   completion only" half (accepted, upstream; its discovery half is unreliable in TXE), and SP-17 limits who can do it
-   to the designated completer.
+   Fixed: both payment paths refuse a zero amount, and `paid(c)` makes a request take one payment (**GL-02**); **SP-07**
+   covers the private zero, and SP-17 limits who can pay to the designated completer.
 
 Other properties the current code would fail, outside that list: **SP-28** (a capsule naming the creator pads a
 merchant-to-merchant request, against docs/architecture.md), **GL-05** (a public payment to the zero address breaks
