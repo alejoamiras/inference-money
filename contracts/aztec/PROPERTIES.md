@@ -91,16 +91,13 @@
   Coverage: TXE-UNREACHABLE — TXE exposes no public logs; an event replay in packages/integration could check it; not
   covered.
 
-- [ ] **GL-06** — No outside caller, whether a user, a merchant or a stranger, can call the token's own helpers:
+- [x] **GL-06** — No outside caller, whether a user, a merchant or a stranger, can call the token's own helpers:
   `increase_public_balance_internal` (a public credit with no supply write), `decrease_public_balance_internal`,
   `increase_total_supply_internal`, `decrease_total_supply_internal`, `recurse_subtract_balance_internal`. (Category:
   STATE_TRANSITION; Guarantee: SHOULD-HOLD — docs/assurance-map.md A7: "`#[only_self]` helpers are unreachable
   directly"; Priority: HIGH; Scope: always-on; Sources: ADV-02, SPEC-05)
-  Coverage: UNCOVERED — A7 cites the `guards` suite, but token_bridge/src/test/guards.nr probes only the bridge's
-  `_assert_not_paused` and the proxy's `assert_bridge`; scripts/abi-superset.test.ts pins the attribute in the
-  artifact, not the behaviour.
-  Test goes in: token/src/test/guards.nr (new, mirroring token_bridge/src/test/guards.nr) ::
-  increase_public_balance_internal_rejects_a_stranger, and one per helper
+  Coverage: COVERED by token/src/test/guards.nr, one probe per helper (a user, a merchant, a stranger, the minter, the
+  owner), each with arguments under which the body would succeed.
 
 - [~] **GL-07** — Every write-once value keeps its first value for good: the token's name, symbol, decimals, minter and
   authorization contract; the bridge's config (proxy, token, portal); the proxy's owner, token and bridge, across every
@@ -591,14 +588,15 @@
   public_transfer_to_self, rules_requests.nr:a_user_pays_a_merchants_request_privately and
   a_user_pays_a_merchants_request_publicly.
 
-- [ ] **SP-02** — Only mints and burns change total supply: transfers, request openings and payments, every
+- [x] **SP-02** — Only mints and burns change total supply: transfers, request openings and payments, every
   merchant-list call and `cancel_authwit` leave it unchanged and move no balance beyond their own debit and credit.
   (Category: VARIABLE_TRANSITION — `total_supply`; Guarantee: SHOULD-HOLD — docs/integration.md "What each action makes
   public": "Aztec shows claim and withdrawal amounts (total-supply writes)", and "Direct private transfers show only
   counts"; Priority: MEDIUM; Scope: after every transfer, opening, payment, list call and cancel_authwit; Sources: CON-03,
   ST-28, RT-10)
-  Coverage: UNCOVERED — no transfer, request or list test reads `total_supply` or a third party's balance.
-  Test goes in: token/src/test/rules_private.nr :: no_transfer_or_request_moves_the_total_supply
+  Coverage: COVERED by token/src/test/rules_private.nr:no_transfer_or_request_moves_the_total_supply (every transfer
+  kind, a request and its payment, two list calls and cancel_authwit; then the supply and every party's balances,
+  a bystander's included).
 
 - [~] **SP-03** — A mint by the minter raises supply by exactly `amount` and credits exactly `amount` to one account
   (`to`'s public or private balance, or the request owner's for `mint_to_commitment`), every other balance unchanged; a
@@ -645,14 +643,12 @@
   initialize_transfer_commitment.nr:initialize_transfer_commitment asserts only the validity nullifier.
   Test goes in: token/src/test/initialize_transfer_commitment.nr :: opening_a_request_moves_no_balance_and_no_supply
 
-- [ ] **SP-07** — A zero-amount private payment into a request is refused, like its public twin.
+- [x] **SP-07** — A zero-amount private payment into a request is refused, like its public twin.
   `transfer_public_to_commitment` and `mint_to_commitment` revert on 0 (aztec-nr's `complete`: "Cannot complete a
-  PartialUintNote with a value of 0"), but `complete_from_private` has no such check, so a private payment of 0
-  completes the request; since the recipient discovers only the first completion, a later real payment into it is lost.
-  Only the designated completer can do this. (Category: STATE_TRANSITION; Guarantee: EXPLORATORY; Priority: MEDIUM;
-  Scope: after transfer_private_to_commitment with amount 0; Sources: RT-12, SPEC-52; EXPECTED-FAIL today)
-  Coverage: UNCOVERED.
-  Test goes in: token/src/test/rules_requests.nr :: a_zero_private_payment_into_a_request_is_refused
+  PartialUintNote with a value of 0"), and `transfer_private_to_commitment` refuses it before `complete_from_private`,
+  which has no such check. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD; Priority: MEDIUM; Scope: after
+  transfer_private_to_commitment with amount 0; Sources: RT-12, SPEC-52)
+  Coverage: COVERED by token/src/test/rules_requests.nr:a_private_payment_of_zero_is_refused.
 
 - [x] **SP-08** — If it's a merchant, moving its own funds private→public and back leaves both its balances where they
   started. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — exact identity: both legs debit and credit the same
@@ -710,13 +706,11 @@
   stamped…" compares nullifier counts only.
   Test goes in: token/src/test/rules_requests.nr :: stamped_and_padded_openings_leave_the_same_effect_counts
 
-- [ ] **SP-14** — If it's a user, it cannot open a request for another user by naming a merchant as the completer: the
+- [x] **SP-14** — If it's a user, it cannot open a request for another user by naming a merchant as the completer: the
   opening is judged on its creator and recipient only. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD —
   docs/integration.md "Who may do what", open a payment request, if it's a user: "Only with a merchant as the
   recipient"; Priority: MEDIUM; Scope: after initialize_transfer_commitment; Sources: ADV-19)
-  Coverage: UNCOVERED — token/src/test/rules_requests.nr:a_user_cannot_open_a_request_for_a_user names the user creator
-  as completer, never a merchant.
-  Test goes in: token/src/test/rules_requests.nr :: naming_a_merchant_completer_does_not_let_a_user_open_for_a_user
+  Coverage: COVERED by token/src/test/rules_requests.nr:naming_a_merchant_completer_does_not_let_a_user_open_for_a_user.
 
 - [x] **SP-15** — A payment into a request goes through iff its payer may pay it: if it's a user (judged on `from`),
   only into a stamped request, privately or publicly; if it's a merchant, into any request. (Category: STATE_TRANSITION;
@@ -829,13 +823,14 @@
   removal, each checked a second before and at landing), a_scheduled_guardian_cannot_cancel_before_taking_office,
   the_guardian_is_scheduled_by_the_admin_only.
 
-- [ ] **SP-26** — Only the current merchant admin can propose the next one: a user, a merchant, a stranger or the
+- [x] **SP-26** — Only the current merchant admin can propose the next one: a user, a merchant, a stranger or the
   guardian proposing itself is refused, so none can reach `accept_merchant_admin` and take the list, and with it every
   rule. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — A20: "the admin role moves in two steps"; archived plan,
   admin-only additions: `propose_merchant_admin(new)`; Priority: HIGH; Scope: after propose_merchant_admin; Sources:
   SPEC-29, ADV-27, ST-15)
-  Coverage: UNCOVERED — token/src/test/merchants.nr only ever proposes as the admin.
-  Test goes in: token/src/test/merchants.nr :: only_the_admin_proposes_the_next_admin
+  Coverage: COVERED by token/src/test/merchants.nr: propose_merchant_admin_is_admin_only (a stranger),
+  propose_merchant_admin_refuses_a_merchant, propose_merchant_admin_refuses_the_guardian (in office) and
+  the_proposed_admin_cannot_propose_before_accepting.
 
 ### Token: the side hint
 
@@ -928,15 +923,14 @@
   Test goes in: token_bridge/src/test/claims_private.nr :: a_public_deposit_cannot_be_claimed_privately;
   token_bridge/src/test/returns.nr :: a_private_deposit_cannot_be_returned_publicly
 
-- [ ] **SP-36** — The bridge consumes only messages whose L1 sender is its configured portal: the same content and
+- [x] **SP-36** — The bridge consumes only messages whose L1 sender is its configured portal: the same content and
   secret hash sent by any other L1 address, an attacker's contract say, cannot be claimed publicly or privately, or
   returned. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — archived plan "Non-obvious mechanics" 8: the sole
   consumer guard requires that "the message sender is `config.portal`"; Priority: HIGH; Scope: after each of the four
   consumers; Sources: SPEC-10, ADV-01)
-  Coverage: UNCOVERED — every TXE helper injects from `utils::PORTAL`; only scripts/check-sole-consumer.sh pins it, in
-  the source text.
-  Test goes in: token_bridge/src/test/claims.nr :: a_message_from_another_l1_sender_cannot_be_claimed, with private-claim
-  and return twins
+  Coverage: COVERED by token_bridge/src/test/claims.nr: a_message_from_another_l1_sender_cannot_be_claimed, its
+  `_privately` twin, a_message_from_another_l1_sender_cannot_be_returned and its `_privately` twin (the message helpers'
+  `_via` siblings send from another L1 address), with scripts/check-sole-consumer.sh pinning the text.
 
 - [~] **SP-37** — A claim consumes its message only when every committed field matches: for a public claim the
   recipient, amount, depositor and secret; for a private one the amount, the depositor, and the recipient and salt
@@ -1056,23 +1050,22 @@
   Test goes in: token_bridge/src/test/exits.nr :: a_switched_off_merchant_cannot_exit_as_a_merchant;
   token_bridge/src/test/claims.nr :: a_switched_off_merchant_cannot_claim_publicly
 
-- [ ] **SP-49** — SYN. A switch-off stops a merchant's cash-outs: once it lands, a merchant that never bound a funding
-  address cannot bind a fresh L1 address with a small private deposit and then exit its private balance (say, users'
-  payments) there. Today it can: its first private claim binds any depositor, and the user rule then sends everything to
-  that address. (Category: STATE_TRANSITION; Guarantee: EXPLORATORY — the docs let any account's first private claim
-  bind it; only the docs/operations.md "Emergency" runbook (pause, switch off, wait D, unpause) implies a switch-off
-  ends cash-outs; Priority: HIGH; Scope: after claim_private(bind = true) and exit_to_l1_private by a switched-off
-  merchant; Sources: SYN (audit finding 1); EXPECTED-FAIL today)
-  Coverage: UNCOVERED.
-  Test goes in: token_bridge/src/test/exits.nr :: a_switched_off_merchant_cannot_bind_a_new_address_and_exit_there
+- [x] **SP-49** — Accepted behaviour (owner): a switch-off demotes a merchant to a user, it does not freeze it, so a
+  merchant that never bound a funding address binds one on its first private claim, from any L1 address, and exits
+  there. Onboarding closes the gap instead: a merchant binds before it is listed (docs/operations.md), and an
+  ex-merchant with no binding must still be able to withdraw somewhere. (Category: STATE_TRANSITION; Guarantee:
+  SHOULD-HOLD as pinned; Priority: HIGH; Scope: after claim_private(bind = true) and exit_to_l1_private by a
+  switched-off merchant; Sources: SYN (audit finding 1))
+  Coverage: COVERED by token_bridge/src/test/exits.nr:a_switched_off_merchant_that_never_bound_binds_late_and_exits_there.
 
-- [ ] **SP-50** — An exit only burns its own sender's balance: a burn authwit a victim granted the proxy and has not
+- [x] **SP-50** — An exit only burns its own sender's balance: a burn authwit a victim granted the proxy and has not
   used gives a stranger nothing. The stranger's exit burns the stranger's own balance or fails, and the victim can still
-  exit with that authwit. (Category: STATE_TRANSITION; Guarantee: EXPLORATORY — A4 says only "needs the holder's
-  authwit"; Priority: HIGH; Scope: after exit_to_l1_public, exit_to_l1_private; Sources: ADV-09, SPEC-25)
-  Coverage: UNCOVERED — token_bridge/src/test/exits.nr:exit_public_without_authwit_rejected and
-  exit_private_without_authwit_rejected cover a holder without its own authwit, not a stranger spending someone else's.
-  Test goes in: token_bridge/src/test/exits.nr :: a_strangers_exit_cannot_spend_a_victims_burn_authwit
+  exit with that authwit. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD; Priority: HIGH; Scope: after
+  exit_to_l1_public, exit_to_l1_private; Sources: ADV-09, SPEC-25)
+  Coverage: COVERED by token_bridge/src/test/exits.nr:a_strangers_exit_cannot_spend_a_victims_burn_authwit and
+  a_strangers_private_exit_cannot_spend_a_victims_burn_authwit (the stranger's exit under the same amount and nonce
+  burns its own balance, then the victim's authwit still pays the victim's exit); a holder without its own authwit is
+  refused by exit_public_without_authwit_rejected and exit_private_without_authwit_rejected.
 
 - [ ] **SP-51** — An exit's burn authwit works once: repeating the exit with the same nonce fails even when the balance
   covers it, and an authwit cancelled with `cancel_authwit` cannot drive an exit. (Category: STATE_TRANSITION;
@@ -1152,48 +1145,49 @@
 ## Known audit findings these properties would catch
 
 1. **A switched-off merchant with no binding binds a new address with a small private deposit and withdraws there**
-   (`TokenBridge.claim_private` / `exit_to_l1_private`). Caught by **SP-49** (SYN, EXPECTED-FAIL today). SP-48, SP-46
-   and GL-45 frame the rule and pass today: a switched-off merchant falls back to the user rule, and the user rule binds
-   whatever its first private claim names.
-2. **`transfer_public_to_private` proves, and probes first, the hidden recipient instead of the already-public sender.**
-   Caught by **SP-33** (SYN, EXPECTED-FAIL today). GL-28 (the hint's rules as written) passes; SP-31 is the same class
-   of node leak on the private entry points.
-3. **The side hint ignores entry delays and pending delay decreases** (`hints.probe` / `merchant_side_hint`), so it can
-   prove the merchant with the earlier expiry. Caught by **SP-30** (EXPECTED-FAIL today). SP-34 measures the caps the
-   pick should compare; GL-31 is the expiry parity the pick protects.
+   (`TokenBridge.claim_private` / `exit_to_l1_private`). Accepted by the owner: a switch-off demotes, it does not
+   freeze, and onboarding binds a merchant before listing it. **SP-49** pins the accepted behaviour. SP-48, SP-46 and
+   GL-45 frame the rule: a switched-off merchant falls back to the user rule, and the user rule binds whatever its
+   first private claim names.
+2. **`transfer_public_to_private` proved, and probed first, the hidden recipient instead of the already-public
+   sender.** Fixed: both calls that publish one side pass it first, kept. **SP-33** covers it; SP-31 is the accepted
+   query on the private entry points.
+3. **The side hint ignored entry delays and pending delay decreases** (`hints.probe` / `merchant_side_hint`). Fixed:
+   the probe compares each entry's horizon. **SP-30** covers it; SP-34 pins the caps the pick compares; GL-31 is the
+   expiry parity the pick protects.
 4. **A stamped request stays payable after its merchant's switch-off, for any amount and with no end date** (accepted
    by the owner). **GL-12** pins the accepted behaviour (SHOULD-HOLD, passes); **GL-13** is its converse (EXPLORATORY,
    EXPECTED-FAIL today), to implement only if the residual is revisited. GL-02 bounds the residual: every payment into
    such a request is debited from its payer and lands only with the request's owner.
-5. **A private completion of amount 0 is accepted, and the recipient's PXE discovers only the first completion.**
-   Caught by **SP-07** (EXPECTED-FAIL today). GL-02 holds the "first completion only" half (accepted, upstream; its
-   discovery half is unreliable in TXE), and SP-17 limits who can do it to the designated completer.
+5. **A private completion of amount 0 was accepted, and the recipient's PXE discovers only the first completion.**
+   Fixed: `transfer_private_to_commitment` refuses a zero amount; **SP-07** covers it. GL-02 holds the "first
+   completion only" half (accepted, upstream; its discovery half is unreliable in TXE), and SP-17 limits who can do it
+   to the designated completer.
 
 Other properties the current code would fail, outside that list: **SP-28** (a capsule naming the creator pads a
-merchant-to-merchant request, against docs/architecture.md), **SP-31** (without a capsule, a merchant counterparty with
-a pending change makes the hint query the paying user), **GL-34** (TokenPortal accepts a zero deposit no L2 call can
-consume), **GL-05** (a public payment to the zero address breaks the `Transfer`-event books).
+merchant-to-merchant request, against docs/architecture.md), **GL-05** (a public payment to the zero address breaks
+the `Transfer`-event books). **GL-34** (TokenPortal accepted a zero deposit no L2 call can consume) is fixed on L1: every
+deposit path refuses zero.
 
 Documentation that disagrees with the code: docs/architecture.md "Expiry" (a pending change on a 24 h entry can leave
 far more than 30 minutes; GL-31) and its omission of the pending-decrease cap (SP-34); A7's "Only the bridge mints or
-burns" (holders can burn directly; GL-43) and its citation of the `guards` suite for the token's `#[only_self]` helpers,
-which it never probes (GL-06); upstream's note in token/src/test/mint_to_commitment.nr that "the protocol still
+burns" (holders can burn directly; GL-43); upstream's note in token/src/test/mint_to_commitment.nr that "the protocol still
 prevents" double completion (GL-02).
 
 ## Coverage summary
 
 108 properties: 49 global, 59 specific; 105 merged from the five lenses' 197 raw properties, 3 added (SYN). Priority: 52
 HIGH, 38 MEDIUM, 18 LOW. Guarantee: 89 SHOULD-HOLD, 19 EXPLORATORY. Category: 15 VALID_STATE, 69 STATE_TRANSITION, 9
-VARIABLE_TRANSITION, 15 HIGH_LEVEL. EXPECTED-FAIL today: 9 (GL-05, GL-13, GL-34, SP-07, SP-28, SP-30, SP-31, SP-33,
-SP-49).
+VARIABLE_TRANSITION, 15 HIGH_LEVEL. EXPECTED-FAIL today: 3 (GL-05, GL-13, SP-28); SP-07, SP-30, SP-33 and GL-34 are
+fixed, SP-31 and SP-49 accepted.
 
 | Crate | COVERED | PARTIAL | UNCOVERED | TXE-UNREACHABLE | Total |
 |---|---|---|---|---|---|
-| token (merchant Token, hints) | 15 | 34 | 10 | 8 | 67 |
-| token_bridge (with token_minter_proxy) | 6 | 21 | 8 | 3 | 38 |
+| token (merchant Token, hints) | 23 | 34 | 2 | 8 | 67 |
+| token_bridge (with token_minter_proxy) | 9 | 21 | 5 | 3 | 38 |
 | keystone (portal_messages vectors) | 0 | 1 | 0 | 0 | 1 |
 | cross-chain (L1 portal and L2 together) | 0 | 0 | 0 | 2 | 2 |
-| **All** | **21** | **56** | **18** | **13** | **108** |
+| **All** | **32** | **56** | **7** | **13** | **108** |
 
 The largest PARTIAL gap is the supply: no TXE test reads `total_supply` after a claim, an exit, a private burn, a
 transfer or a payment (GL-01, GL-42, SP-02, SP-04, SP-42, SP-44), so the L2 half of the books has no Noir check.
@@ -1204,19 +1198,6 @@ ST-06 (no private proof at the last second, no switch-on mirror; GL-17), ST-23 (
 COVERED halves merged into wider properties (SPEC-44 into GL-27, SPEC-45 into GL-28, SPEC-46 into SP-29, ADV-03 into
 GL-41, CON-04 into SP-03, CON-06 into SP-05, ADV-43 into GL-35, SPEC-55 into GL-49).
 
-Highest-priority UNCOVERED properties:
-
-1. **SP-36** — only the configured portal's messages are consumed (one argument at four call sites guards unbacked
-   mints; no behavioural test).
-2. **GL-06** — the token's `#[only_self]` helpers refuse outside callers (`increase_public_balance_internal` is a free
-   public credit if its attribute is lost; A7 cites a suite that never probes it).
-3. **SP-49** — a switched-off merchant cannot bind a fresh address and exit there (audit finding 1, EXPECTED-FAIL).
-4. **SP-26** — only the merchant admin proposes the next admin (the shortest path to owning the list).
-5. **SP-50** — a stranger's exit cannot spend a victim's standing burn authwit.
-6. **SP-33** — public→private proves the public merchant sender, not the hidden recipient (audit finding 2,
-   EXPECTED-FAIL).
-7. **SP-30** — between two merchants, the hint proves the one with the later expiry cap (audit finding 3,
-   EXPECTED-FAIL).
-8. **SP-07** — a zero private payment into a request is refused (audit finding 5, EXPECTED-FAIL).
-9. **SP-02** — transfers, requests and list calls never move the supply.
-10. **SP-14** — naming a merchant completer does not let a user open a request for a user.
+The ten highest-priority UNCOVERED properties this list named are now covered: SP-36, GL-06, SP-49 (as accepted
+behaviour), SP-26, SP-50, SP-33, SP-30, SP-07, SP-02 and SP-14. Still UNCOVERED: GL-13 (the converse of an accepted
+residual), GL-25, SP-39, SP-51, SP-52, SP-55 and SP-59.

@@ -329,3 +329,26 @@ unconstrained fn the_guardian_is_scheduled_by_the_admin_only() {
     let w = utils::setup_merchant_world(false);
     w.env.call_public(w.bob, Token::at(w.token).schedule_merchant_guardian(w.bob));
 }
+
+#[test(should_fail_with = "Only the merchant admin")]
+unconstrained fn propose_merchant_admin_refuses_a_merchant() {
+    let w = utils::setup_merchant_world(false);
+    w.env.call_public(w.m1, Token::at(w.token).propose_merchant_admin(w.m1));
+}
+
+#[test(should_fail_with = "Only the merchant admin")]
+unconstrained fn propose_merchant_admin_refuses_the_guardian() {
+    let w = utils::setup_merchant_world(false);
+    let t0 = w.env.last_block_timestamp();
+    w.env.call_public(w.admin, Token::at(w.token).schedule_merchant_guardian(w.bob));
+    at(w, t0 + DAY);
+    assert_eq(roles(w).guardian, w.bob);
+    w.env.call_public(w.bob, Token::at(w.token).propose_merchant_admin(w.bob));
+}
+
+#[test(should_fail_with = "Only the merchant admin")]
+unconstrained fn the_proposed_admin_cannot_propose_before_accepting() {
+    let w = utils::setup_merchant_world(false);
+    w.env.call_public(w.admin, Token::at(w.token).propose_merchant_admin(w.bob));
+    w.env.call_public(w.bob, Token::at(w.token).propose_merchant_admin(w.alice));
+}

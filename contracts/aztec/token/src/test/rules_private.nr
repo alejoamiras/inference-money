@@ -173,3 +173,31 @@ unconstrained fn public_to_public_is_unrestricted() {
     );
     utils::check_public_balance(w.env, w.token, w.bob, AMOUNT);
 }
+
+// Only mints and burns write the total supply: every transfer kind, a request and its payment, list calls and
+// cancel_authwit move value only between their own parties, and a bystander's balances never move.
+#[test]
+unconstrained fn no_transfer_or_request_moves_the_total_supply() {
+    let w = utils::setup_merchant_world(false);
+    let token = Token::at(w.token);
+    let supply = utils::get_total_supply(w.env, w.token);
+    w.env.call_private(w.alice, token.transfer_private_to_private(w.alice, w.m1, AMOUNT, 0));
+    w.env.call_private(w.m1, token.transfer_private_to_public(w.m1, w.m2, AMOUNT, 0));
+    w.env.call_private(w.m2, token.transfer_public_to_private(w.m2, w.alice, AMOUNT, 0));
+    w.env.call_public(w.alice, token.transfer_public_to_public(w.alice, w.m1, AMOUNT, 0));
+    let c = w.env.call_private(w.alice, token.initialize_transfer_commitment(w.m1, w.alice));
+    w.env.call_private(w.alice, token.transfer_private_to_commitment(w.alice, c, AMOUNT, 0));
+    w.env.call_public(w.admin, token.add_merchant(w.bob));
+    w.env.call_public(w.admin, token.schedule_merchant_off(w.bob, true));
+    w.env.call_private(w.alice, token.cancel_authwit(0));
+
+    utils::check_total_supply(w.env, w.token, supply);
+    utils::check_private_balance(w.env, w.token, w.alice, mint_amount - AMOUNT);
+    utils::check_public_balance(w.env, w.token, w.alice, mint_amount - AMOUNT);
+    utils::check_private_balance(w.env, w.token, w.m1, mint_amount + AMOUNT);
+    utils::check_public_balance(w.env, w.token, w.m1, mint_amount + AMOUNT);
+    utils::check_private_balance(w.env, w.token, w.m2, mint_amount);
+    utils::check_public_balance(w.env, w.token, w.m2, mint_amount);
+    utils::check_private_balance(w.env, w.token, w.bob, 0);
+    utils::check_public_balance(w.env, w.token, w.bob, 0);
+}

@@ -682,7 +682,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** the base gate.
 
-**P10. The top-10 property tests.**
+**P10. The top-10 property tests.** ✓
 
 | Property | Test |
 |---|---|

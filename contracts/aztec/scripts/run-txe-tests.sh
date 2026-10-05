@@ -20,8 +20,8 @@ if [ "${1:-}" = "--crate" ]; then
   shift 2
 fi
 case "$crate" in
-  token) floor=168 ;;
-  token_bridge) floor=78 ;;
+  token) floor=178 ;;
+  token_bridge) floor=85 ;;
   keystone) floor=20 ;;
   *)
     echo "usage: $0 [--crate token|token_bridge|keystone] [nargo flags...] [-- test names...]" >&2
