@@ -57,6 +57,10 @@ jobs:
         run: |
           bash contracts/aztec/scripts/check-sole-consumer.sh --self-test
           bash contracts/aztec/scripts/check-sole-consumer.sh
+      - name: Stamp-constraint guard
+        run: |
+          bash contracts/aztec/scripts/check-stamp-constraint.sh --self-test
+          bash contracts/aztec/scripts/check-stamp-constraint.sh
       - name: No unpinned Noir dependency was fetched
         run: bash contracts/aztec/scripts/noir-deps.sh --verify --exact
       - name: Tree unchanged

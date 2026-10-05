@@ -702,7 +702,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** as P8.
 
-**P11. Held exit and tripwire.**
+**P11. Held exit and tripwire.** ✓
 - `packages/integration/clock/merchant-exit-expiry.test.ts`, from the `stamp-expiry.test.ts:139-173` template:
   - `holdSends`;
   - an un-awaited `exitToL1({asMerchant: true})` proven while a switch-off is scheduled;
