@@ -248,7 +248,8 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
         outbox.consume(message, _epoch, _numCheckpointsInEpoch, _leafIndex, _path);
 
         // Checks the portal's debit, not the recipient's credit: the reserve is ours to protect, what the recipient
-        // nets is the token's business. A transfer to the portal itself never debits, so it always reverts here.
+        // nets is the token's business. A transfer to the portal itself never debits, so it reverts here unless zero,
+        // and the L2 bridge never emits a zero exit or return.
         uint256 before = underlying.balanceOf(address(this));
         underlying.safeTransfer(_recipient, _amount);
         if (before - underlying.balanceOf(address(this)) != _amount) revert InexactTransfer();
