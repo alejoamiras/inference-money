@@ -5,6 +5,7 @@ import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import {
 	assertPublicRecipient,
 	type BridgeManifest,
+	type ClaimConsent,
 	type ClaimTicket,
 	type ClaimWait,
 	claim,
@@ -41,7 +42,7 @@ import {
 	type WalletClient,
 } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import type { User } from "./actors"
+import type { Actor } from "./actors"
 import { DEMO_SEED } from "./amounts"
 import { ethereumKey } from "./keys"
 
@@ -62,15 +63,15 @@ export interface DemoL1 {
 	chain: Chain
 }
 
-/** A_demo (alice's) or B_demo (bob's). Their keys are public: anyone may sign as them. */
-export function demoL1(rpcUrl: string, m: BridgeManifest, user: User): DemoL1 {
+/** A cast member's Ethereum account: A_demo (alice's), B_demo (bob's) or a merchant's treasury. Its key is public. */
+export function demoL1(rpcUrl: string, m: BridgeManifest, actor: Actor): DemoL1 {
 	const chain = defineChain({
 		id: m.l1.chainId,
 		name: `chain-${m.l1.chainId}`,
 		nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
 		rpcUrls: { default: { http: [rpcUrl] } },
 	})
-	const account = privateKeyToAccount(ethereumKey(m.l2.bridge.address, user))
+	const account = privateKeyToAccount(ethereumKey(m.l2.bridge.address, actor))
 	const transport = http(rpcUrl)
 	return {
 		publicClient: createPublicClient({ chain, transport }) as PublicClient,
@@ -111,8 +112,8 @@ const tokenOf = (m: BridgeManifest): AztecAddress => AztecAddress.fromStringUnsa
 export const sponsoredFee = (m: BridgeManifest) => ({ paymentMethod: sponsoredPayment(m) })
 
 export interface DepositPlan {
-	/** A_demo (alice's) or B_demo (bob's). */
-	from: User
+	/** Whose Ethereum account pays ({@link demoL1}). */
+	from: Actor
 	to: AztecAddress
 	kind: DepositKind
 	amount: bigint
@@ -154,14 +155,20 @@ const CLAIMABLE = { pollMs: 5_000, attempts: 720 }
 
 /**
  * Claims `t` once its message is consumable, as its recipient (a private claim must be; a public one goes through the
- * sponsor). "already" when its message was consumed before, by this claim or anyone's.
+ * sponsor). "already" when its message was consumed before, by this claim or anyone's. A first private claim binds its
+ * recipient only with `consent.allowBind`.
  */
-export async function castClaim(s: DemoSession, t: ClaimTicket, onWait?: (w: ClaimWait) => void): Promise<"claimed" | "already"> {
+export async function castClaim(
+	s: DemoSession,
+	t: ClaimTicket,
+	onWait?: (w: ClaimWait) => void,
+	consent: ClaimConsent = {},
+): Promise<"claimed" | "already"> {
 	const wait = s.wait ?? L2_DONE
 	if (await isClaimConsumed(t, s.node, s.m, tipOf(wait))) return "already"
 	const from = t.draft.intent.recipient
-	await waitClaimable(t, s.node, s.wallet, s.m, from, onWait, CLAIMABLE)
-	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored", wait })
+	await waitClaimable(t, s.node, s.wallet, s.m, from, onWait, { ...CLAIMABLE, ...consent })
+	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored", wait, ...consent })
 	return result === "claimed" ? "claimed" : "already"
 }
 

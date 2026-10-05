@@ -737,7 +737,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 4: consent, onboarding, remaining docs (`pashov-audit-fizz-sdk`)
 
-**P14. `allowBind`.**
+**P14. `allowBind`.** ✓
 - `claim`, `waitClaimable`, `claimCall`, `BindConsentRequiredError`; the `castClaim` opts; the showcase confirm.
 - Tests:
   - `claim.test.ts`: with `allowBind`, a first claim binds (arg `1n`); without it, it throws with zero simulations and zero sends; a bound account never prompts.
@@ -749,14 +749,14 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** base gate; `bun run test:integration`; `bun run --cwd apps/showcase test:components`.
 
-**P15. Bind before listing.**
+**P15. Bind before listing.** ✓
 - The demo seeds and their order; `demo fund` funds the merchants; the `merchants add` reminder.
 - The two-phase testnet stop, with a unit test of the seed order and the "list now" stop.
 - The `docs/operations.md:13,51,71,89-97` runbook.
 
 **Gate:** `RUN_ID=p15 bun run net:up && RUN_ID=p15 bun run deploy:local && RUN_ID=p15 bun run bridge demo setup local && RUN_ID=p15 bun run bridge smoke local`, then `RUN_ID=p15 bun run net:down`.
 
-**P16. The remaining leads, in docs.**
+**P16. The remaining leads, in docs.** ✓
 - F-03 by design: the stolen-key race, bind-before-listing, a switch-off demotes rather than freezes. The Emergency runbook (`operations.md:79-87`) no longer implies that a switch-off ends every cash-out.
 - An ex-merchant still paid through live stamps refunds users on Ethereum, through its exit (P13).
 - Merchants claim before they deliver, because a private deposit is clawable until it is claimed.
@@ -771,7 +771,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `bun run lint`.
 
-**P17. End-to-end.**
+**P17. End-to-end.** ✓
 
 **Gate:**
 - `bun run test:e2e`, in which try-happy still settles and `demo setup` binds and then lists on local;

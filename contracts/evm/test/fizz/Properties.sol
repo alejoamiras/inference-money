@@ -8,7 +8,6 @@ import {vm} from "./utils/Hevm.sol";
 import {Snapshots} from "./Snapshots.sol";
 import {PropertiesAsserts} from "./utils/PropertiesAsserts.sol";
 
-/// @notice Contains the functions that check the properties (invariants)
 abstract contract Properties is PropertiesAsserts, Snapshots {
     // ―――――――――――――――――――― Global properties ―――――――――――――――――――――
     // These properties must always hold after any function call.

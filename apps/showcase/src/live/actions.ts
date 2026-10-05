@@ -4,7 +4,9 @@ import { waitForTx } from "@aztec-labs/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
 import {
 	type BridgeManifest,
+	type ClaimConsent,
 	type ClaimTicket,
+	claimBinding,
 	type DepositDraft,
 	decodeClaimTicket,
 	decodeDepositDraft,
@@ -61,6 +63,8 @@ export interface LiveCtx {
 	explorer: Explorer | undefined
 	/** Requests opened and not paid yet, by `payee>payer`: a payment uses one before opening its own. */
 	requests: Map<string, Fr>
+	/** Asks the visitor a yes/no question; `window.confirm` by default. */
+	confirm?: (question: string) => boolean
 }
 
 export type Report = (stage: Stage, detail?: string) => void
@@ -225,15 +229,30 @@ async function claimable(ctx: LiveCtx, user: User): Promise<Claimable> {
 	return NOTHING_TO_CLAIM
 }
 
+/** Asks before a first private claim binds `user`'s account for good; undefined when the visitor declines. */
+async function bindConsent(ctx: LiveCtx, user: User, t: ClaimTicket): Promise<ClaimConsent | undefined> {
+	const { kind, recipient } = t.draft.intent
+	if (kind !== "private" || (await claimBinding(ctx.demo.wallet, ctx.m, recipient, t.depositor)) !== "binds") return {}
+	const question =
+		`Claiming this deposit binds ${HOLDER_NAME[user]}'s account ${recipient}, for good, to ${t.depositor} (the address ` +
+		"it came from). Later private deposits must come from there, and withdrawals go only there. Claim and bind?"
+	return (ctx.confirm ?? ((q: string) => window.confirm(q)))(question) ? { allowBind: true } : undefined
+}
+
 async function claimDeposit(ctx: LiveCtx, d: ValidDraft, report: Report): Promise<Outcome> {
 	const user = d.actor as User
 	const found = await claimable(ctx, user)
 	// The recording has alice's claim only; a deposit of this page's still on its way is waited for, never replayed over.
 	if (found === NOTHING_TO_CLAIM && user === "alice") return replay(ctx, "claim", found)
 	if (typeof found === "string") return { kind: "failed", detail: found }
+	const consent = await bindConsent(ctx, user, found.ticket)
+	if (!consent) return { kind: "failed", detail: "Nothing claimed: the binding was declined." }
 	const since = ctx.demo.sent.length
-	const result = await castClaim(session(ctx), found.ticket, () =>
-		report("simulate", "Waiting for the deposit's message to reach Aztec."),
+	const result = await castClaim(
+		session(ctx),
+		found.ticket,
+		() => report("simulate", "Waiting for the deposit's message to reach Aztec."),
+		consent,
 	)
 	ctx.tickets.putDeposit({ ...found.p, claimed: true })
 	if (result === "already") return { kind: "settled", detail: ALREADY_CONSUMED, rows: [] }

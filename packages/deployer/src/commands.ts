@@ -89,6 +89,9 @@ export const HANDLERS: Record<Command, Handler> = {
 		asAdmin(inv, async (s, admin) => {
 			const accounts = inv.args.slice(1).map(aztecAddress)
 			log(`listed ${accounts.length} merchant(s) in ${await addMerchants(s, admin, accounts)} tx(s)`)
+			log(
+				"each must already be bound to its own treasury: a merchant's first private claim binds it, for good, and this CLI cannot read a binding",
+			)
 		}),
 	"merchants off": (inv) =>
 		asAdmin(inv, async (s, admin) => {

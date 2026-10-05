@@ -29,6 +29,19 @@ export class NotFundingAddressError extends Error {
 	}
 }
 
+/** Claiming would bind an unbound account for good, and the caller did not pass `allowBind`; nothing was simulated or sent. */
+export class BindConsentRequiredError extends Error {
+	constructor(
+		readonly recipient: AztecAddress,
+		readonly depositor: Address,
+	) {
+		super(
+			`Claiming this deposit binds ${recipient}, for good, to its depositor ${depositor}, the key holder that signed it. Claim with allowBind once its owner agrees.`,
+		)
+		this.name = "BindConsentRequiredError"
+	}
+}
+
 /**
  * What claiming a private deposit from `depositor` into `recipient` does to the account: "binds" on its first claim,
  * which ties it to `depositor` for good, "matches" once it is bound there. A deposit from any other address throws

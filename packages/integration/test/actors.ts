@@ -89,16 +89,17 @@ export async function deposit(l1: L1Ctx, kind: DepositKind, recipient: AztecAddr
 	return confirmDeposit(d, l1, m)
 }
 
+// The funding fixtures bind their own test accounts; the specs that test consent call the unconsented API.
 export function claimable(t: ClaimTicket, from: AztecAddress): Promise<void> {
 	const { manifest: m, node, wallet } = harness()
-	return waitClaimable(t, node, wallet, m, from, undefined, { pollMs: 1_000, attempts: 600 })
+	return waitClaimable(t, node, wallet, m, from, undefined, { pollMs: 1_000, attempts: 600, allowBind: true })
 }
 
 /** Test accounts hold no Fee Juice, so public ops choose the sponsor explicitly; private ones rely on the default. */
 export const payFor = (kind: DepositKind): FeeChoice | undefined => (kind === "public" ? "sponsored" : undefined)
 
 export const claimFor = (t: ClaimTicket, from = t.draft.intent.recipient) =>
-	claim(t, harness().node, harness().wallet, harness().manifest, { from, fee: payFor(t.draft.intent.kind) })
+	claim(t, harness().node, harness().wallet, harness().manifest, { from, fee: payFor(t.draft.intent.kind), allowBind: true })
 
 /** Deposits and claims, so `recipient` holds `amount` more in the given balance. */
 export async function funded(l1: L1Ctx, kind: DepositKind, recipient: AztecAddress, amount: bigint): Promise<void> {

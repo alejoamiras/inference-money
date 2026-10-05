@@ -1,5 +1,5 @@
 import type { BridgeManifest } from "@inference-money/bridge-core"
-import { approvePermit2, DEMO_L1_TARGET, demoL1, USERS, usdcOf } from "@inference-money/demo"
+import { approvePermit2, DEMO_L1_TARGET, demoL1, MERCHANTS, USERS, usdcOf } from "@inference-money/demo"
 import { type Address, createTestClient, erc20Abi, http, parseAbi } from "viem"
 import { type L1Signer, l1Chain, writeEvm } from "./l1"
 
@@ -36,17 +36,17 @@ export function signerFaucet(funder: L1Signer, m: BridgeManifest): Faucet {
 	}
 }
 
-/** Tops A_demo and B_demo up to {@link DEMO_L1_TARGET} and approves Permit2 from each; holdings above it stay. */
+/** Tops each cast member's Ethereum account up to {@link DEMO_L1_TARGET} and approves Permit2 from each; holdings above it stay. */
 export async function fundDemoL1(rpcUrl: string, m: BridgeManifest, faucet: Faucet, log: (m: string) => void): Promise<void> {
-	for (const user of USERS) {
-		const signer = demoL1(rpcUrl, m, user)
+	for (const actor of [...USERS, ...MERCHANTS]) {
+		const signer = demoL1(rpcUrl, m, actor)
 		const address = signer.account.address
-		const target = DEMO_L1_TARGET[user]
+		const target = DEMO_L1_TARGET[actor]
 		const eth = target.eth - (await signer.publicClient.getBalance({ address }))
 		if (eth > 0n) await faucet.eth(address, target.eth, eth)
 		const usdc = target.usdc - (await usdcOf(signer, m, address))
 		if (usdc > 0n) await faucet.usdc(signer, usdc)
 		await approvePermit2(signer, m, target.usdc)
-		log(`${user}'s Ethereum account ${address}: topped up to ${target.eth} wei and ${target.usdc} USDC units`)
+		log(`${actor}'s Ethereum account ${address}: topped up to ${target.eth} wei and ${target.usdc} USDC units`)
 	}
 }

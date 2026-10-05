@@ -24,6 +24,8 @@ const claims = vi.hoisted(() => ({
 	state: "checkpointed" as "proposed" | "checkpointed" | "finalized" | "pruned",
 	sent: 0,
 	result: "claimed" as "claimed" | "already",
+	binding: "matches" as "binds" | "matches",
+	consent: undefined as unknown,
 }))
 
 // A deposit this page sent is still unconfirmed on Ethereum (a "broken" one cannot even be read back); a claim
@@ -32,7 +34,7 @@ vi.mock("@inference-money/bridge-core", async (original) => {
 	const real = await original<typeof import("@inference-money/bridge-core")>()
 	const { Fr } = await import("@aztec-labs/aztec.js/fields")
 	const { AztecAddress } = await import("@aztec-labs/aztec.js/addresses")
-	const intent = { recipient: AztecAddress.ZERO, amount: 10_000n }
+	const intent = { recipient: AztecAddress.ZERO, amount: 10_000n, kind: "private" }
 	const ticket = { messageHash: "0x01", leafIndex: 1n, depositor: "0xd", draft: { secretOrSalt: Fr.ZERO, intent } }
 	return {
 		...real,
@@ -47,6 +49,7 @@ vi.mock("@inference-money/bridge-core", async (original) => {
 			return ticket
 		},
 		syncMerchantList: async () => ({}),
+		claimBinding: async () => claims.binding,
 		openRequest: async () => {
 			requests.order.push("open")
 			await requests.hold
@@ -68,8 +71,9 @@ vi.mock("@inference-money/bridge-core", async (original) => {
 })
 vi.mock("@inference-money/demo", async (original) => ({
 	...(await original<typeof import("@inference-money/demo")>()),
-	castClaim: async () => {
+	castClaim: async (_s: unknown, _t: unknown, _on: unknown, consent: unknown) => {
 		claims.sent++
+		claims.consent = consent
 		return claims.result
 	},
 }))
@@ -228,6 +232,29 @@ describe("claim", () => {
 		store.set("d3", { id: "d3", user: "bob", since: 2, claim: "ticket" })
 		claims.state = "pruned"
 		expect([(await claim()).kind, claims.sent, [...store.keys()]]).toEqual(["settled", 2, ["d3"]])
+	})
+
+	it("asks before a first claim binds the account: a decline sends nothing and keeps the ticket, an accept consents", async () => {
+		const store = new Map<string, PendingDeposit>([["d1", { id: "d1", user: "bob", since: 0, claim: "ticket" }]])
+		const tickets = {
+			deposits: () => [...store.values()],
+			putDeposit: (d: PendingDeposit) => store.set(d.id, d),
+			dropDeposit: (id: string) => store.delete(id),
+		} as unknown as Tickets
+		const questions: string[] = []
+		let accept = false
+		const confirm = (q: string) => questions.push(q) > 0 && accept
+		const ctx: LiveCtx = { ...ctxWith(false), tickets, confirm }
+		const claim = () => runDraft(ctx, { actor: "bob", action: "claim", to: "bob" }, WALLETS, () => {})
+		Object.assign(claims, { state: "pruned", binding: "binds" })
+		const sent = claims.sent
+		expect(await claim()).toEqual({ kind: "failed", detail: "Nothing claimed: the binding was declined." })
+		expect([claims.sent - sent, store.get("d1")?.claimed]).toEqual([0, undefined])
+		expect(questions).toEqual([expect.stringContaining("for good, to 0xd (the address it came from)")])
+		accept = true
+		expect((await claim()).kind).toBe("settled")
+		expect([claims.sent - sent, claims.consent]).toEqual([1, { allowBind: true }])
+		claims.binding = "matches"
 	})
 
 	it("never reports a mint for a message something consumed before, and keeps its secret until that is final", async () => {
