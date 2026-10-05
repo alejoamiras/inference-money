@@ -1,5 +1,14 @@
 import { describe, expect, it } from "bun:test"
-import { claimBinding, depositFate, exitTicketFromTx, fundingAddress, NotFundingAddressError } from "@inference-money/bridge-core"
+import {
+	BindConsentRequiredError,
+	claim,
+	claimBinding,
+	depositFate,
+	exitTicketFromTx,
+	fundingAddress,
+	NotFundingAddressError,
+	waitClaimable,
+} from "@inference-money/bridge-core"
 import { type Address, isAddressEqual } from "viem"
 import {
 	claimable,
@@ -11,6 +20,7 @@ import {
 	openBooks,
 	returnable,
 	returnFor,
+	sentDuring,
 	USDC,
 	usdcOf,
 	withdraw,
@@ -34,6 +44,11 @@ describe.skipIf(!INTEGRATION)("funding-address binding", () => {
 		expect(await depositFate(first, node, m)).toEqual({ consumed: false })
 		await claimable(first, bob)
 		expect(await claimBinding(wallet, m, bob, first.depositor), "the app warns before this claim").toBe("binds")
+		const unconsented = await sentDuring(async () => {
+			await expect(claim(first, node, wallet, m, { from: bob })).rejects.toBeInstanceOf(BindConsentRequiredError)
+			await expect(waitClaimable(first, node, wallet, m, bob)).rejects.toBeInstanceOf(BindConsentRequiredError)
+		})
+		expect(unconsented, "refused without consent before anything is proven").toEqual([])
 		expect(await claimFor(first)).toBe("claimed")
 		expect(await depositFate(first, node, m)).toMatchObject({ consumed: true, withdrawal: false })
 		const bound = await boundTo(bob)

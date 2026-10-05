@@ -3,7 +3,7 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import { TxStatus } from "@aztec-labs/aztec.js/tx"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
-import { NotFundingAddressError } from "./binding"
+import { BindConsentRequiredError, NotFundingAddressError } from "./binding"
 import {
 	type ClaimNode,
 	claim,
@@ -51,7 +51,7 @@ describe("registerSponsor", () => {
 describe("claim", () => {
 	it("pays a private claim through the sponsor and leaves a public one to the wallet", async () => {
 		const priv = fakeWallet()
-		expect(await claim(await ticket("private"), NO_NULLIFIER, priv.wallet, M, { from: recipient })).toBe("claimed")
+		expect(await claim(await ticket("private"), NO_NULLIFIER, priv.wallet, M, { from: recipient, allowBind: true })).toBe("claimed")
 		expect(priv.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_private"], feePayer: M.l2.sponsoredFpc })
 
 		const pub = fakeWallet()
@@ -59,7 +59,7 @@ describe("claim", () => {
 		expect(pub.sent[0]).toMatchObject({ calls: ["claim_public"], feePayer: undefined })
 
 		const chosen = fakeWallet()
-		await claim(await ticket("private"), NO_NULLIFIER, chosen.wallet, M, { from: recipient, fee: "wallet-default" })
+		await claim(await ticket("private"), NO_NULLIFIER, chosen.wallet, M, { from: recipient, fee: "wallet-default", allowBind: true })
 		expect(chosen.sent[0]).toMatchObject({ calls: ["claim_private"], feePayer: undefined })
 
 		const sponsoredPublic = fakeWallet()
@@ -67,15 +67,24 @@ describe("claim", () => {
 		expect(sponsoredPublic.sent[0]).toMatchObject({ calls: ["sponsor_unconditionally", "claim_public"], feePayer: M.l2.sponsoredFpc })
 	})
 
-	it("binds the recipient's account on its first private claim, and on no later one", async () => {
+	it("binds the recipient's account on its first private claim, only with consent, and on no later one", async () => {
 		const bindArg = (w: ReturnType<typeof fakeWallet>) => w.sent[0]?.args.at(-1)?.at(-1)
+		const t = await ticket("private")
+		const unconsented = fakeWallet()
+		const never = { getL1ToL2MessageMembershipWitness: async () => undefined }
+		await expect(claim(t, NO_NULLIFIER, unconsented.wallet, M, { from: recipient })).rejects.toBeInstanceOf(BindConsentRequiredError)
+		await expect(waitClaimable(t, never, unconsented.wallet, M, recipient), "before waiting for the message").rejects.toBeInstanceOf(
+			BindConsentRequiredError,
+		)
+		expect(unconsented.simulated.length + unconsented.sent.length).toBe(0)
+
 		const first = fakeWallet()
-		await claim(await ticket("private"), NO_NULLIFIER, first.wallet, M, { from: recipient })
+		await claim(t, NO_NULLIFIER, first.wallet, M, { from: recipient, allowBind: true })
 		expect(bindArg(first)).toBe(1n)
 
 		const bound = fakeWallet({ utility: () => [new Fr(0xd0d0)] })
-		await claim(await ticket("private"), NO_NULLIFIER, bound.wallet, M, { from: recipient })
-		expect(bindArg(bound)).toBe(0n)
+		await claim(t, NO_NULLIFIER, bound.wallet, M, { from: recipient })
+		expect(bindArg(bound), "a bound account needs no consent").toBe(0n)
 	})
 
 	it("refuses a private deposit from another address than the bound one before any simulation", async () => {
@@ -127,19 +136,20 @@ describe("claim", () => {
 					return leaves.map(() => ({ data: 7n }) as never)
 				},
 			}
-			expect(await claim(t, nullified, wallet, M, { from: recipient })).toBe("consumed-unknown")
-			await expect(claim(t, NO_NULLIFIER, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
+			const opts = { from: recipient, allowBind: true }
+			expect(await claim(t, nullified, wallet, M, opts)).toBe("consumed-unknown")
+			await expect(claim(t, NO_NULLIFIER, wallet, M, opts)).rejects.toThrow("already nullified")
 			const unreachable: ClaimNode = { findLeavesIndexes: fail("503") as never, getTxReceipt: CHECKPOINTED }
-			await expect(claim(t, unreachable, wallet, M, { from: recipient })).rejects.toThrow("already nullified")
+			await expect(claim(t, unreachable, wallet, M, opts)).rejects.toThrow("already nullified")
 			expect(queried).toHaveLength(1)
 		}
 	})
 
 	it("surfaces a sponsor that cannot pay, or is missing, as SponsorUnavailableError", async () => {
 		const exhausted = fakeWallet({ send: fail("Not enough balance for fee payer to pay for transaction") })
-		await expect(claim(await ticket("private"), NO_NULLIFIER, exhausted.wallet, M, { from: recipient })).rejects.toBeInstanceOf(
-			SponsorUnavailableError,
-		)
+		await expect(
+			claim(await ticket("private"), NO_NULLIFIER, exhausted.wallet, M, { from: recipient, allowBind: true }),
+		).rejects.toBeInstanceOf(SponsorUnavailableError)
 
 		const none = fakeWallet()
 		const noSponsor = { ...M, l2: { ...M.l2, sponsoredFpc: undefined } }

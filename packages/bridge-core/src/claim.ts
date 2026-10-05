@@ -11,7 +11,7 @@ import type { AztecNode } from "@aztec-labs/stdlib/interfaces/client"
 import { computeFeeJuiceMessageNullifier } from "@aztec-labs/stdlib/messaging"
 import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import { sponsoredFpcArtifact, tokenBridgeArtifact } from "./artifacts"
-import { claimBinding } from "./binding"
+import { BindConsentRequiredError, claimBinding } from "./binding"
 import { deriveClaimSecret } from "./claim-secret"
 import type { ClaimTicket } from "./deposit"
 import type { BridgeManifest } from "./manifest"
@@ -101,16 +101,30 @@ export async function registerSponsor(wallet: Pick<Wallet, "registerContract">, 
 	return instance.address
 }
 
-async function claimCall(t: ClaimTicket, wallet: Wallet, m: BridgeManifest) {
+/**
+ * Whether a private claim of `t` binds its recipient: its first does, to the deposit's depositor, for good, so it
+ * needs `allowBind`. A deposit from any other address than a bound account's is refused here, before any proving.
+ */
+async function consentedBind(t: ClaimTicket, wallet: Wallet, m: BridgeManifest, allowBind: boolean | undefined): Promise<boolean> {
+	const { recipient } = t.draft.intent
+	const bind = (await claimBinding(wallet, m, recipient, t.depositor)) === "binds"
+	if (bind && allowBind !== true) throw new BindConsentRequiredError(recipient, t.depositor)
+	return bind
+}
+
+async function claimCall(t: ClaimTicket, wallet: Wallet, m: BridgeManifest, allowBind: boolean | undefined) {
 	const bridge = Contract.at(AztecAddress.fromStringUnsafe(m.l2.bridge.address), tokenBridgeArtifact, wallet)
 	const { amount, recipient, kind } = t.draft.intent
 	const leaf = new Fr(t.leafIndex)
 	const depositor = EthAddress.fromString(t.depositor)
 	if (kind === "public") return bridge.methods.claim_public!(recipient, amount, t.draft.secretOrSalt, leaf, depositor)
-	// The recipient's first private claim binds its account to this deposit's depositor; a deposit from any other
-	// address than a bound account's is refused here, before any proving.
-	const bind = (await claimBinding(wallet, m, recipient, t.depositor)) === "binds"
+	const bind = await consentedBind(t, wallet, m, allowBind)
 	return bridge.methods.claim_private!(recipient, amount, t.draft.secretOrSalt, leaf, depositor, bind)
+}
+
+export interface ClaimConsent {
+	/** Consent to the binding an unbound recipient's first private claim makes; without it that claim throws {@link BindConsentRequiredError}. */
+	allowBind?: boolean
 }
 
 export interface WaitClaimableOptions {
@@ -159,17 +173,21 @@ export async function waitConsumable(
 	throw new Error("The deposit has not reached your wallet yet. It is kept; try again in a few minutes.")
 }
 
-/** {@link waitConsumable} for the claim of `t` from `from`'s wallet. */
-export function waitClaimable(
+/**
+ * {@link waitConsumable} for the claim of `t` from `from`'s wallet. A claim that would bind without consent is refused
+ * at once, before the message is even waited for.
+ */
+export async function waitClaimable(
 	t: ClaimTicket,
 	node: ClaimableNode,
 	wallet: Wallet,
 	m: BridgeManifest,
 	from: AztecAddress,
 	on?: StageSink<ClaimWait>,
-	opts: WaitClaimableOptions = {},
+	opts: WaitClaimableOptions & ClaimConsent = {},
 ): Promise<void> {
-	return waitConsumable(t, node, async () => (await claimCall(t, wallet, m)).simulate({ from }), on, opts)
+	if (t.draft.intent.kind === "private") await consentedBind(t, wallet, m, opts.allowBind)
+	return waitConsumable(t, node, async () => (await claimCall(t, wallet, m, opts.allowBind)).simulate({ from }), on, opts)
 }
 
 export type NullifierNode = Pick<AztecNode, "findLeavesIndexes">
@@ -233,20 +251,22 @@ async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManif
  * Mints the deposit on L2 from `from`: a private claim only from its recipient, a public one from anyone (the mint
  * goes to the merchant the message names), paid per {@link FeeChoice}. Both outcomes hold only at `opts.wait`'s tip, a
  * checkpoint by default: keep the secret until {@link waitClaimFinalized} says "finalized". "consumed-unknown" needs
- * this ticket's nullifier on L2 at that tip: a nullifier error can come from any part of the tx.
+ * this ticket's nullifier on L2 at that tip: a nullifier error can come from any part of the tx. A first private claim
+ * needs `allowBind` ({@link ClaimConsent}).
  */
 export async function claim(
 	t: ClaimTicket,
 	node: ClaimNode,
 	wallet: Wallet,
 	m: BridgeManifest,
-	opts: { from: AztecAddress; fee?: FeeChoice; wait?: L2Wait },
+	opts: { from: AztecAddress; fee?: FeeChoice; wait?: L2Wait } & ClaimConsent,
 ): Promise<ClaimResult> {
 	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
 	const sponsored = fee !== undefined
 	const wait = opts.wait ?? L2_DONE
+	const call = await claimCall(t, wallet, m, opts.allowBind)
 	try {
-		const { txHash } = await (await claimCall(t, wallet, m)).send({ from: opts.from, fee, wait: NO_WAIT })
+		const { txHash } = await call.send({ from: opts.from, fee, wait: NO_WAIT })
 		await waitForTx(node as AztecNode, txHash, wait)
 		return "claimed"
 	} catch (e) {

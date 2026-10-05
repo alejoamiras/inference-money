@@ -61,8 +61,8 @@ describe.skipIf(!INTEGRATION)("guards", () => {
 		const [l1, bob] = await Promise.all([l1Actor(), l2Actor()])
 		const t = await deposit(l1, "private", bob, USDC)
 		await claimable(t, bob)
-		await expect(claim(t, node, wallet, broke, { from: bob })).rejects.toBeInstanceOf(SponsorUnavailableError)
-		expect(await claim(t, node, wallet, m, { from: bob })).toBe("claimed")
+		await expect(claim(t, node, wallet, broke, { from: bob, allowBind: true })).rejects.toBeInstanceOf(SponsorUnavailableError)
+		expect(await claim(t, node, wallet, m, { from: bob, allowBind: true })).toBe("claimed")
 		expect((await l2Balances(bob)).private).toBe(USDC)
 	})
 

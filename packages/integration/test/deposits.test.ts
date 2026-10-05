@@ -82,9 +82,11 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 		const t = await deposit(l1, "private", bob, 3n * USDC)
 		await claimable(t, bob)
 		const { node, wallet, manifest: m } = harness()
-		await expect(claim(t, node, wallet, m, { from: relayer })).rejects.toThrow("Only the recipient can claim privately")
+		// Consent, so each attempt reaches the contract's own refusal.
+		const asRelayer = { from: relayer, allowBind: true }
+		await expect(claim(t, node, wallet, m, asRelayer)).rejects.toThrow("Only the recipient can claim privately")
 		const redirected: ClaimTicket = { ...t, draft: { ...t.draft, intent: { ...t.draft.intent, recipient: relayer } } }
-		await expect(claim(redirected, node, wallet, m, { from: relayer })).rejects.toThrow(/No L1 to L2 message found/)
+		await expect(claim(redirected, node, wallet, m, asRelayer)).rejects.toThrow(/No L1 to L2 message found/)
 		expect(await claimFor(t)).toBe("claimed")
 		expect((await l2Balances(bob)).private).toBe(3n * USDC)
 		expect((await l2Balances(relayer)).private).toBe(0n)

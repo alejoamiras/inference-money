@@ -5,6 +5,7 @@ import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import {
 	assertPublicRecipient,
 	type BridgeManifest,
+	type ClaimConsent,
 	type ClaimTicket,
 	type ClaimWait,
 	claim,
@@ -154,14 +155,20 @@ const CLAIMABLE = { pollMs: 5_000, attempts: 720 }
 
 /**
  * Claims `t` once its message is consumable, as its recipient (a private claim must be; a public one goes through the
- * sponsor). "already" when its message was consumed before, by this claim or anyone's.
+ * sponsor). "already" when its message was consumed before, by this claim or anyone's. A first private claim binds its
+ * recipient only with `consent.allowBind`.
  */
-export async function castClaim(s: DemoSession, t: ClaimTicket, onWait?: (w: ClaimWait) => void): Promise<"claimed" | "already"> {
+export async function castClaim(
+	s: DemoSession,
+	t: ClaimTicket,
+	onWait?: (w: ClaimWait) => void,
+	consent: ClaimConsent = {},
+): Promise<"claimed" | "already"> {
 	const wait = s.wait ?? L2_DONE
 	if (await isClaimConsumed(t, s.node, s.m, tipOf(wait))) return "already"
 	const from = t.draft.intent.recipient
-	await waitClaimable(t, s.node, s.wallet, s.m, from, onWait, CLAIMABLE)
-	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored", wait })
+	await waitClaimable(t, s.node, s.wallet, s.m, from, onWait, { ...CLAIMABLE, ...consent })
+	const result = await claim(t, s.node, s.wallet, s.m, { from, fee: "sponsored", wait, ...consent })
 	return result === "claimed" ? "claimed" : "already"
 }
 

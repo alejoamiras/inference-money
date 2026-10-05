@@ -7,9 +7,10 @@ import * as core from "@inference-money/bridge-core"
 const approvals: bigint[] = []
 /** The private recipient's funding address; none until its first claim. */
 let bound: `0x${string}` | undefined
-/** The tip each claim read asked for, and the wait each claim was given. */
+/** The tip each claim read asked for, the wait each claim was given, and the consent its wait and claim each got. */
 const reads: string[] = []
 const claimWaits: unknown[] = []
+const consents: unknown[] = []
 mock.module("@inference-money/bridge-core", () => ({
 	...core,
 	syncMerchantList: async () => ({ block: 1, at: 0n, entries: new Map() }),
@@ -21,9 +22,12 @@ mock.module("@inference-money/bridge-core", () => ({
 		reads.push(at)
 		return false
 	},
-	waitClaimable: async () => {},
-	claim: async (_t: unknown, _n: unknown, _w: unknown, _m: unknown, opts: { wait: unknown }) => {
+	waitClaimable: async (...args: unknown[]) => {
+		consents.push((args[6] as { allowBind?: boolean }).allowBind)
+	},
+	claim: async (_t: unknown, _n: unknown, _w: unknown, _m: unknown, opts: { wait: unknown; allowBind?: boolean }) => {
 		claimWaits.push(opts.wait)
+		consents.push(opts.allowBind)
 		return "claimed"
 	},
 	sponsoredPayment: () => undefined,
@@ -70,9 +74,10 @@ describe("castClaim and sendPrivate", () => {
 		const session = (wait?: core.L2Wait) =>
 			({ m: { l2: { token: { address: to.toString() } } }, node: proposed, wallet: {}, wait }) as never
 		expect(await castClaim(session(core.L2_PROPOSED), t)).toBe("claimed")
-		await castClaim(session(), t)
+		await castClaim(session(), t, undefined, { allowBind: true })
 		expect(reads).toEqual(["proposed", "checkpointed"])
 		expect(claimWaits).toEqual([core.L2_PROPOSED, core.L2_DONE])
+		expect(consents, "forwarded to the wait and the claim, never defaulted").toEqual([undefined, undefined, true, true])
 		// A checkpoint wait never returns here: the receipt stays proposed.
 		expect(await sendPrivate(session(core.L2_PROPOSED), to, to, 1n)).toBeInstanceOf(TxHash)
 	})

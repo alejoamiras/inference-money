@@ -130,8 +130,10 @@ async function ensureMerchantsListed(s: Session, log: Log): Promise<void> {
 
 function liveSetupOps(s: Session, log: Log): SetupOps {
 	let players: Record<string, Player> = {}
+	// The private seeds bind cast accounts to their own L1 accounts, as intended; a pruned claim lost its binding too.
+	const BIND = { allowBind: true }
 	const claimAgain = async (t: ClaimTicket) => {
-		await castClaim(s, t, logWait(log))
+		await castClaim(s, t, logWait(log), BIND)
 	}
 	return {
 		prepare: async (tag) => {
@@ -146,7 +148,7 @@ function liveSetupOps(s: Session, log: Log): SetupOps {
 			return castDeposit(s, demoL1(s.endpoints.l1RpcUrl, s.m, plan.from), plan, prior, persist)
 		},
 		claim: async (t) => {
-			log(`claim to ${t.draft.intent.recipient}: ${await castClaim(s, t, logWait(log))}`)
+			log(`claim to ${t.draft.intent.recipient}: ${await castClaim(s, t, logWait(log), BIND)}`)
 		},
 		final: {
 			finality: (t) => waitClaimFinalized(t, s.node, s.m),
