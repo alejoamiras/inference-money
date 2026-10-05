@@ -1,0 +1,46 @@
+name: Contracts fuzz (nightly)
+
+# An hour of Medusa over contracts/evm/test/fizz, off the PR path: a campaign this long would gate every merge. The
+# corpus carries over between nights while the suite, the sources and the config are unchanged.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-contracts
+  cancel-in-progress: false
+
+jobs:
+  medusa:
+    name: medusa (1h)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-toolchains
+        with:
+          medusa: "true"
+      # A cache entry is immutable, so each run saves under its own key. It restores the newest for the same inputs, else
+      # the newest of any: Medusa replays what still executes, so a source change does not start from zero.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: contracts/evm/fizz_data/corpus_medusa
+          key: medusa-corpus-${{ hashFiles('contracts/evm/test/fizz/**', 'contracts/evm/src/**', 'contracts/evm/medusa.json') }}-${{ github.run_id }}
+          restore-keys: |
+            medusa-corpus-${{ hashFiles('contracts/evm/test/fizz/**', 'contracts/evm/src/**', 'contracts/evm/medusa.json') }}-
+            medusa-corpus-
+      - run: bun run test:evm:fuzz
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: medusa-campaign
+          path: |
+            contracts/evm/fizz_data/last-campaign.log
+            contracts/evm/fizz_data/logs_medusa/
+            contracts/evm/fizz_data/corpus_medusa/test_results/
+          retention-days: 14
+          if-no-files-found: ignore
