@@ -18,8 +18,8 @@ import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
 ///   I1  reserve == Σdeposits + Σdonations − Σwithdrawals, measured on the real token balance, never ghost-vs-ghost.
 ///   I2  every successful deposit sent exactly one Inbox message, and nothing else did.
 ///   I3  the bindings chosen at initialize never change.
-///   I4  every message names its depositor (a direct deposit's caller, the router's argument otherwise), and no one
-///       but the router names one.
+///   I4  every message names its depositor (a direct private deposit's signer, a direct public deposit's refund address,
+///       the router's argument otherwise), and no one but the router names one unsigned.
 contract TokenPortalInvariantTest is Test {
     PortalHandler internal handler;
 
@@ -67,7 +67,8 @@ contract PortalHandler is StdUtils {
     CapturingInbox public inbox;
     CapturingOutbox public outbox;
     FakeRegistry public registry;
-    address[3] private actors = [address(0xA1), address(0xA2), address(0xA3)];
+    address[3] private actors = [vm.addr(0xA1), vm.addr(0xA2), vm.addr(0xA3)];
+    mapping(address actor => uint256) private keys;
 
     uint256 public ghostDeposited;
     uint256 public ghostDonated;
@@ -83,6 +84,9 @@ contract PortalHandler is StdUtils {
         registry = new FakeRegistry(address(new FakeRollup(address(inbox), address(outbox))));
         usdc = new MockUsdc();
         (portal, router) = initializedPortal(address(registry), address(usdc), BRIDGE);
+        for (uint256 i; i < actors.length; i++) {
+            keys[actors[i]] = 0xA1 + i;
+        }
     }
 
     function deposit(uint256 actorSeed, uint256 amount, bool isPrivate, bytes32 to) external {
@@ -136,15 +140,23 @@ contract PortalHandler is StdUtils {
         } catch {}
     }
 
-    /// `payer` funds the deposit; it names `depositor`, through the router whenever the two differ.
+    /// `payer` funds the deposit; it names `depositor`, through the router whenever the two differ. A direct private
+    /// deposit carries the depositor's own authorization; the deposit count in its secret hash keeps each one fresh.
     function _deposit(address payer, address depositor, uint256 amount, bool isPrivate, bytes32 to) private {
         to = bytes32(bound(uint256(to), 0, Constants.MAX_FIELD_VALUE));
+        bytes32 secretHash = bytes32(ghostDepositCount);
+        bytes memory signature;
+        if (payer == depositor && isPrivate) {
+            bytes32 digest = portal.fundingAuthorizationDigest(depositor, payer, amount, secretHash, block.timestamp);
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(keys[depositor], digest);
+            signature = abi.encodePacked(r, s, v);
+        }
         usdc.mint(payer, amount);
         vm.startPrank(payer);
         usdc.approve(address(portal), amount);
         if (payer == depositor) {
-            if (isPrivate) portal.depositToAztecPrivate(amount, bytes32(0));
-            else portal.depositToAztecPublic(to, amount, bytes32(0));
+            if (isPrivate) portal.depositToAztecPrivate(depositor, amount, secretHash, block.timestamp, signature);
+            else portal.depositToAztecPublic(depositor, to, amount, bytes32(0));
         } else {
             if (isPrivate) portal.depositToAztecPrivateFor(depositor, amount, bytes32(0));
             else portal.depositToAztecPublicFor(depositor, to, amount, bytes32(0));

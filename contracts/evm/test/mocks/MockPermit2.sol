@@ -4,6 +4,7 @@ pragma solidity >=0.8.27;
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@oz/token/ERC20/utils/SafeERC20.sol";
 import {ISignatureTransfer} from "../../src/interfaces/ISignatureTransfer.sol";
+import {Permit2Digest} from "./Permit2Digest.sol";
 
 /// Success-always Permit2 that records what it was handed and can be told to reject. It never checks a signature:
 /// signature validity is Permit2's own domain, pinned by the Sepolia fork suite against the real contract. It does
@@ -56,7 +57,8 @@ contract MockPermit2 is ISignatureTransfer {
         return 0;
     }
 
-    function DOMAIN_SEPARATOR() external pure override returns (bytes32) {
-        return bytes32(0);
+    /// Permit2's own formula, so the router's `permitDigest` is the digest a real signer signs.
+    function DOMAIN_SEPARATOR() external view override returns (bytes32) {
+        return Permit2Digest.domainSeparator(block.chainid, address(this));
     }
 }

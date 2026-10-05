@@ -81,7 +81,8 @@ The exception is a bug that leaves out a field. Then an old signature still veri
 | Account | Result |
 |---|---|
 | Plain EOA | Passes, one signature, one tx (unchanged) |
-| EIP-7702 account whose delegate implements ERC-1271 honestly | Passes: Permit2 calls `isValidSignature`, and the router independently recovers the key |
+| EIP-7702 account whose delegate implements ERC-1271 by recovering its key from the raw digest | Passes: Permit2 calls `isValidSignature`, and the router independently recovers the key |
+| 7702 account whose delegate wants a wrapped signature (ERC-7739) | Refused (P7 re-audit): the router needs the raw 65-byte key signature and Permit2 forwards the same bytes, so no one signature passes both. It uses the portal's signed path through an integrator |
 | 7702 account whose delegate lacks ERC-1271 | Refused by Permit2 before anything moves. It uses the portal's signed path through an integrator |
 | 7702 account with a permissive 1271 delegate | Passes only if the key really signed. Its residual is the named "delegated to everyone" one |
 | ERC-1271 contract (Safe), honest or permissive (audit F-02) | Refused, because no key recovers to a contract address. A 65-byte signature gets `SignerIsNotTheCaller`; an empty or other-length one gets OZ's `ECDSAInvalidSignatureLength(n)`. A Safe deposits through the portal path, with an owner EOA as depositor |
@@ -534,7 +535,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 2: L1 deposit rules (`pashov-audit-fizz-l1`)
 
-**P2. Portal guards.**
+**P2. Portal guards.** ✓
 - `_requireNonZero`, `_requireCanonical`, `_requireDepositor`, and the new public signature.
 - The `FakeRegistry` setter; every call site moved, fizz's public-deposit handlers included, and fizz's zero-deposit handler now expects `ZeroAmount`.
 - Halmos `proveRejectsZero` (public direct + private `...For`), `proveRejectsStaleRollup` and `proveRejectsBadRefund`, each with its mutant, canary, gate pair and self-test log.
@@ -543,7 +544,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `bun run test:evm && bun run test:evm:formal && bun run test:evm:slither`.
 
-**P3. The signed private deposit.**
+**P3. The signed private deposit.** ✓
 - OZ `EIP712`/`ECDSA`, the struct, the used bit, the errors, `fundingAuthorizationDigest`, the hooks.
 - `FundingAuthorization.t.sol`:
   - literals for the typehash, domain separator, struct hash and digest, computed with `cast`;
@@ -582,7 +583,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** as P2.
 
-**P4. The router key-holder rule.**
+**P4. The router key-holder rule.** ✓
 - `_requireSigner` (private only), `permitDigest`, `SignerIsNotTheCaller`.
 - `MockPermit2.DOMAIN_SEPARATOR` becomes real, and `RouterFixture` signs with `vm.addr(pk)`.
 - Tests:
@@ -607,7 +608,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - It must pass before the first keyed deployment in Arc 5, through an endpoint the owner provides when asked.
 - It never runs during a keyed run, and nothing deploys while it is open.
 
-**P5. Fizz properties and campaign, and the L1 TypeScript mirror.**
+**P5. Fizz properties and campaign, and the L1 TypeScript mirror.** ✓
 - The rest of section 6's fizz changes. The call sites already moved in P3 and P4; this phase adds the new properties, the canonical-switch handler and the submitter cases.
 - **Deposit liveness under a rollup switch.** `_cleanEnv()` (`test/fizz/Base.sol:242`) gains a deposit-only precondition: the portal's rollup is still canonical. Without it, `adv_depositLiveness` (`handlers/RoundTripHandler.sol:121`) records the correct `RollupNotCanonical` refusal as `depositLivenessBroken`, and GL-29 (`Properties.sol:289`) fails. Withdrawal liveness stays independent of canonicality. `_cleanEnv()` also guards a withdrawal postcondition (`Properties.sol:469`), so the new precondition is added only where deposits are checked, never to that withdrawal guard. A regression sequence pins this: switch the canonical rollup, try a deposit, then check that GL-29 holds and a withdraw still pays.
 - `B/abi.ts`, `B/funding-authorization.ts` + its pinned test, `KeyHolderRequiredError` + `deposit.test.ts`.
@@ -621,7 +622,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `bun run --cwd contracts/evm test:evm:fuzz` with a 30-minute timeout, zero failures, and signed private deposits actually exercised;
 - `bun run test:integration`.
 
-**P6. L1 docs.**
+**P6. L1 docs.** ✓
 - `docs/architecture.md:3,5,7,21-25`: deposits, the funding identity, the residuals, and a rollup upgrade stops deposits.
 - `docs/integration.md:42,50,68-78,90-93`:
   - the typed errors;
@@ -640,7 +641,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `bun run lint`.
 
-**P7. L1 re-audit.**
+**P7. L1 re-audit.** ✓
 - The solidity-auditor, 3 passes, over `contracts/evm/src`, seeded with the 2026-10-02 ledger as known findings.
 - A Medusa campaign of at least 1 hour over the new portal and router.
 - Triage everything into this arc. A finding that needs a new rule gets its proof, mutant and canary.
@@ -722,6 +723,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `docs/integration.md:18,58,99`: the linkability section names the remaining fingerprint.
 - `docs/operations.md:72,75,79-87`.
 - `docs/assurance-map.md` A5, A21, with the real test names.
+- The P7 re-audit's comment lead: `portal_messages/src/lib.nr:5` and `token_bridge/src/main.nr:135` call the depositor the address the funds came from. On the signed path the submitter pays, so both say "the depositor the deposit names". The main.nr text pin moves with the comment, and `compile.sh --check` must still pass: a comment changes no artifact.
 
 **Gate:** `bun run lint`.
 
@@ -946,7 +948,28 @@ Two items became gate confirmations (Asks A1, A2).
 
 ## Re-audit verdicts
 
-_Filled in during P7 and P13: each finding, accepted or rejected, with the reason._
+**P7, L1 (2026-10-05).** The solidity-auditor ran 3 passes of 12 agents over `contracts/evm/src` at `d50ac96`, seeded with the earlier ledger. It reported **0 findings** and 19 leads. A 1-hour Medusa campaign over the new portal and router held all 73 properties (3646 s, about 12 M calls, no shrunk sequence). None of the five earlier-scan records came back: the router naming an ERC-1271 contract (F-02), the shared contract depositor (F-01), the two canonical-rollup leads and the zero deposit. P2–P4 fixed each.
+
+| Lead (location) | Verdict | Reason and action |
+|---|---|---|
+| A 7702 delegate that wants a wrapped signature cannot deposit privately through the router (`Permit2DepositRouter.deposit`) | Accepted, residual | The owner's router rule (ledger #1) needs the raw key signature. Permit2 forwards the same bytes to the delegate, so an ERC-7739 delegate fails one check or the other. Such an account uses the portal's signed path. The `docs/integration.md` sentence is corrected, the account table in section 1 is narrowed, and the SDK flow is a Before-mainnet follow-up |
+| A stranger's gift deposit binds an unbound account (`TokenBridge.claim_private`) | Accepted | Arc 4, P14: `claim()` refuses to bind without `allowBind`, and the showcase asks first, showing the depositor |
+| A sender-side USDC fee passes the deposit pull but freezes every withdrawal (`_pullExact`, `withdraw`) | Accepted, documented; no code change | It needs a Circle upgrade. The freeze comes from the withdraw side and hits every existing balance, so refusing the fee at deposit time would unfreeze nothing. `docs/architecture.md` (USDC's controls) says direct deposits keep landing meanwhile |
+| After a rollup switch, an unbound account can never bind (`_requireCanonical`) | Accepted, documented | Exempting a binding deposit would reopen stale-rollup deposits, the hole P2 closed. Covered in "What no contract closes" and in the rollup-upgrade follow-up |
+| The u128 cap is per deposit, not on the total (`_requireDeposit`) | Rejected | USDC's supply, about 7.6e16 base units, keeps the total far below 2^128 (GL-26) |
+| The signed path can name a USDC-blocklisted key holder (`depositToAztecPrivate`) | Accepted, documented | Only the submitter, who chose to fund that account, waits: its exits pay once Circle clears the address, and nothing is lost. A portal check would tie the portal to FiatToken's blocklist API. Covered in `docs/architecture.md` (USDC's controls) |
+| A copied secret hash binds a recipient to the copier (`depositToAztecPrivate`) | Rejected for the contracts; documented | bridge-core claims only from its own receipt, and P14's consent shows the depositor before binding. `docs/integration.md` tells direct integrators to claim by leaf index and depositor, never by secret hash |
+| A signed `FundingAuthorization` cannot be cancelled | Accepted, residual (owner, 2026-10-04) | The deadline bounds it, and no tokens can be lost. The docs say to sign a short deadline |
+| Two Noir comments call the depositor the source of the funds | Accepted | Fixed in Arc 3 (P12): `portal_messages/src/lib.nr` and `token_bridge/src/main.nr`, whose text pin moves with the comment |
+| A key delegated to an open 7702 executor acts as a shared depositor | Accepted, residual | A named residual (section 1 and "What no contract closes"). No portal check can see a delegation made later |
+| A direct private deposit refunds the signer, not the payer | Accepted, documented | By design: the signer is the depositor that the binding names. `docs/integration.md`: a return pays the depositor, never the submitter, and a Safe's named owner holds the deposit outside the Safe's threshold |
+| A secret hash that no claim salt opens strands its deposit | Rejected | No contract can check a preimage. bridge-core derives every hash from a salt, and the docs say so |
+| The deposit events differ from the canonical Aztec portal's | Rejected | Intentional: the depositor is part of the message. Documented, together with the stock aztec.js helpers reverting |
+| Any caller can name a victim as a public deposit's refund address | Accepted, residual | No tokens leave the victim. Documented, including that the event's depositor is unsigned |
+| The portal keeps the rollup it read at `initialize`, and exits pay only while the old rollup proves (`initialize`, `withdraw`) | Accepted, residual | This is the Aztec trust boundary. The rollup-upgrade story is a Before-mainnet follow-up |
+| A blocklisted funding address blocks its account's exits | Accepted, documented | An inherited USDC control. The exit stays retriable (`test_blacklistedRecipient_revertsAtomicallyAndStaysRetriable`) |
+| The debit check accepts a zero payout to the portal itself | Accepted, comment fix | Unreachable: every L2 exit and return asserts `amount > 0`. The comment at `TokenPortal.sol:250` overclaimed; it now says so, and GL-18 quotes it |
+| Harness: fizz switches the canonical rollup back, which the real Registry cannot | Rejected | Switching back only adds states. Every sequence that stays switched is a prefix the campaign also runs |
 
 ## Decision ledger
 

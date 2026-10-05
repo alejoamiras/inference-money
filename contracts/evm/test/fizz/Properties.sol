@@ -300,6 +300,25 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
         eq(ghosts.foreignDomainPaid, 0, "GL-31: foreign-domain leaf paid out");
     }
 
+    /// @notice GL-32: no deposit lands while the registry's canonical rollup is not the portal's
+    function property_staleRollupRefusesDeposits() public {
+        eq(ghosts.staleDepositAccepted, 0, "GL-32: a deposit landed on a rollup that is no longer canonical");
+    }
+
+    /// @notice GL-33: a portal authorization deposits once, and only for the submitter it names
+    function property_authorizationsSingleUse() public {
+        eq(ghosts.authorizationMisused, 0, "GL-33: a spent or foreign-submitter authorization was not refused");
+    }
+
+    /// @notice GL-34: a private deposit carrying another key's signature reaches neither Permit2 nor the Inbox
+    function property_foreignSignaturesRefused() public {
+        eq(
+            ghosts.foreignSignatureAccepted,
+            0,
+            "GL-34: a foreign signature was not refused before Permit2 and the Inbox"
+        );
+    }
+
     // ――――――――――――――――――― Specific properties ――――――――――――――――――――
     // These properties must hold after specific function calls.
     // They MUST BE INTERNAL and called at the end of the relevant handlers.
@@ -646,8 +665,8 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
         neq(uint256(hashOther), uint256(hashDirect), "SP-21: another actor's deposit carries the first actor's hash");
     }
 
-    /// @notice SP-22: a zero direct deposit moves no USDC and no claimable value; a zero router deposit moves nothing
-    function property_zeroAmountSafe(bool routerLeg) internal {
+    /// @notice SP-22: a zero deposit is refused on every path and moves nothing: no USDC, no message, no claimable value
+    function property_zeroAmountSafe() internal {
         eq(stateAfter.portalBal, stateBefore.portalBal, "SP-22: zero deposit moved portal USDC");
         eq(
             stateAfter.actorTokenBalance,
@@ -659,6 +678,6 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
             stateBefore.pendingDepositAmount,
             "SP-22: zero deposit created claimable value"
         );
-        eq(stateAfter.inboxSent, stateBefore.inboxSent + (routerLeg ? 0 : 1), "SP-22: zero deposit message count wrong");
+        eq(stateAfter.inboxSent, stateBefore.inboxSent, "SP-22: zero deposit sent a message");
     }
 }

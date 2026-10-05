@@ -32,11 +32,15 @@ import {ProofCanary} from "./mocks/ProofCanary.sol";
 ///
 /// Threat model: Permit2 is the success-always mock (signature validity is Permit2's own domain, pinned by the fork
 /// suite) and the portal is the non-hashing mock, because halmos 0.3.3 cannot model sha256. What is proven is the
-/// router's own accounting and gating under those semantics. Failures are signalled with assertions only, because
-/// halmos cannot observe `revert(string)`. Each forge canary runs its proof's body against a mutant with that one
-/// rule deleted and requires the body to fail on that rule's assertion.
+/// router's own accounting and gating under those semantics. Conservation and caller naming are proven for public
+/// deposits: a private one first passes the router's key-holder check, and halmos cannot prove a signature recovery
+/// (its ecrecover is uninterpreted), so their private legs run in forge over real signatures. Failures are signalled
+/// with assertions only, because halmos cannot observe `revert(string)`. Each forge canary runs its proof's body against
+/// a mutant with that one rule deleted and requires the body to fail on that rule's assertion.
 contract FormalRouterTest is ProofCanary {
-    address internal constant USER = address(0xDA0);
+    uint256 internal constant USER_KEY = 0xDA0;
+    /// `vm.addr(USER_KEY)`, pinned so halmos sees a concrete caller.
+    address internal constant USER = 0xd369aB40A942Ad15411e38e1322d8EF2eC54fdd7;
     bytes32 internal constant RECIPIENT = bytes32(uint256(0x1234));
     bytes32 internal constant SECRET_HASH = bytes32(uint256(0x5EC7E7));
     uint256 internal constant USER_BALANCE = 1_000_000 * 1e6;
@@ -59,10 +63,8 @@ contract FormalRouterTest is ProofCanary {
         usdc.approve(address(permit2), type(uint256).max);
     }
 
-    function check_deposit_conservesUserFunds(uint128 amountRaw, uint128 donationRaw, uint128 shortRaw, bool isPrivate)
-        public
-    {
-        proveConservation(router, amountRaw, donationRaw, shortRaw, isPrivate);
+    function check_deposit_conservesUserFunds(uint128 amountRaw, uint128 donationRaw, uint128 shortRaw) public {
+        proveConservation(router, amountRaw, donationRaw, shortRaw, false);
     }
 
     function check_deposit_rejectsZeroAmount(bytes32 recipient, bytes32 secretHash, bool isPrivate) public {
@@ -81,8 +83,8 @@ contract FormalRouterTest is ProofCanary {
         provePublicNamesRecipient(router, amountRaw);
     }
 
-    function check_deposit_namesItsCallerAsDepositor(address caller, uint128 amountRaw, bool isPrivate) public {
-        proveNamesCaller(router, caller, amountRaw, isPrivate);
+    function check_deposit_namesItsCallerAsDepositor(address caller, uint128 amountRaw) public {
+        proveNamesCaller(router, caller, 0, amountRaw, false);
     }
 
     function proveConservation(
@@ -135,17 +137,41 @@ contract FormalRouterTest is ProofCanary {
     }
 
     /// Any funded caller other than the contracts in play: the L2 claim binds the deposit to whoever the portal is
-    /// told, so it must be the caller Permit2 pulled from, never the router or anyone else.
-    function proveNamesCaller(Permit2DepositRouter r, address caller, uint128 amountRaw, bool isPrivate) public {
+    /// told, so it must be the caller Permit2 pulled from, never the router or anyone else. `callerKey` signs a
+    /// private deposit and is unused for a public one.
+    function proveNamesCaller(
+        Permit2DepositRouter r,
+        address caller,
+        uint256 callerKey,
+        uint128 amountRaw,
+        bool isPrivate
+    ) public {
         vm.assume(caller != address(0) && caller != address(r) && caller != address(portal));
         vm.assume(caller != address(permit2) && caller != address(usdc));
         uint256 amount = bound(uint256(amountRaw), 1, USER_BALANCE);
         usdc.mint(caller, amount);
         vm.prank(caller);
         usdc.approve(address(permit2), amount);
+        bytes32 recipient = isPrivate ? bytes32(0) : RECIPIENT;
+        bytes memory signature = _signature(r, callerKey, amount, recipient, SECRET_HASH, isPrivate);
         vm.prank(caller);
-        r.deposit(amount, isPrivate ? bytes32(0) : RECIPIENT, SECRET_HASH, isPrivate, 0, 1, hex"");
+        r.deposit(amount, recipient, SECRET_HASH, isPrivate, 0, 1, signature);
         assertEq(portal.lastDepositor(), caller, MISNAMED);
+    }
+
+    /// `key`'s signature over `r`'s Permit2 digest for a private deposit; empty for a public one, which the router
+    /// leaves to Permit2.
+    function _signature(
+        Permit2DepositRouter r,
+        uint256 key,
+        uint256 amount,
+        bytes32 recipient,
+        bytes32 secretHash,
+        bool isPrivate
+    ) internal view returns (bytes memory) {
+        if (!isPrivate) return hex"";
+        (uint8 v, bytes32 rr, bytes32 s) = vm.sign(key, r.permitDigest(amount, recipient, secretHash, true, 0, 1));
+        return abi.encodePacked(rr, s, v);
     }
 
     /// Runs one deposit and reports what moved, whether or not it reverted.
@@ -157,8 +183,10 @@ contract FormalRouterTest is ProofCanary {
         portal.setShortBy(short);
         uint256 userBefore = usdc.balanceOf(USER);
         uint256 portalBefore = usdc.balanceOf(address(portal));
+        bytes32 recipient = isPrivate ? bytes32(0) : RECIPIENT;
+        bytes memory signature = _signature(r, USER_KEY, amount, recipient, SECRET_HASH, isPrivate);
         vm.prank(USER);
-        try r.deposit(amount, isPrivate ? bytes32(0) : RECIPIENT, SECRET_HASH, isPrivate, 0, 1, hex"") {
+        try r.deposit(amount, recipient, SECRET_HASH, isPrivate, 0, 1, signature) {
             ok = true;
         } catch {}
         userPaid = userBefore - usdc.balanceOf(USER);
@@ -176,8 +204,9 @@ contract FormalRouterTest is ProofCanary {
         bytes4 selector
     ) internal {
         uint256 userBefore = usdc.balanceOf(USER);
+        bytes memory signature = _signature(r, USER_KEY, amount, recipient, secretHash, isPrivate);
         vm.prank(USER);
-        try r.deposit(amount, recipient, secretHash, isPrivate, 0, 1, hex"") {
+        try r.deposit(amount, recipient, secretHash, isPrivate, 0, 1, signature) {
             assertTrue(false, ACCEPTED);
         } catch (bytes memory reason) {
             assertEq(bytes4(reason), selector, "rejected for the wrong reason");
@@ -237,9 +266,23 @@ contract FormalRouterTest is ProofCanary {
     /// The real router passes the body for a concrete caller, so the proof's success path is reachable rather than
     /// vacuous; the mutant fails it on the naming assertion.
     function test_canary_namesCaller_failsWhenTheRouterNamesItself() public {
-        proveNamesCaller(router, makeAddr("caller"), 1e6, true);
         (ISignatureTransfer p, ITokenPortal t, IERC20 token) = _mutantBase();
         RouterNamesItself mutant = new RouterNamesItself(p, t, token);
-        _assertProofFails(abi.encodeCall(this.proveNamesCaller, (mutant, USER, 1e6, false)), MISNAMED);
+        _assertProofFails(abi.encodeCall(this.proveNamesCaller, (mutant, USER, USER_KEY, 1e6, false)), MISNAMED);
+    }
+
+    // The private legs halmos does not prove, over real signatures.
+
+    function test_privateLeg_conserves() public {
+        proveConservation(router, 100e6, 5e6, 0, true);
+    }
+
+    function test_privateLeg_shortPullRevertsMovingNothing() public {
+        proveConservation(router, 100e6, 5e6, 1, true);
+    }
+
+    function test_privateLeg_namesItsSigningCaller() public {
+        (address caller, uint256 callerKey) = makeAddrAndKey("caller");
+        proveNamesCaller(router, caller, callerKey, 1e6, true);
     }
 }

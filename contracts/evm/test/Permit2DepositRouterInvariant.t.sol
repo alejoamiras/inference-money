@@ -52,7 +52,9 @@ contract RouterHandler is StdUtils {
     CapturingInbox public inbox;
     TokenPortal public portal;
     Permit2DepositRouter public router;
-    address[3] private actors = [address(0xA1), address(0xA2), address(0xA3)];
+    /// Key-held, so their private deposits pass the router's key-holder check.
+    address[3] private actors = [vm.addr(0xA1), vm.addr(0xA2), vm.addr(0xA3)];
+    mapping(address actor => uint256) private keys;
 
     uint256 public ghostDeposited;
     uint256 public ghostDonated;
@@ -71,6 +73,7 @@ contract RouterHandler is StdUtils {
             address(router)
         );
         for (uint256 i = 0; i < actors.length; i++) {
+            keys[actors[i]] = 0xA1 + i;
             vm.prank(actors[i]);
             usdc.approve(address(permit2), type(uint256).max);
         }
@@ -82,8 +85,10 @@ contract RouterHandler is StdUtils {
         if (!isPrivate) recipient = bytes32(bound(uint256(recipient), 1, Constants.MAX_FIELD_VALUE));
         address actor = actors[actorSeed % actors.length];
         usdc.mint(actor, amount);
+        if (isPrivate) recipient = bytes32(0);
+        bytes memory signature = _signature(actor, amount, recipient, isPrivate);
         vm.prank(actor);
-        router.deposit(amount, isPrivate ? bytes32(0) : recipient, bytes32(0), isPrivate, 0, 1, hex"");
+        router.deposit(amount, recipient, bytes32(0), isPrivate, 0, 1, signature);
         ghostDeposited += amount;
         ghostDepositCount++;
     }
@@ -92,8 +97,9 @@ contract RouterHandler is StdUtils {
     function depositRaw(uint256 actorSeed, uint256 amount, bytes32 recipient, bool isPrivate) external {
         address actor = actors[actorSeed % actors.length];
         usdc.mint(actor, bound(amount, 0, type(uint128).max));
+        bytes memory signature = _signature(actor, amount, recipient, isPrivate);
         vm.prank(actor);
-        try router.deposit(amount, recipient, bytes32(0), isPrivate, 0, 1, hex"") {
+        try router.deposit(amount, recipient, bytes32(0), isPrivate, 0, 1, signature) {
             ghostDeposited += amount;
             ghostDepositCount++;
         } catch {}
@@ -113,5 +119,16 @@ contract RouterHandler is StdUtils {
         vm.prank(actor);
         try router.deposit(amount, bytes32(uint256(1)), bytes32(0), false, 0, 1, hex"") {} catch {}
         permit2.setReject(false);
+    }
+
+    /// The actor's own signature over the router's digest; computed before the prank its digest read would consume.
+    function _signature(address actor, uint256 amount, bytes32 recipient, bool isPrivate)
+        private
+        view
+        returns (bytes memory)
+    {
+        bytes32 digest = router.permitDigest(amount, recipient, bytes32(0), isPrivate, 0, 1);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(keys[actor], digest);
+        return abi.encodePacked(r, s, v);
     }
 }

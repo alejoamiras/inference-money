@@ -5,7 +5,9 @@ import "../Base.sol";
 import {Properties} from "../Properties.sol";
 
 /// @notice Handles the interaction with Permit2DepositRouter. Permit2 is the project's recording mock: it never
-/// checks the signature (the Sepolia fork suite pins the real one), so `nonce`, `deadline` and `signature` are inert.
+/// checks the signature (the Sepolia fork suite pins the real one), so `nonce` and `deadline` are inert to it. The
+/// router itself requires a private deposit's signature to recover to its caller, so every leg signs with the actor's
+/// key.
 abstract contract Permit2DepositRouterHandler is Properties {
     // ――――――――――――――――――――――――― Clamped ――――――――――――――――――――――――――
 
@@ -21,7 +23,9 @@ abstract contract Permit2DepositRouterHandler is Properties {
         _ensureFunds(actor, amount);
         bytes32 recipient = isPrivate ? bytes32(0) : toL2Account(accountSeed);
         bytes32 secret = _toField(secretHash);
-        permit2DepositRouter_deposit(amount, recipient, secret, isPrivate, nonce, block.timestamp + 1, "");
+        uint256 deadline = block.timestamp + 1;
+        bytes memory signature = _permitSignature(actor, amount, recipient, secret, isPrivate, nonce, deadline);
+        permit2DepositRouter_deposit(amount, recipient, secret, isPrivate, nonce, deadline, signature);
     }
 
     /// Boundary stress: the largest fundable amount, the L2 side's u128 ceiling while the mock supply allows.
@@ -29,7 +33,9 @@ abstract contract Permit2DepositRouterHandler is Properties {
         uint256 amount = _largestFundable(actor);
         if (amount == 0) return;
         bytes32 recipient = isPrivate ? bytes32(0) : toL2Account(accountSeed);
-        permit2DepositRouter_deposit(amount, recipient, bytes32(0), isPrivate, 0, block.timestamp + 1, "");
+        uint256 deadline = block.timestamp + 1;
+        bytes memory signature = _permitSignature(actor, amount, recipient, bytes32(0), isPrivate, 0, deadline);
+        permit2DepositRouter_deposit(amount, recipient, bytes32(0), isPrivate, 0, deadline, signature);
     }
 
     /// Malformed intents (zero, over u128, a private deposit naming a recipient, a public one naming none) must never
@@ -70,7 +76,7 @@ abstract contract Permit2DepositRouterHandler is Properties {
         }
         if (usdc.balanceOf(address(portal)) != portalBefore || inbox.sent() != sentBefore) ghosts.boundaryAccepted++;
         _noopEnd(consumed);
-        if (kind == 0) property_zeroAmountSafe(true);
+        if (kind == 0) property_zeroAmountSafe();
     }
 
     function permit2DepositRouter_secondary(uint256 amount, bool isPrivate) public {
@@ -103,6 +109,7 @@ abstract contract Permit2DepositRouterHandler is Properties {
 
     /// Model update after a successful router deposit by signer `depositor`.
     function _afterRouterDeposit(address depositor, bytes32 aztecRecipient, uint256 amount, bool isPrivate) internal {
+        if (!_canonical()) ghosts.staleDepositAccepted++;
         _recordDeposit(depositor, aztecRecipient, amount, isPrivate);
         ghosts.routerDeposited += amount;
         _flagInexactDeposit(amount);
@@ -112,12 +119,17 @@ abstract contract Permit2DepositRouterHandler is Properties {
     function _permit2DepositRouter_rejectedPermit(uint256 amount, bool isPrivate) internal {
         amount = clampBetween(amount, 1, MAX_REALISTIC_AMOUNT);
         _ensureFunds(actor, amount);
+        bytes32 recipient = isPrivate ? bytes32(0) : L2_ACCOUNTS[0];
+        bytes memory signature = _permitSignature(actor, amount, recipient, bytes32(0), isPrivate, 0, 1);
         permit2.setReject(true);
         uint256 consumed = _noopBegin();
         vm.prank(actor);
-        try router.deposit(amount, isPrivate ? bytes32(0) : L2_ACCOUNTS[0], bytes32(0), isPrivate, 0, 1, "") {
+        try router.deposit(amount, recipient, bytes32(0), isPrivate, 0, 1, signature) {
             ghosts.permit2RejectBypassed++;
-        } catch {}
+        } catch (bytes memory reason) {
+            // Any other refusal came before the pull, so the probe never reached Permit2.
+            if (bytes4(reason) != MockPermit2.MockRejected.selector) ghosts.permit2RejectBypassed++;
+        }
         permit2.setReject(false);
         _noopEnd(consumed);
     }

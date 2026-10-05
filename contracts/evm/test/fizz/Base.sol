@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.27 <0.9.0;
 
-import {Actor} from "./Actor.sol";
 import {Clamp} from "./utils/Clamp.sol";
 import {DecimalPrinter} from "./utils/DecimalPrinter.sol";
 import {Deployer} from "./utils/Deployer.sol";
@@ -33,7 +32,6 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     string[] internal ACTOR_LABELS = ["Alice", "Bob", "Charlie"];
     uint256 internal constant BLOCK_INTERVAL = 12 seconds;
-    uint256 internal constant INITIAL_ETH_BALANCE = 1_000 ether;
     /// 1B USDC (6 decimals) per actor: no realistic clamp ever runs a funded actor dry.
     uint256 internal constant INITIAL_TOKEN_BALANCE = 1e15;
     /// Upper clamp for "realistic" deposits and exits: 1M USDC.
@@ -75,7 +73,10 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         uint256 reinitialized; // a second initialize succeeded
         uint256 misnamedMessages; // a deposit's Inbox content hash did not match the independent model
         uint256 permit2RejectBypassed; // a router deposit succeeded although Permit2 refused the pull
-        uint256 boundaryAccepted; // an out-of-range deposit (amount > u128, `_to` > field) succeeded
+        uint256 boundaryAccepted; // an out-of-range deposit (zero, > u128, `_to` > field, unusable refund) passed or misfired
+        uint256 staleDepositAccepted; // a deposit succeeded while the registry's canonical rollup was not the portal's
+        uint256 authorizationMisused; // a spent, or another submitter's, portal authorization deposited (or misfired)
+        uint256 foreignSignatureAccepted; // a private deposit carrying another key's signature passed (or misfired)
         uint256 selfPayoutAccepted; // a proven exit to the portal itself paid out
         uint256 misboundRouter; // a fresh portal/router accepted a stranger's init, a foreign router or a code-less dependency
         // Flow splits and liveness counters
@@ -129,6 +130,22 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     address[] internal actors;
     address internal actor;
+    /// Actors are key-held EOAs, so they can sign the portal's private-deposit authorizations.
+    mapping(address actor => uint256) internal actorKey;
+    /// Spent into each authorization's deadline, so two identical deposits never share a digest.
+    uint256 internal authorizationNonce;
+
+    /// The last portal authorization that deposited, kept for the replay and foreign-submitter probes.
+    struct Authorization {
+        address depositor;
+        address submitter;
+        uint256 amount;
+        bytes32 secretHash;
+        uint256 deadline;
+        bytes signature;
+    }
+
+    Authorization internal lastAuthorization;
     address internal admin;
 
     modifier asActor() virtual {
@@ -191,11 +208,11 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         vm.label(admin, "Admin");
 
         for (uint256 i; i < ACTOR_LABELS.length; i++) {
-            address _actor = address(new Actor{value: INITIAL_ETH_BALANCE}());
+            uint256 key = uint256(keccak256(bytes(ACTOR_LABELS[i])));
+            address _actor = vm.addr(key);
+            actorKey[_actor] = key;
             actors.push(_actor);
-            if (ACTOR_LABELS.length > i) {
-                vm.label(_actor, ACTOR_LABELS[i]);
-            }
+            vm.label(_actor, ACTOR_LABELS[i]);
             // Real holders approve both spenders once: the portal for direct deposits, Permit2 for signed ones.
             usdc.mint(_actor, INITIAL_TOKEN_BALANCE);
             vm.startPrank(_actor);
@@ -230,6 +247,33 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         if (other == not) other = actors[(seed + 1) % actors.length];
     }
 
+    /// `depositor`'s fresh authorization for `submitter`'s private deposit; the deadline it signed is returned with it.
+    function _authorize(address depositor, address submitter, uint256 amount, bytes32 secretHash)
+        internal
+        returns (uint256 deadline, bytes memory signature)
+    {
+        // A year out, so a probe replaying it later meets the replay rule, not the expiry one.
+        deadline = block.timestamp + 365 days + authorizationNonce++;
+        bytes32 digest = portal.fundingAuthorizationDigest(depositor, submitter, amount, secretHash, deadline);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(actorKey[depositor], digest);
+        signature = abi.encodePacked(r, s, v);
+    }
+
+    /// `signer`'s signature over the router's Permit2 digest. Computed before any prank its digest read would consume.
+    function _permitSignature(
+        address signer,
+        uint256 amount,
+        bytes32 recipient,
+        bytes32 secretHash,
+        bool isPrivate,
+        uint256 nonce,
+        uint256 deadline
+    ) internal returns (bytes memory) {
+        bytes32 digest = router.permitDigest(amount, recipient, secretHash, isPrivate, nonce, deadline);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(actorKey[signer], digest);
+        return abi.encodePacked(r, s, v);
+    }
+
     /// A boundary probe's revert is a refusal only with its rule's own selector; any other revert could hide the rule.
     function _requireRefusal(bytes memory reason, bytes4 selector) internal {
         if (bytes4(reason) != selector) ghosts.boundaryAccepted++;
@@ -262,6 +306,16 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
     function _cleanEnv() internal view returns (bool) {
         return usdc.mode() == ModalUsdc.Mode.Normal && usdc.hookPayload().length == 0 && !usdc.blacklisted(actor)
             && !usdc.blacklisted(address(portal));
+    }
+
+    /// `_cleanEnv` for a deposit: also the portal's rollup still canonical, since deposits stop after an upgrade while
+    /// withdrawals do not (so withdrawal guards keep `_cleanEnv` alone).
+    function _depositEnvClean() internal view returns (bool) {
+        return _cleanEnv() && _canonical();
+    }
+
+    function _canonical() internal view returns (bool) {
+        return registry.getCanonicalRollup() == address(portal.rollup());
     }
 
     /// Whether the real Outbox has consumed the leaf of a proven exit; false if the view reverts.

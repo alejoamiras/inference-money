@@ -117,9 +117,10 @@ abstract contract RoundTripHandler is AztecL2Handler, Permit2DepositRouterHandle
 
     // ――――――――――――――――――――――――― Probes ――――――――――――――――――――――――――
 
-    /// A funded, unblocked caller's in-range deposit in a Normal environment must go through, whatever the history.
+    /// A funded, unblocked caller's in-range deposit in a Normal environment with the portal's rollup still canonical
+    /// must go through, whatever the history.
     function adv_depositLiveness(uint8 which, uint256 amt, bool dust) public {
-        if (!_cleanEnv()) return;
+        if (!_depositEnvClean()) return;
         which = uint8(which % 4);
         uint256 amount = dust ? clampBetween(amt, 1, 99) : clampBetween(amt, 1, MAX_REALISTIC_AMOUNT);
         if (!_ensureFunds(actor, amount)) return;
@@ -197,17 +198,25 @@ abstract contract RoundTripHandler is AztecL2Handler, Permit2DepositRouterHandle
         returns (bool ok)
     {
         bytes32 recipient = isPrivate ? bytes32(0) : to;
+        uint256 deadline;
+        bytes memory signature;
+        if (viaRouter) {
+            deadline = block.timestamp + 1;
+            signature = _permitSignature(who, amount, recipient, secret, isPrivate, 0, deadline);
+        } else if (isPrivate) {
+            (deadline, signature) = _authorize(who, who, amount, secret);
+        }
         vm.prank(who);
         if (viaRouter) {
-            try router.deposit(amount, recipient, secret, isPrivate, 0, block.timestamp + 1, "") {
+            try router.deposit(amount, recipient, secret, isPrivate, 0, deadline, signature) {
                 ok = true;
             } catch {}
         } else if (isPrivate) {
-            try portal.depositToAztecPrivate(amount, secret) {
+            try portal.depositToAztecPrivate(who, amount, secret, deadline, signature) {
                 ok = true;
             } catch {}
         } else {
-            try portal.depositToAztecPublic(to, amount, secret) {
+            try portal.depositToAztecPublic(who, to, amount, secret) {
                 ok = true;
             } catch {}
         }

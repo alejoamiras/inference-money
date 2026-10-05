@@ -3,6 +3,13 @@
  * entry to the compiled contracts (router, portal) and to @aztec-foundation/l1-artifacts (Outbox, Registry, Rollup).
  */
 
+/** OpenZeppelin's ECDSA recovery errors: a compact, high-s or unrecoverable signature, refused before Permit2. */
+const ECDSA_ERRORS = [
+	{ type: "error", name: "ECDSAInvalidSignature", inputs: [] },
+	{ type: "error", name: "ECDSAInvalidSignatureLength", inputs: [{ name: "length", type: "uint256" }] },
+	{ type: "error", name: "ECDSAInvalidSignatureS", inputs: [{ name: "s", type: "bytes32" }] },
+] as const
+
 const PERMIT2_DEPOSIT_ROUTER_ERRORS = [
 	{ type: "error", name: "AmountExceedsL2Max", inputs: [] },
 	{ type: "error", name: "InexactPull", inputs: [] },
@@ -12,8 +19,23 @@ const PERMIT2_DEPOSIT_ROUTER_ERRORS = [
 	{ type: "error", name: "ReentrancyGuardReentrantCall", inputs: [] },
 	{ type: "error", name: "ResidualBalance", inputs: [] },
 	{ type: "error", name: "SafeERC20FailedOperation", inputs: [{ name: "token", type: "address" }] },
+	{ type: "error", name: "SignerIsNotTheCaller", inputs: [] },
 	{ type: "error", name: "ZeroAmount", inputs: [] },
+	...ECDSA_ERRORS,
 ] as const
+
+/**
+ * The two Permit2 signature errors a deposit can surface; they decode only when Permit2 raises them itself (a 7702
+ * delegate returning the wrong magic value). A delegate with no `isValidSignature`, or one that reverts, fails with
+ * its own revert, often empty. abi.test.ts pins both selectors.
+ */
+export const PERMIT2_SIGNATURE_ERRORS = [
+	{ type: "error", name: "InvalidContractSignature", inputs: [] },
+	{ type: "error", name: "InvalidSigner", inputs: [] },
+] as const
+
+/** The portal's refusals a router deposit bubbles that the router never raises itself; abi.test.ts pins them to the portal. */
+export const PORTAL_BUBBLED_ERRORS = [{ type: "error", name: "RollupNotCanonical", inputs: [] }] as const
 
 export const PERMIT2_DEPOSIT_ROUTER_ABI = [
 	{
@@ -52,6 +74,8 @@ export const PERMIT2_DEPOSIT_ROUTER_ABI = [
 	{ type: "function", name: "PORTAL", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
 	{ type: "function", name: "TOKEN", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
 	...PERMIT2_DEPOSIT_ROUTER_ERRORS,
+	...PERMIT2_SIGNATURE_ERRORS,
+	...PORTAL_BUBBLED_ERRORS,
 ] as const
 
 const view = <const N extends string, const T extends string>(name: N, type: T) =>
@@ -89,6 +113,121 @@ const OUTBOX_CONSUME_ERRORS = [
 		],
 	},
 	{ type: "error", name: "MerkleLib__InvalidIndexForPathLength", inputs: [] },
+] as const
+
+const DEPOSIT_OUTPUTS = [
+	{ name: "", type: "bytes32" },
+	{ name: "", type: "uint256" },
+] as const
+
+/** The portal's deposits, for integrators calling it directly; bridge-core's own flow goes through the router. */
+const PORTAL_DEPOSIT_ABI = [
+	{
+		type: "function",
+		name: "depositToAztecPublic",
+		stateMutability: "nonpayable",
+		inputs: [
+			{ name: "_depositor", type: "address" },
+			{ name: "_to", type: "bytes32" },
+			{ name: "_amount", type: "uint256" },
+			{ name: "_secretHash", type: "bytes32" },
+		],
+		outputs: DEPOSIT_OUTPUTS,
+	},
+	{
+		type: "function",
+		name: "depositToAztecPrivate",
+		stateMutability: "nonpayable",
+		inputs: [
+			{ name: "_depositor", type: "address" },
+			{ name: "_amount", type: "uint256" },
+			{ name: "_secretHashForL2MessageConsumption", type: "bytes32" },
+			{ name: "_deadline", type: "uint256" },
+			{ name: "_signature", type: "bytes" },
+		],
+		outputs: DEPOSIT_OUTPUTS,
+	},
+	{
+		type: "function",
+		name: "depositToAztecPublicFor",
+		stateMutability: "nonpayable",
+		inputs: [
+			{ name: "_depositor", type: "address" },
+			{ name: "_to", type: "bytes32" },
+			{ name: "_amount", type: "uint256" },
+			{ name: "_secretHash", type: "bytes32" },
+		],
+		outputs: DEPOSIT_OUTPUTS,
+	},
+	{
+		type: "function",
+		name: "depositToAztecPrivateFor",
+		stateMutability: "nonpayable",
+		inputs: [
+			{ name: "_depositor", type: "address" },
+			{ name: "_amount", type: "uint256" },
+			{ name: "_secretHashForL2MessageConsumption", type: "bytes32" },
+		],
+		outputs: DEPOSIT_OUTPUTS,
+	},
+	{
+		type: "function",
+		name: "fundingAuthorizationDigest",
+		stateMutability: "view",
+		inputs: [
+			{ name: "_depositor", type: "address" },
+			{ name: "_submitter", type: "address" },
+			{ name: "_amount", type: "uint256" },
+			{ name: "_secretHash", type: "bytes32" },
+			{ name: "_deadline", type: "uint256" },
+		],
+		outputs: [{ name: "", type: "bytes32" }],
+	},
+	{
+		type: "function",
+		name: "authorizationUsed",
+		stateMutability: "view",
+		inputs: [{ name: "digest", type: "bytes32" }],
+		outputs: [{ name: "", type: "bool" }],
+	},
+	{
+		type: "function",
+		name: "eip712Domain",
+		stateMutability: "view",
+		inputs: [],
+		outputs: [
+			{ name: "fields", type: "bytes1" },
+			{ name: "name", type: "string" },
+			{ name: "version", type: "string" },
+			{ name: "chainId", type: "uint256" },
+			{ name: "verifyingContract", type: "address" },
+			{ name: "salt", type: "bytes32" },
+			{ name: "extensions", type: "uint256[]" },
+		],
+	},
+	{
+		type: "event",
+		name: "DepositToAztecPublic",
+		inputs: [
+			{ name: "depositor", type: "address", indexed: true },
+			{ name: "to", type: "bytes32", indexed: false },
+			{ name: "amount", type: "uint256", indexed: false },
+			{ name: "secretHash", type: "bytes32", indexed: false },
+			{ name: "key", type: "bytes32", indexed: false },
+			{ name: "index", type: "uint256", indexed: false },
+		],
+	},
+	{
+		type: "event",
+		name: "DepositToAztecPrivate",
+		inputs: [
+			{ name: "depositor", type: "address", indexed: true },
+			{ name: "amount", type: "uint256", indexed: false },
+			{ name: "secretHashForL2MessageConsumption", type: "bytes32", indexed: false },
+			{ name: "key", type: "bytes32", indexed: false },
+			{ name: "index", type: "uint256", indexed: false },
+		],
+	},
 ] as const
 
 export const TOKEN_PORTAL_ABI = [
@@ -137,10 +276,19 @@ export const TOKEN_PORTAL_ABI = [
 			{ name: "callerOnL1", type: "address", indexed: false },
 		],
 	},
+	...PORTAL_DEPOSIT_ABI,
 	{ type: "error", name: "AmountExceedsL2Max", inputs: [] },
 	{ type: "error", name: "RecipientExceedsFieldMax", inputs: [] },
 	{ type: "error", name: "InexactTransfer", inputs: [] },
 	{ type: "error", name: "ReentrancyGuardReentrantCall", inputs: [] },
+	{ type: "error", name: "ZeroAmount", inputs: [] },
+	...PORTAL_BUBBLED_ERRORS,
+	{ type: "error", name: "InvalidDepositor", inputs: [] },
+	{ type: "error", name: "NotRouter", inputs: [] },
+	{ type: "error", name: "AuthorizationExpired", inputs: [{ name: "deadline", type: "uint256" }] },
+	{ type: "error", name: "AuthorizationUsed", inputs: [] },
+	{ type: "error", name: "SignerIsNotTheDepositor", inputs: [] },
+	...ECDSA_ERRORS,
 	...OUTBOX_CONSUME_ERRORS,
 ] as const
 

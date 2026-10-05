@@ -107,14 +107,15 @@ abstract contract AztecL2Handler is Properties {
     // ―――――――――――――――――――――――― Environment ――――――――――――――――――――――――
 
     function env_secondary(uint8 selector, uint256 arg0, uint256 arg1, address arg2) public {
-        selector = uint8(selector % 6);
+        selector = uint8(selector % 7);
         uint256 consumed = _noopBegin();
         if (selector == 0) _env_donatePortal(arg0);
         else if (selector == 1) _env_donateRouter(arg0);
         else if (selector == 2) _env_setTokenMode(arg0);
         else if (selector == 3) _env_setBlacklisted(arg2, arg0);
         else if (selector == 4) _env_armReentry(arg0, arg1);
-        else _env_selfPayout(arg0, arg1);
+        else if (selector == 5) _env_selfPayout(arg0, arg1);
+        else _env_switchCanonical(arg0);
         snapshotAfter();
         if (selector == 5) property_refusedCallIsNoop(consumed);
         _universalChecks(false, false);
@@ -151,7 +152,7 @@ abstract contract AztecL2Handler is Properties {
     function _env_armReentry(uint256 targetSeed, uint256 payloadSeed) internal {
         if (targetSeed % 2 == 0) {
             bytes memory payload = payloadSeed % 2 == 0
-                ? abi.encodeCall(TokenPortal.depositToAztecPrivate, (1, bytes32(0)))
+                ? abi.encodeCall(TokenPortal.depositToAztecPrivate, (actors[0], 1, bytes32(0), block.timestamp, ""))
                 : abi.encodeCall(TokenPortal.withdraw, (actors[0], 1, false, Epoch.wrap(0), 1, 0, new bytes32[](0)));
             usdc.arm(address(portal), address(portal), address(portal), payload);
         } else {
@@ -162,6 +163,12 @@ abstract contract AztecL2Handler is Properties {
                 abi.encodeCall(Permit2DepositRouter.deposit, (1, bytes32(0), bytes32(0), true, 0, 1, ""))
             );
         }
+    }
+
+    /// A governance upgrade names another rollup canonical (or names the portal's again): deposits must stop while it
+    /// is not the portal's, and proven exits must keep paying.
+    function _env_switchCanonical(uint256 seed) internal {
+        registry.setCanonicalRollup(seed % 2 == 0 ? address(0xC0FFEE) : address(rollup));
     }
 
     /// An L2 bug that let an exit name the portal itself as recipient: proven, it must still never pay out, because

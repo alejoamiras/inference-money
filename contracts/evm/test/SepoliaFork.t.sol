@@ -13,10 +13,13 @@ import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
 import {TokenPortal} from "../src/TokenPortal.sol";
 import {ISignatureTransfer} from "../src/interfaces/ISignatureTransfer.sol";
 import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
+import {RouterWithoutSignerCheck} from "./mocks/Mutants.sol";
 import {Permit2Digest} from "./mocks/Permit2Digest.sol";
+import {Honest1271Delegate, Inert, PermissiveWallet, RevertingDelegate, WrongMagicDelegate} from "./mocks/Wallets.sol";
 
 /// Permit2's own errors (Uniswap/permit2 SignatureTransfer + SignatureVerification).
 interface IPermit2Errors {
+    error InvalidContractSignature();
     error InvalidNonce();
     error InvalidSigner();
     error SignatureExpired(uint256 signatureDeadline);
@@ -144,6 +147,93 @@ contract SepoliaForkTest is Test {
         vm.prank(makeAddr("thief"));
         vm.expectRevert(IPermit2Errors.InvalidSigner.selector);
         router.deposit(AMOUNT, RECIPIENT, SECRET_HASH, false, 0, deadline, sig);
+    }
+
+    /// The router's own digest is the real Permit2's, so the key it requires is the one Permit2 checks.
+    function test_permitDigestIsTheRealPermit2s() public view {
+        uint256 deadline = block.timestamp + 30 minutes;
+        bytes32 model = Permit2Digest.digest(
+            Permit2Digest.Params({
+                chainId: block.chainid,
+                permit2: PERMIT2,
+                token: USDC,
+                amount: AMOUNT,
+                spender: address(router),
+                nonce: 7,
+                deadline: deadline,
+                witness: router.hashWitness(bytes32(0), SECRET_HASH, true),
+                witnessTypeString: router.DEPOSIT_WITNESS_TYPE_STRING()
+            })
+        );
+        assertEq(router.permitDigest(AMOUNT, bytes32(0), SECRET_HASH, true, 7, deadline), model);
+    }
+
+    // ── Real EIP-7702 delegation: Permit2 then calls the account's `isValidSignature` ─────────
+
+    /// With an honest ERC-1271 delegate, the key holder's private deposit passes both checks.
+    function test_7702_honestDelegatePasses() public {
+        vm.signAndAttachDelegation(address(new Honest1271Delegate()), userPk);
+        bytes memory sig = _sign(bytes32(0), true, 2, block.timestamp + 30 minutes);
+        vm.prank(user);
+        router.deposit(AMOUNT, bytes32(0), SECRET_HASH, true, 2, block.timestamp + 30 minutes, sig);
+        assertEq(IERC20(USDC).balanceOf(address(portal)), AMOUNT, "portal reserve");
+    }
+
+    /// A delegate without a working ERC-1271 is refused by Permit2 itself, each with its actual revert, and nothing
+    /// moves: such a wallet uses the portal's signed path instead.
+    function test_7702_brokenDelegatesAreRefusedByPermit2() public {
+        uint256 deadline = block.timestamp + 30 minutes;
+        bytes memory sig = _sign(bytes32(0), true, 3, deadline);
+
+        vm.signAndAttachDelegation(address(new WrongMagicDelegate()), userPk);
+        _expectPrivateRefused(
+            sig, 3, deadline, abi.encodeWithSelector(IPermit2Errors.InvalidContractSignature.selector)
+        );
+        vm.signAndAttachDelegation(address(new RevertingDelegate()), userPk);
+        _expectPrivateRefused(sig, 3, deadline, abi.encodeWithSelector(RevertingDelegate.NoSignatures.selector));
+        vm.signAndAttachDelegation(address(new Inert()), userPk);
+        _expectPrivateRefused(sig, 3, deadline, "");
+    }
+
+    /// Against the real Permit2: an account delegated to a permissive ERC-1271 submits someone else's signature.
+    /// The router refuses it; a router without its key-holder check lets the real Permit2 admit it.
+    function test_7702_permissiveDelegateWithAForeignSignature() public {
+        uint256 deadline = block.timestamp + 30 minutes;
+        vm.signAndAttachDelegation(address(new PermissiveWallet()), userPk);
+        bytes memory foreign = _signWith(0xB0B, router, bytes32(0), true, 4, deadline);
+        _expectPrivateRefused(
+            foreign, 4, deadline, abi.encodeWithSelector(Permit2DepositRouter.SignerIsNotTheCaller.selector)
+        );
+
+        TokenPortal portal2 = new TokenPortal();
+        RouterWithoutSignerCheck mutant =
+            new RouterWithoutSignerCheck(ISignatureTransfer(PERMIT2), ITokenPortal(address(portal2)), IERC20(USDC));
+        portal2.initialize(REGISTRY, USDC, L2_BRIDGE, address(mutant));
+        bytes memory foreignForMutant = _signWith(0xB0B, mutant, bytes32(0), true, 4, deadline);
+        vm.prank(user);
+        mutant.deposit(AMOUNT, bytes32(0), SECRET_HASH, true, 4, deadline, foreignForMutant);
+        assertEq(IERC20(USDC).balanceOf(address(portal2)), AMOUNT, "the real Permit2 admitted a foreign signature");
+    }
+
+    function _expectPrivateRefused(bytes memory sig, uint256 nonce, uint256 deadline, bytes memory reason) internal {
+        uint256 balance = IERC20(USDC).balanceOf(user);
+        vm.prank(user);
+        vm.expectRevert(reason);
+        router.deposit(AMOUNT, bytes32(0), SECRET_HASH, true, nonce, deadline, sig);
+        assertEq(IERC20(USDC).balanceOf(user), balance, "a refused deposit moved funds");
+    }
+
+    function _signWith(
+        uint256 key,
+        Permit2DepositRouter r,
+        bytes32 recipient,
+        bool isPrivate,
+        uint256 nonce,
+        uint256 deadline
+    ) internal view returns (bytes memory) {
+        (uint8 v, bytes32 rr, bytes32 s) =
+            vm.sign(key, r.permitDigest(AMOUNT, recipient, SECRET_HASH, isPrivate, nonce, deadline));
+        return abi.encodePacked(rr, s, v);
     }
 
     function _sign(bytes32 recipient, bool isPrivate, uint256 nonce, uint256 deadline)
