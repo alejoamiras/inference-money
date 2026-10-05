@@ -41,6 +41,7 @@ import { deployPlayers, enlist, type Log, logWait, type Player, withHeartbeat } 
 import { anvilFaucet, fundDemoL1, signerFaucet } from "./demo-l1"
 import { topUpSponsor } from "./fee-juice"
 import { l1Signer } from "./l1"
+import { TESTNET } from "./networks"
 import { type StateDir, withStateDir } from "./run-state"
 import { l1PrivateKeyFrom } from "./secrets"
 import { adminAccount, type ManifestRef, type Session, withSession } from "./session"
@@ -103,7 +104,6 @@ async function seedTicket(plan: SetupPlan, seed: Seed, store: PlanStore, ops: Se
 	return t
 }
 
-/** Deposits, claims and keeps until final each of `seeds`, resuming from what `plan` holds. */
 async function seedAll(plan: SetupPlan, seeds: readonly Seed[], store: PlanStore, ops: SetupOps): Promise<void> {
 	const tickets: ClaimTicket[] = []
 	for (const seed of seeds) tickets.push(await seedTicket(plan, seed, store, ops))
@@ -122,7 +122,10 @@ export async function runSetup(store: PlanStore, ops: SetupOps, publish: (tag: s
 	store.write(plan)
 	await ops.prepare(plan.tag)
 	const binds: BindSeed[] = []
-	for (const seed of BIND_SEEDS) if (plan.tickets[seed] || plan.drafts[seed] || !(await ops.bound(seed))) binds.push(seed)
+	for (const seed of BIND_SEEDS) {
+		const bound = await ops.bound(seed)
+		if (plan.tickets[seed] || plan.drafts[seed] || !bound) binds.push(seed)
+	}
 	await seedAll(plan, binds, store, ops)
 	for (const seed of BIND_SEEDS) {
 		if (!(await ops.bound(seed))) throw new Error(`${BIND_MERCHANT[seed]}'s binding claim left it unbound`)
@@ -281,6 +284,8 @@ export function demoFund(ref: ManifestRef, log: Log): Promise<void> {
 			await fundDemoL1(rpc, s.m, anvilFaucet(rpc, s.m), log)
 			return
 		}
+		// The cast's keys are public: ETH sent to them on any chain with value is anyone's.
+		if (s.m.l1.chainId !== TESTNET.l1ChainId) throw new Error(`demo fund runs on Sepolia only, not chain ${s.m.l1.chainId}`)
 		const key = l1PrivateKeyFrom()
 		await fundDemoL1(rpc, s.m, signerFaucet(l1Signer(rpc, s.m.l1.chainId, privateKeyToAccount(key)), s.m), log)
 		const { galactica } = await enlist(s, ["galactica"] as const)

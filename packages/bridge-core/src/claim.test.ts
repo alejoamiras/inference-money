@@ -153,9 +153,9 @@ describe("claim", () => {
 
 		const none = fakeWallet()
 		const noSponsor = { ...M, l2: { ...M.l2, sponsoredFpc: undefined } }
-		await expect(claim(await ticket("private"), NO_NULLIFIER, none.wallet, noSponsor, { from: recipient })).rejects.toBeInstanceOf(
-			SponsorUnavailableError,
-		)
+		await expect(
+			claim(await ticket("private"), NO_NULLIFIER, none.wallet, noSponsor, { from: recipient, allowBind: true }),
+		).rejects.toBeInstanceOf(SponsorUnavailableError)
 		expect(none.sent).toHaveLength(0)
 
 		const other = fakeWallet({ send: fail("boom") })

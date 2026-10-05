@@ -261,10 +261,10 @@ export async function claim(
 	m: BridgeManifest,
 	opts: { from: AztecAddress; fee?: FeeChoice; wait?: L2Wait } & ClaimConsent,
 ): Promise<ClaimResult> {
+	const call = await claimCall(t, wallet, m, opts.allowBind)
 	const fee = feeFor(t.draft.intent.kind, m, opts.fee)
 	const sponsored = fee !== undefined
 	const wait = opts.wait ?? L2_DONE
-	const call = await claimCall(t, wallet, m, opts.allowBind)
 	try {
 		const { txHash } = await call.send({ from: opts.from, fee, wait: NO_WAIT })
 		await waitForTx(node as AztecNode, txHash, wait)

@@ -19,7 +19,7 @@ const requests = vi.hoisted(() => ({ order: [] as string[], hold: undefined as P
  */
 const payments = vi.hoisted(() => ({ refuse: false, refusals: [] as string[], into: [] as unknown[] }))
 
-/** Where a claim this page made stands on L2, how many claims it sent, what a claim does to the account, and the consent the last one carried. */
+/** Where a claim this page made stands on L2, and how many claims it sent. */
 const claims = vi.hoisted(() => ({
 	state: "checkpointed" as "proposed" | "checkpointed" | "finalized" | "pruned",
 	sent: 0,

@@ -50,7 +50,7 @@ The deploy run never sees the admin secret, and the admin run never sees the L1 
 
 **Testnet, in order:**
 1. `admin address` (commit the printed address into the deploy template).
-2. Keyed: `probe` + `deploy testnet` + `demo fund`. One run, one L1 key, which must already hold 0.04 Sepolia ETH for gas and 50.000002 Circle Sepolia USDC: `demo fund` transfers what the cast's Ethereum accounts lack, and nothing checks first.
+2. Keyed: `probe` + `deploy testnet` + `demo fund`. One run, one L1 key, which must already hold Sepolia ETH for the deploy's and the run's own gas plus 0.04 for the cast, and 50.000002 Circle Sepolia USDC: `demo fund` transfers what the cast's Ethereum accounts lack, and nothing checks first.
 3. Keyed: `admin accept`.
 4. Keyless: `demo setup`. It binds galactica and supplier to their own Ethereum accounts, then stops at the listing.
 5. Keyed: `merchants add <galactica> <supplier>` (their addresses: `demo status`).

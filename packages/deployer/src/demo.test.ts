@@ -107,15 +107,27 @@ describe("demo setup", () => {
 		expect(published).toHaveLength(1)
 	})
 
-	it("refuses to list a merchant bound anywhere but its treasury, before any deposit", async () => {
-		const { store } = memoryStore()
-		const poisoned = fakeOps({
-			bound: async () => {
-				throw new Error("galactica is bound to 0xbad, not its treasury: redeploy, or list another merchant account")
-			},
-		})
-		await expect(runSetup(store, poisoned.ops, () => {})).rejects.toThrow("redeploy")
-		expect(poisoned.events).toEqual([])
+	it("refuses to list a merchant bound anywhere but its treasury, before any deposit or claim, even on resume", async () => {
+		const { store, current } = memoryStore()
+		const poisoned = () =>
+			fakeOps({
+				bound: async () => {
+					throw new Error("galactica is bound to 0xbad, not its treasury: redeploy, or list another merchant account")
+				},
+			})
+		const fresh = poisoned()
+		await expect(runSetup(store, fresh.ops, () => {})).rejects.toThrow("redeploy")
+		expect(fresh.events).toEqual([])
+
+		const stop = fakeOps({ list: async () => Promise.reject(new Error("List the demo merchants first")) })
+		await expect(runSetup(store, stop.ops, () => {})).rejects.toThrow("List")
+		expect(Object.keys(current()?.tickets ?? {})).toEqual(["galacticaBind", "supplierBind"])
+		const resumed = poisoned()
+		await expect(
+			runSetup(store, resumed.ops, () => {}),
+			"a stored ticket still checks the binding",
+		).rejects.toThrow("redeploy")
+		expect(resumed.events).toEqual([])
 	})
 
 	it("resumes an interrupted setup with its own tag, recovering a deposit sent before the crash instead of repeating it", async () => {
