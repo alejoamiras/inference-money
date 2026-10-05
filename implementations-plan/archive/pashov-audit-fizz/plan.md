@@ -1,7 +1,7 @@
 ---
 plan: pashov-audit-fizz
 tier: deep
-status: approved 2026-10-04
+status: completed 2026-10-05
 base: 6fd8f98
 driver: claude-code
 claude_model: fable
@@ -9,6 +9,36 @@ code_review: off
 eli5_mode: artifact
 budget: recon 3 agents; code-review off; Codex at high
 ---
+
+## Outcome
+
+**2026-10-05: completed, delivered as stacked PRs #26–#30 with this close-out on top; merging is the owner's call.** The `/goal` and `/loop` seeds below are retired: this plan is a record of what was decided and why, never a task list.
+
+**Shipped.**
+- #26: the Medusa fizz suite is committed, and a nightly `fuzz-contracts.yml` campaign runs it.
+- #27: only a depositor's key can name it on a private deposit. The router requires the Permit2 signer to be the caller. The portal's direct path takes a signed `FundingAuthorization` bound to its submitter. The portal refuses zero amounts, stale rollups and unusable refund addresses.
+- #28: the token's side hint proves the published side and the merchant whose read caps the tx latest, and bridge-core mirrors it. A merchant payer near a switch-off pays through a live stamp. Any account may shield to, or send privately to, itself (ledger #27). The static stamp tripwire is in CI, along with the ten most valuable uncovered properties and the held-exit clock spec.
+- #29: a binding first claim needs `allowBind`, and the showcase asks before one. `demo setup` binds each merchant to its treasury before listing it. The remaining audit leads are written up in the docs.
+- #30: testnet is redeployed from #29's head (bridge `0x1bcb6a90…3f81`), the demo is set up again, and the tour is re-recorded.
+
+**Re-audits.** The L1 re-audit (P7) found 0 findings and 19 leads. The Aztec.nr re-audit (P13) found 2 findings, both fixed. Every verdict is in **Re-audit verdicts**. Each arc's Codex loop and the cross-arc pass converged.
+
+**Dropped, and why.**
+- A full SDK flow for the portal's signed path: the owner's router rule leaves it serving only 7702 wallets without ERC-1271 (ledger #2). It is a follow-up.
+- A mutant-artifact stamp canary: the static tripwire covers the kernel guarantee for a fraction of the harness (ledger #15). It is a follow-up if ever wanted.
+- ERC-2098 compact signatures: extra decode surface with no consumer (ledger #6).
+- The `_submitter()` hook: the mutants override `_fundingStructHash`, where either bug would live.
+
+**Accepted residuals (owner).**
+- A 7702 delegate that wants a wrapped signature deposits through the portal's signed path.
+- A signed `FundingAuthorization` cannot be cancelled; its deadline bounds it.
+- The signed path can name a USDC-blocklisted key holder. Only the submitter waits, until Circle clears the address.
+- A switch-off demotes a merchant to a user and does not freeze it, so an unbound ex-merchant can still bind late (F-03).
+- Stamps keep a switched-off merchant payable for up to 25 h.
+- A user's public tokens from another user shield and exit to the recipient's funding address. This follows from ledger #27; the public hop already publishes both accounts.
+- A poisoned demo-merchant binding (the cast's keys are public) recovers only by a redeploy or another merchant account.
+
+**Post-merge.** Dispatch `fuzz-contracts.yml` once on `main`: GitHub dispatches only from the default branch.
 
 # Fix the open audit findings (Pashov solidity + Aztec.nr lenses, fizz)
 
