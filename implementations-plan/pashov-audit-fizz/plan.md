@@ -782,7 +782,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 5: keyed testnet redeploy (`pashov-audit-fizz-testnet`, blocks on the owner)
 
-**P18.**
+**P18.** ✓
 - Commit and push. `bash scripts/keyed-worktree.sh sync`.
 - Keyless `bun run probe:testnet`.
 - The owner approves each `env-exec` run from the keyed worktree:

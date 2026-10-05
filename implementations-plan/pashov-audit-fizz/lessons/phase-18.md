@@ -17,3 +17,6 @@
 | Workers Builds preview of the pushed branch, `SHOWCASE_URL=<commit preview> bun run --cwd apps/showcase test:testnet` | 2/2: the build serves its manifest, tour and headers; every cheat refused with nothing sent; galactica's refund and A_demo's deposit proven in the browser. | — |
 | Base gate | `bun run lint`, `typecheck` and `test` exit 0. | — |
 | Arc 5 Codex round 1 (session `codex-n4wkWcpm`, `git diff pashov-audit-fizz-sdk...HEAD`) | 1 low: this log credited the final `verify --tour` with a 32.02 USDC supply, a figure from the earlier read-back during the smoke; the tour's exit had lowered it since. No other finding. | Fixed. |
+| Arc 5 Codex round 2 (resumed) | **Converged**: "No new material findings. The previous finding is fixed, and the added gate results match the transcript. Confidence: high. MATERIAL FINDINGS: 0". | — |
+
+Gate: `bridge verify deployments/testnet.json --tour deployments/testnet-tour.json` every check passed; `test:evm:fork` 12/12; `test:testnet` on the Workers preview 2/2; `build:testnet` with `build/manifest-identity.test.ts` 7/7; `bun run lint`, `typecheck` and `test` exit 0.
