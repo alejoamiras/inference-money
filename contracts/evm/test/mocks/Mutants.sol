@@ -129,6 +129,12 @@ contract RouterWithoutSettleCheck is Permit2DepositRouter {
     function _checkSettled(uint256) internal view override {}
 }
 
+contract RouterWithoutSignerCheck is Permit2DepositRouter {
+    constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
+
+    function _requireSigner(bytes32, bytes calldata) internal view override {}
+}
+
 contract RouterNamesItself is Permit2DepositRouter {
     constructor(ISignatureTransfer p, ITokenPortal portal, IERC20 token) Permit2DepositRouter(p, portal, token) {}
 

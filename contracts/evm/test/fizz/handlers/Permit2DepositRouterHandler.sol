@@ -5,7 +5,9 @@ import "../Base.sol";
 import {Properties} from "../Properties.sol";
 
 /// @notice Handles the interaction with Permit2DepositRouter. Permit2 is the project's recording mock: it never
-/// checks the signature (the Sepolia fork suite pins the real one), so `nonce`, `deadline` and `signature` are inert.
+/// checks the signature (the Sepolia fork suite pins the real one), so `nonce` and `deadline` are inert to it. The
+/// router itself requires a private deposit's signature to recover to its caller, so every leg signs with the actor's
+/// key.
 abstract contract Permit2DepositRouterHandler is Properties {
     // ――――――――――――――――――――――――― Clamped ――――――――――――――――――――――――――
 
@@ -21,7 +23,9 @@ abstract contract Permit2DepositRouterHandler is Properties {
         _ensureFunds(actor, amount);
         bytes32 recipient = isPrivate ? bytes32(0) : toL2Account(accountSeed);
         bytes32 secret = _toField(secretHash);
-        permit2DepositRouter_deposit(amount, recipient, secret, isPrivate, nonce, block.timestamp + 1, "");
+        uint256 deadline = block.timestamp + 1;
+        bytes memory signature = _permitSignature(actor, amount, recipient, secret, isPrivate, nonce, deadline);
+        permit2DepositRouter_deposit(amount, recipient, secret, isPrivate, nonce, deadline, signature);
     }
 
     /// Boundary stress: the largest fundable amount, the L2 side's u128 ceiling while the mock supply allows.
@@ -29,7 +33,9 @@ abstract contract Permit2DepositRouterHandler is Properties {
         uint256 amount = _largestFundable(actor);
         if (amount == 0) return;
         bytes32 recipient = isPrivate ? bytes32(0) : toL2Account(accountSeed);
-        permit2DepositRouter_deposit(amount, recipient, bytes32(0), isPrivate, 0, block.timestamp + 1, "");
+        uint256 deadline = block.timestamp + 1;
+        bytes memory signature = _permitSignature(actor, amount, recipient, bytes32(0), isPrivate, 0, deadline);
+        permit2DepositRouter_deposit(amount, recipient, bytes32(0), isPrivate, 0, deadline, signature);
     }
 
     /// Malformed intents (zero, over u128, a private deposit naming a recipient, a public one naming none) must never

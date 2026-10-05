@@ -243,6 +243,21 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         signature = abi.encodePacked(r, s, v);
     }
 
+    /// `signer`'s signature over the router's Permit2 digest. Computed before any prank its digest read would consume.
+    function _permitSignature(
+        address signer,
+        uint256 amount,
+        bytes32 recipient,
+        bytes32 secretHash,
+        bool isPrivate,
+        uint256 nonce,
+        uint256 deadline
+    ) internal returns (bytes memory) {
+        bytes32 digest = router.permitDigest(amount, recipient, secretHash, isPrivate, nonce, deadline);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(actorKey[signer], digest);
+        return abi.encodePacked(r, s, v);
+    }
+
     /// A boundary probe's revert is a refusal only with its rule's own selector; any other revert could hide the rule.
     function _requireRefusal(bytes memory reason, bytes4 selector) internal {
         if (bytes4(reason) != selector) ghosts.boundaryAccepted++;

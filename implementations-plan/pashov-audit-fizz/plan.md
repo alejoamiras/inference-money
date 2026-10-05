@@ -582,7 +582,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** as P2.
 
-**P4. The router key-holder rule.**
+**P4. The router key-holder rule.** ✓
 - `_requireSigner` (private only), `permitDigest`, `SignerIsNotTheCaller`.
 - `MockPermit2.DOMAIN_SEPARATOR` becomes real, and `RouterFixture` signs with `vm.addr(pk)`.
 - Tests:

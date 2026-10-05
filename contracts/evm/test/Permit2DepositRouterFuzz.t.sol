@@ -37,6 +37,29 @@ contract Permit2DepositRouterFuzzTest is RouterFixture {
         assertTrue(Permit2Digest.digest(p) != base, "a signed input does not bind");
     }
 
+    /// The router's own `permitDigest` equals the independent model of Permit2's digest for every input, so the key it
+    /// requires is exactly the one Permit2 checks.
+    function testFuzz_permitDigestMatchesTheSpec(
+        uint256 amount,
+        bytes32 recipient,
+        bytes32 secretHash,
+        bool isPrivate,
+        uint256 nonce,
+        uint256 deadline
+    ) public view {
+        Permit2Digest.Params memory p = _params(recipient, secretHash, isPrivate);
+        p.amount = amount;
+        p.nonce = nonce;
+        p.deadline = deadline;
+        assertEq(
+            router.permitDigest(amount, recipient, secretHash, isPrivate, nonce, deadline), Permit2Digest.digest(p)
+        );
+        assertEq(
+            router.PERMIT_WITNESS_TYPEHASH(),
+            keccak256(abi.encodePacked(Permit2Digest.STUB, router.DEPOSIT_WITNESS_TYPE_STRING()))
+        );
+    }
+
     /// Over the whole u128 domain, with any donation parked in the router: the portal receives exactly `amount`,
     /// the message carries the same amount, and the router keeps exactly the donation with zero allowance.
     function testFuzz_depositAccounting(uint256 amount, uint256 donation, bool isPrivate) public {

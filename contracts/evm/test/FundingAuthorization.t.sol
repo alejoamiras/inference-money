@@ -467,6 +467,25 @@ contract FundingAuthorizationTest is ProofCanary {
         );
     }
 
+    /// A periphery's signed direct private deposit, the second one warm.
+    function test_gas_depositPrivateSigned() public {
+        bytes memory first = _authorize(portal, KEY, depositor, periphery);
+        bytes memory second =
+            _sign(KEY, portal.fundingAuthorizationDigest(depositor, periphery, AMOUNT, SECRET_HASH, DEADLINE - 1));
+        vm.startPrank(periphery);
+        portal.depositToAztecPrivate(depositor, AMOUNT, SECRET_HASH, DEADLINE, first);
+        portal.depositToAztecPrivate(depositor, AMOUNT, SECRET_HASH, DEADLINE - 1, second);
+        vm.stopPrank();
+    }
+
+    /// A direct public deposit naming a refund address, the second one warm.
+    function test_gas_depositPublicDirect() public {
+        vm.startPrank(periphery);
+        portal.depositToAztecPublic(depositor, bytes32(uint256(1)), AMOUNT, SECRET_HASH);
+        portal.depositToAztecPublic(depositor, bytes32(uint256(1)), AMOUNT, SECRET_HASH);
+        vm.stopPrank();
+    }
+
     // ── Canaries (forge) ─────────────────────────────────────────────────────────────────────
 
     function test_canary_signer_failsWithoutTheCheck() public {

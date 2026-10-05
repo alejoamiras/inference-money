@@ -63,8 +63,8 @@ self_test() {
 [PASS] check_initializedBindingsCannotChange(address,bytes32,address) (paths: 2)
 Symbolic test result: 9 passed; 0 failed; time: 0.31s
 Running 6 tests for test/FormalRouter.t.sol:FormalRouterTest
-[PASS] check_deposit_conservesUserFunds(uint128,uint128,uint128,bool) (paths: 478)
-[PASS] check_deposit_namesItsCallerAsDepositor(address,uint128,bool) (paths: 8)
+[PASS] check_deposit_conservesUserFunds(uint128,uint128,uint128) (paths: 240)
+[PASS] check_deposit_namesItsCallerAsDepositor(address,uint128) (paths: 4)
 [PASS] check_deposit_privateRequiresZeroRecipient(uint128,bytes32) (paths: 7)
 [PASS] check_deposit_publicRequiresRecipient(uint128) (paths: 6)
 [PASS] check_deposit_rejectsAmountAboveU128(uint256,bytes32,bool) (paths: 2)

@@ -3,6 +3,7 @@ pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
 import {ReentrancyGuardTransient} from "@oz/utils/ReentrancyGuardTransient.sol";
+import {ECDSA} from "@oz/utils/cryptography/ECDSA.sol";
 
 import {Constants} from "@aztec/core/libraries/ConstantsGen.sol";
 import {Permit2DepositRouter} from "../src/Permit2DepositRouter.sol";
@@ -12,10 +13,15 @@ import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
 import {MockPermit2} from "./mocks/MockPermit2.sol";
 import {MockTokenPortal} from "./mocks/MockPortal.sol";
 import {MockUsdc} from "./mocks/MockUsdc.sol";
+import {RouterWithoutSignerCheck} from "./mocks/Mutants.sol";
 import {RouterFixture} from "./mocks/RouterFixture.sol";
 import {FeeOnTransferERC20, HookERC20, OverDeliveringERC20, SenderSurchargeERC20} from "./mocks/TestTokens.sol";
+import {PermissiveWallet} from "./mocks/Wallets.sol";
 
 contract Permit2DepositRouterTest is RouterFixture {
+    /// secp256k1's group order: an `s` above half of it is the high-s twin OZ refuses.
+    uint256 internal constant SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+
     MockUsdc internal usdc;
 
     function setUp() public {
@@ -190,8 +196,146 @@ contract Permit2DepositRouterTest is RouterFixture {
 
     function test_gas_depositPrivate() public {
         _deposit(1e6, true);
+        bytes memory signature = _permitSignature(userKey, 1e6, bytes32(0), true, 1, 1);
         vm.prank(user);
-        router.deposit(1e6, bytes32(0), SECRET_HASH, true, 1, 1, hex"");
+        router.deposit(1e6, bytes32(0), SECRET_HASH, true, 1, 1, signature);
+    }
+
+    // ── The key-holder rule (private deposits) ───────────────────────────────────────────────
+
+    string internal constant FOREIGN_REACHED_PERMIT2 = "a foreign signature reached Permit2";
+
+    /// Submits a private deposit as `caller` and requires `selector` (with `args`, if any) before Permit2 is called.
+    function _expectRefusedBeforePermit2(
+        address caller,
+        uint256 amount,
+        uint256 nonce,
+        bytes memory signature,
+        bytes memory reason
+    ) internal {
+        uint256 paid = token.balanceOf(caller);
+        vm.prank(caller);
+        vm.expectRevert(reason);
+        router.deposit(amount, bytes32(0), SECRET_HASH, true, nonce, 1, signature);
+        assertEq(permit2.calls(), 0, "a refused signature reached Permit2");
+        assertEq(token.balanceOf(caller), paid, "a refused deposit moved funds");
+    }
+
+    /// A thief holding the user's signature and its own funds: only the caller's own key passes.
+    function proveForeignSignatureRefused(Permit2DepositRouter r) public {
+        address thief = makeAddr("thief");
+        usdc.mint(thief, 1e6);
+        vm.prank(thief);
+        usdc.approve(address(permit2), type(uint256).max);
+        bytes32 digest = r.permitDigest(1e6, bytes32(0), SECRET_HASH, true, 0, 1);
+        (uint8 v, bytes32 rr, bytes32 s) = vm.sign(userKey, digest);
+        vm.prank(thief);
+        try r.deposit(1e6, bytes32(0), SECRET_HASH, true, 0, 1, abi.encodePacked(rr, s, v)) {
+            assertTrue(false, FOREIGN_REACHED_PERMIT2);
+        } catch (bytes memory reason) {
+            assertEq(bytes4(reason), Permit2DepositRouter.SignerIsNotTheCaller.selector, "refused for the wrong reason");
+        }
+        assertEq(permit2.calls(), 0, FOREIGN_REACHED_PERMIT2);
+    }
+
+    function test_privateDeposit_refusesAForeignSignature() public {
+        proveForeignSignatureRefused(router);
+    }
+
+    function test_canary_signer_failsWithoutTheCheck() public {
+        RouterWithoutSignerCheck mutant = new RouterWithoutSignerCheck(
+            ISignatureTransfer(address(permit2)), ITokenPortal(address(new MockTokenPortal(usdc))), usdc
+        );
+        (bool ok, bytes memory reason) = address(this).call(abi.encodeCall(this.proveForeignSignatureRefused, (mutant)));
+        assertFalse(ok, "the proof passed against its mutant");
+        assertTrue(
+            vm.indexOf(string(reason), FOREIGN_REACHED_PERMIT2) != type(uint256).max, "failed on another assertion"
+        );
+    }
+
+    /// F-02: a contract owner whose ERC-1271 approves anything is refused before Permit2 would consult it; no key
+    /// recovers to a contract address.
+    function test_privateDeposit_refusesAPermissive1271Owner() public {
+        address wallet = address(new PermissiveWallet());
+        usdc.mint(wallet, 1e6);
+        vm.prank(wallet);
+        usdc.approve(address(permit2), type(uint256).max);
+        _expectRefusedBeforePermit2(
+            wallet, 1e6, 0, hex"", abi.encodeWithSelector(ECDSA.ECDSAInvalidSignatureLength.selector, 0)
+        );
+        bytes memory anyKey = _permitSignature(userKey, 1e6, bytes32(0), true, 0, 1);
+        _expectRefusedBeforePermit2(
+            wallet, 1e6, 0, anyKey, abi.encodeWithSelector(Permit2DepositRouter.SignerIsNotTheCaller.selector)
+        );
+    }
+
+    /// An account delegated under EIP-7702 still signs with its key: the router passes it, and Permit2 then checks it
+    /// its own way (here the recording mock).
+    function test_privateDeposit_a7702DelegatedCallerPasses() public {
+        vm.signAndAttachDelegation(address(new PermissiveWallet()), userKey);
+        assertGt(user.code.length, 0, "the user carries a delegation");
+        _deposit(1e6, true);
+        assertTrue(lastMintWasPrivate(1e6), "the message names the key holder");
+    }
+
+    /// The F-02 shape with a real delegation: a key-held account delegated to a permissive ERC-1271 submits another
+    /// key's signature, which Permit2 would accept through `isValidSignature`; the router refuses it first.
+    function test_privateDeposit_a7702PermissiveDelegateCannotUseAForeignSignature() public {
+        vm.signAndAttachDelegation(address(new PermissiveWallet()), userKey);
+        bytes memory foreign = _permitSignature(0xB0B, 1e6, bytes32(0), true, 0, 1);
+        _expectRefusedBeforePermit2(
+            user, 1e6, 0, foreign, abi.encodeWithSelector(Permit2DepositRouter.SignerIsNotTheCaller.selector)
+        );
+    }
+
+    /// Permit2 alone accepts both shapes; OZ's recovery refuses them before Permit2 is called.
+    function test_privateDeposit_refusesCompactAndHighS() public {
+        bytes32 digest = router.permitDigest(1e6, bytes32(0), SECRET_HASH, true, 0, 1);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
+        bytes memory compact = abi.encodePacked(r, bytes32(uint256(s) | (uint256(v - 27) << 255)));
+        bytes32 highS = bytes32(SECP256K1_N - uint256(s));
+        bytes memory twin = abi.encodePacked(r, highS, v == 27 ? uint8(28) : uint8(27));
+        _expectRefusedBeforePermit2(
+            user, 1e6, 0, compact, abi.encodeWithSelector(ECDSA.ECDSAInvalidSignatureLength.selector, 64)
+        );
+        _expectRefusedBeforePermit2(
+            user, 1e6, 0, twin, abi.encodeWithSelector(ECDSA.ECDSAInvalidSignatureS.selector, highS)
+        );
+    }
+
+    /// One honest private signature, then each signed field changed alone with the signature kept: the router refuses
+    /// every variant before Permit2. The recipient and privacy fields are refused by the intent rules first.
+    function test_privateDeposit_everySignedFieldIsBound() public {
+        bytes memory signature = _permitSignature(userKey, 1e6, bytes32(0), true, 0, 1);
+        bytes4 refused = Permit2DepositRouter.SignerIsNotTheCaller.selector;
+        uint256 paid = usdc.balanceOf(user);
+        vm.startPrank(user);
+        vm.expectRevert(refused);
+        router.deposit(2e6, bytes32(0), SECRET_HASH, true, 0, 1, signature);
+        vm.expectRevert(refused);
+        router.deposit(1e6, bytes32(0), SECRET_HASH ^ bytes32(uint256(1)), true, 0, 1, signature);
+        vm.expectRevert(refused);
+        router.deposit(1e6, bytes32(0), SECRET_HASH, true, 1, 1, signature);
+        vm.expectRevert(refused);
+        router.deposit(1e6, bytes32(0), SECRET_HASH, true, 0, 2, signature);
+        vm.expectRevert(Permit2DepositRouter.PrivateDepositNamesRecipient.selector);
+        router.deposit(1e6, RECIPIENT, SECRET_HASH, true, 0, 1, signature);
+        vm.expectRevert(Permit2DepositRouter.PublicDepositNeedsRecipient.selector);
+        router.deposit(1e6, bytes32(0), SECRET_HASH, false, 0, 1, signature);
+        vm.stopPrank();
+        assertEq(permit2.calls(), 0, "a tampered deposit reached Permit2");
+        assertEq(usdc.balanceOf(user), paid, "nothing moved");
+        vm.prank(user);
+        router.deposit(1e6, bytes32(0), SECRET_HASH, true, 0, 1, signature);
+        assertTrue(lastMintWasPrivate(1e6), "the untampered deposit still lands");
+    }
+
+    /// The public leg keeps Permit2's own check alone: its depositor is only a refund address, so a contract may make
+    /// one (the recording mock accepts any signature).
+    function test_publicDeposit_isUntouchedByTheKeyHolderRule() public {
+        vm.prank(user);
+        router.deposit(1e6, RECIPIENT, SECRET_HASH, false, 0, 1, hex"");
+        assertTrue(lastMintWasPublic(RECIPIENT, 1e6));
     }
 
     function _expectRejected(uint256 amount, bytes32 recipient, bool isPrivate, bytes4 selector) internal {
