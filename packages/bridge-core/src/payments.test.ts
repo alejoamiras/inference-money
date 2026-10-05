@@ -8,7 +8,7 @@ import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { siloNullifier } from "@aztec-labs/stdlib/hash"
 import type { ExecutionPayload, Tx } from "@aztec-labs/stdlib/tx"
 import { L2_PROPOSED } from "./claim"
-import type { MerchantList } from "./merchants"
+import { MERCHANT_MAX_DELAY, type MerchantList } from "./merchants"
 import {
 	memoryPaymentStore,
 	openedCommitment,
@@ -40,7 +40,19 @@ const [merchant, alice, elsewhere] = await Promise.all([AztecAddress.random(), A
 const LIST: MerchantList = {
 	block: 1,
 	at: 0n,
-	entries: new Map([[merchant.toString(), { off: false, scheduledOff: false, changeAt: 0n }]]),
+	entries: new Map([
+		[
+			merchant.toString(),
+			{
+				off: false,
+				scheduledOff: false,
+				changeAt: 0n,
+				delay: MERCHANT_MAX_DELAY,
+				scheduledDelay: MERCHANT_MAX_DELAY,
+				delayChangeAt: 0n,
+			},
+		],
+	]),
 }
 const MINED = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED]
 /** The first second of an hour bucket, so a stamp opened now stays fresh for two hours. */

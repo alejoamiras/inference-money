@@ -675,7 +675,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `bash contracts/aztec/scripts/check-sole-consumer.sh --self-test && bash contracts/aztec/scripts/check-sole-consumer.sh`;
 - `bun run --cwd contracts/aztec test` (artifact identity, ABI superset).
 
-**P9. The bridge-core horizon mirror.**
+**P9. The bridge-core horizon mirror.** ✓
 - The `MerchantEntry` fields and the helpers; `merchantSide`.
 - The same literal cases.
 - The `payments.ts` rename; the literals in `deposit.test.ts` and `payments.test.ts`; the integration `toMatchObject`.

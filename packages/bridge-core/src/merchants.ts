@@ -40,11 +40,17 @@ export function delayAt(sdc: ScheduledDelayChange, at: bigint): bigint {
 export const Side = { First: 0, Second: 1, Neither: 2 } as const
 export type Side = (typeof Side)[keyof typeof Side]
 
-/** An entry's switch-off state: `off` holds before `changeAt`, `scheduledOff` from then on. */
+/**
+ * An entry's switch-off state: `off` holds before `changeAt`, `scheduledOff` from then on. Its delay likewise: `delay`
+ * before `delayChangeAt`, `scheduledDelay` from then on, either MERCHANT_MIN_DELAY while unset.
+ */
 export interface MerchantEntry {
 	off: boolean
 	scheduledOff: boolean
 	changeAt: bigint
+	delay: bigint | undefined
+	scheduledDelay: bigint | undefined
+	delayChangeAt: bigint
 }
 
 /** Every listed account's entry, read at `block`, whose timestamp is `at`. */
@@ -104,10 +110,19 @@ export async function syncMerchantList(node: MerchantNode, token: AztecAddress, 
 	const entries = await Promise.all(
 		accounts.map(async (account): Promise<[string, MerchantEntry]> => {
 			const slot = await deriveStorageSlotInMap(offSlot, account)
-			const { svc } = await DelayedPublicMutableValues.readFromTree(slot, (s) => node.getPublicStorageAt(BlockNumber(at), token, s))
+			const { svc, sdc } = await DelayedPublicMutableValues.readFromTree(slot, (s) =>
+				node.getPublicStorageAt(BlockNumber(at), token, s),
+			)
 			return [
 				account.toString(),
-				{ off: !svc.previous[0]!.isZero(), scheduledOff: !svc.post[0]!.isZero(), changeAt: svc.timestampOfChange },
+				{
+					off: !svc.previous[0]!.isZero(),
+					scheduledOff: !svc.post[0]!.isZero(),
+					changeAt: svc.timestampOfChange,
+					delay: sdc.pre,
+					scheduledDelay: sdc.post,
+					delayChangeAt: sdc.timestampOfChange,
+				},
 			]
 		}),
 	)
@@ -121,16 +136,37 @@ export function merchantStatus(list: MerchantList, account: AztecAddress, at = l
 	return { merchant: !(at < e.changeAt ? e.off : e.scheduledOff), pending: e.changeAt > at }
 }
 
+/** How long a read of `e` at `at` must assume its value holds: aztec's `get_effective_minimum_delay_at`. */
+export function effectiveMinimumDelayAt(e: MerchantEntry, at: bigint): bigint {
+	const pre = e.delay ?? MERCHANT_MIN_DELAY
+	const post = e.scheduledDelay ?? MERCHANT_MIN_DELAY
+	if (e.delayChangeAt <= at) return post - 1n
+	const throughChange = e.delayChangeAt - at + post
+	return (pre < throughChange ? pre : throughChange) - 1n
+}
+
+/** The last second a read of `e` at `at` holds, given its effective minimum delay `d`: aztec's `get_time_horizon`. */
+export function timeHorizon(e: MerchantEntry, at: bigint, d: bigint): bigint {
+	if (at >= e.changeAt) return at + d
+	return at + d < e.changeAt - 1n ? at + d : e.changeAt - 1n
+}
+
+/** The expiry cap proving `account` a merchant at `at` puts on the tx (the token hint's horizon); 0n if unlisted. */
+export function merchantHorizon(list: MerchantList, account: AztecAddress, at = list.at): bigint {
+	const e = list.entries.get(account.toString())
+	return e ? timeHorizon(e, at, effectiveMinimumDelayAt(e, at)) : 0n
+}
+
 /**
- * The side a transfer or request proves, by the token hint's rules: a merchant side is always kept; opening a
- * request, a merchant recipient is always proven (so its request is stamped); otherwise, of two merchants, the one
- * with no change pending, whose read keeps the tx's expiry longest. `first` is the recipient, `second` the sender.
+ * The side a transfer or request proves, by the token hint's rules: a merchant side is always kept; a merchant
+ * `first` is proven whenever `keepFirst` (the call publishes it, or opens a request for it, which is then stamped);
+ * otherwise, of two merchants, the one whose read caps the tx's expiry latest, `first` on a tie.
  */
-export function merchantSide(list: MerchantList, first: AztecAddress, second: AztecAddress, opening: boolean): Side {
+export function merchantSide(list: MerchantList, first: AztecAddress, second: AztecAddress, keepFirst: boolean): Side {
 	const a = merchantStatus(list, first)
-	if (a.merchant && (opening || !a.pending)) return Side.First
+	if (a.merchant && keepFirst) return Side.First
 	const b = merchantStatus(list, second)
-	if (b.merchant && (!a.merchant || !b.pending)) return Side.Second
+	if (b.merchant && (!a.merchant || merchantHorizon(list, second) > merchantHorizon(list, first))) return Side.Second
 	return a.merchant ? Side.First : Side.Neither
 }
 

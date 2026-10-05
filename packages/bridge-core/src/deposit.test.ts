@@ -443,12 +443,13 @@ describe("reconcileDeposit", () => {
 describe("assertPublicRecipient", () => {
 	it("passes a switched-on merchant and refuses a user or a switched-off merchant", async () => {
 		const [merchant, user, off] = await Promise.all([AztecAddress.random(), AztecAddress.random(), AztecAddress.random()])
+		const SETTLED_DELAY = { delay: undefined, scheduledDelay: undefined, delayChangeAt: 0n }
 		const list = {
 			block: 1,
 			at: NOW,
 			entries: new Map([
-				[merchant.toString(), { off: false, scheduledOff: false, changeAt: 0n }],
-				[off.toString(), { off: true, scheduledOff: true, changeAt: 0n }],
+				[merchant.toString(), { ...SETTLED_DELAY, off: false, scheduledOff: false, changeAt: 0n }],
+				[off.toString(), { ...SETTLED_DELAY, off: true, scheduledOff: true, changeAt: 0n }],
 			]),
 		}
 		expect(() => assertPublicRecipient(list, merchant)).not.toThrow()
