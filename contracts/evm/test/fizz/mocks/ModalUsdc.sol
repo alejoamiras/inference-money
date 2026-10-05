@@ -70,6 +70,8 @@ contract ModalUsdc is MockUsdc {
         delete hookPayload;
         hookFired++;
         (bool ok, bytes memory reason) = hookTarget.call(call);
+        // Cutting the revert data to its selector is the point.
+        // forge-lint: disable-next-line(unsafe-typecast)
         if (ok || bytes4(reason) != ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector) {
             hookReentrySucceeded++;
         }

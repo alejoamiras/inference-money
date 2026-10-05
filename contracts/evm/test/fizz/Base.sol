@@ -275,6 +275,8 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     /// A boundary probe's revert is a refusal only with its rule's own selector; any other revert could hide the rule.
     function _requireRefusal(bytes memory reason, bytes4 selector) internal {
+        // Cutting the revert data to its selector is the point.
+        // forge-lint: disable-next-line(unsafe-typecast)
         if (bytes4(reason) != selector) ghosts.boundaryAccepted++;
     }
 

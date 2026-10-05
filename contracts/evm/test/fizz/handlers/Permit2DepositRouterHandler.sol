@@ -128,6 +128,8 @@ abstract contract Permit2DepositRouterHandler is Properties {
             ghosts.permit2RejectBypassed++;
         } catch (bytes memory reason) {
             // Any other refusal came before the pull, so the probe never reached Permit2.
+            // Cutting the revert data to its selector is the point.
+            // forge-lint: disable-next-line(unsafe-typecast)
             if (bytes4(reason) != MockPermit2.MockRejected.selector) ghosts.permit2RejectBypassed++;
         }
         permit2.setReject(false);
