@@ -756,7 +756,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `RUN_ID=p15 bun run net:up && RUN_ID=p15 bun run deploy:local && RUN_ID=p15 bun run bridge demo setup local && RUN_ID=p15 bun run bridge smoke local`, then `RUN_ID=p15 bun run net:down`.
 
-**P16. The remaining leads, in docs.**
+**P16. The remaining leads, in docs.** ✓
 - F-03 by design: the stolen-key race, bind-before-listing, a switch-off demotes rather than freezes. The Emergency runbook (`operations.md:79-87`) no longer implies that a switch-off ends every cash-out.
 - An ex-merchant still paid through live stamps refunds users on Ethereum, through its exit (P13).
 - Merchants claim before they deliver, because a private deposit is clawable until it is claimed.
