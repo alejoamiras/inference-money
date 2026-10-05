@@ -73,7 +73,10 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         uint256 reinitialized; // a second initialize succeeded
         uint256 misnamedMessages; // a deposit's Inbox content hash did not match the independent model
         uint256 permit2RejectBypassed; // a router deposit succeeded although Permit2 refused the pull
-        uint256 boundaryAccepted; // an out-of-range deposit (amount > u128, `_to` > field) succeeded
+        uint256 boundaryAccepted; // an out-of-range deposit (zero, > u128, `_to` > field, unusable refund) passed or misfired
+        uint256 staleDepositAccepted; // a deposit succeeded while the registry's canonical rollup was not the portal's
+        uint256 authorizationMisused; // a spent, or another submitter's, portal authorization deposited (or misfired)
+        uint256 foreignSignatureAccepted; // a private deposit carrying another key's signature passed (or misfired)
         uint256 selfPayoutAccepted; // a proven exit to the portal itself paid out
         uint256 misboundRouter; // a fresh portal/router accepted a stranger's init, a foreign router or a code-less dependency
         // Flow splits and liveness counters
@@ -131,6 +134,18 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
     mapping(address actor => uint256) internal actorKey;
     /// Spent into each authorization's deadline, so two identical deposits never share a digest.
     uint256 internal authorizationNonce;
+
+    /// The last portal authorization that deposited, kept for the replay and foreign-submitter probes.
+    struct Authorization {
+        address depositor;
+        address submitter;
+        uint256 amount;
+        bytes32 secretHash;
+        uint256 deadline;
+        bytes signature;
+    }
+
+    Authorization internal lastAuthorization;
     address internal admin;
 
     modifier asActor() virtual {
@@ -237,7 +252,8 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         internal
         returns (uint256 deadline, bytes memory signature)
     {
-        deadline = block.timestamp + 1 + authorizationNonce++;
+        // A year out, so a probe replaying it later meets the replay rule, not the expiry one.
+        deadline = block.timestamp + 365 days + authorizationNonce++;
         bytes32 digest = portal.fundingAuthorizationDigest(depositor, submitter, amount, secretHash, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(actorKey[depositor], digest);
         signature = abi.encodePacked(r, s, v);
@@ -290,6 +306,16 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
     function _cleanEnv() internal view returns (bool) {
         return usdc.mode() == ModalUsdc.Mode.Normal && usdc.hookPayload().length == 0 && !usdc.blacklisted(actor)
             && !usdc.blacklisted(address(portal));
+    }
+
+    /// `_cleanEnv` for a deposit: also the portal's rollup still canonical, since deposits stop after an upgrade while
+    /// withdrawals do not (so withdrawal guards keep `_cleanEnv` alone).
+    function _depositEnvClean() internal view returns (bool) {
+        return _cleanEnv() && _canonical();
+    }
+
+    function _canonical() internal view returns (bool) {
+        return registry.getCanonicalRollup() == address(portal.rollup());
     }
 
     /// Whether the real Outbox has consumed the leaf of a proven exit; false if the view reverts.

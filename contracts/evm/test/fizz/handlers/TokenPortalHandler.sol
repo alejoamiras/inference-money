@@ -133,6 +133,92 @@ abstract contract TokenPortalHandler is Properties {
         _noopEnd(consumed);
     }
 
+    /// A periphery's private deposit: the current actor submits and pays, another actor's key signed it, and the
+    /// message names the signer.
+    function tokenPortal_depositToAztecPrivate_forSigner(uint256 _amount, bytes32 _secretHash, uint256 _signerSeed)
+        public
+    {
+        _amount = clampBetween(_amount, 1, MAX_REALISTIC_AMOUNT);
+        _ensureFunds(actor, _amount);
+        address signer = toActor(address(uint160(_signerSeed)));
+        bytes32 secretHash = _toField(_secretHash);
+        (uint256 deadline, bytes memory signature) = _authorize(signer, actor, _amount, secretHash);
+        snapshotBefore();
+        vm.prank(actor);
+        (, uint256 index) = portal.depositToAztecPrivate(signer, _amount, secretHash, deadline, signature);
+        lastAuthorization = Authorization(signer, actor, _amount, secretHash, deadline, signature);
+        _afterDirectDeposit(signer, bytes32(0), _amount, true);
+        snapshotAfter();
+        _directDepositProperties(_amount, secretHash, index);
+    }
+
+    /// The last authorization that deposited, presented again by its submitter (spent) or by another actor (bound to
+    /// its submitter): either way refused with that rule's own selector, before anything moves.
+    function tokenPortal_authorizationMisuse(bool _foreignSubmitter, uint256 _seed) public {
+        Authorization memory a = lastAuthorization;
+        if (a.depositor == address(0)) return;
+        address submitter = _foreignSubmitter ? _otherActor(a.submitter, _seed) : a.submitter;
+        bytes4 refusal =
+            _foreignSubmitter ? TokenPortal.SignerIsNotTheDepositor.selector : TokenPortal.AuthorizationUsed.selector;
+        // Expiry is checked first, and a long campaign can outrun even a year-long deadline.
+        if (block.timestamp > a.deadline) refusal = TokenPortal.AuthorizationExpired.selector;
+        _ensureFunds(submitter, a.amount);
+        uint256 consumed = _noopBegin();
+        vm.prank(submitter);
+        try portal.depositToAztecPrivate(a.depositor, a.amount, a.secretHash, a.deadline, a.signature) {
+            ghosts.authorizationMisused++;
+        } catch (bytes memory reason) {
+            if (bytes4(reason) != refusal) ghosts.authorizationMisused++;
+        }
+        _noopEnd(consumed);
+    }
+
+    /// The current actor submits a private deposit carrying another actor's signature, to the portal (naming itself)
+    /// or to the router: refused with the signer rule's own selector before Permit2 or the Inbox sees it.
+    function tokenPortal_foreignSignature(bool _viaRouter, uint256 _amount, uint256 _signerSeed) public {
+        _amount = clampBetween(_amount, 1, MAX_REALISTIC_AMOUNT);
+        _ensureFunds(actor, _amount);
+        address signer = _otherActor(actor, _signerSeed);
+        uint256 permit2Calls = permit2.calls();
+        uint256 consumed = _noopBegin();
+        bytes4 refusal;
+        bool ok;
+        bytes memory reason;
+        if (_viaRouter) {
+            refusal = Permit2DepositRouter.SignerIsNotTheCaller.selector;
+            uint256 deadline = block.timestamp + 1;
+            bytes memory signature = _permitSignature(signer, _amount, bytes32(0), bytes32(0), true, 0, deadline);
+            vm.prank(actor);
+            (ok, reason) = address(router)
+                .call(abi.encodeCall(router.deposit, (_amount, bytes32(0), bytes32(0), true, 0, deadline, signature)));
+        } else {
+            refusal = TokenPortal.SignerIsNotTheDepositor.selector;
+            (uint256 deadline, bytes memory signature) = _authorize(signer, actor, _amount, bytes32(0));
+            vm.prank(actor);
+            (ok, reason) = address(portal)
+                .call(abi.encodeCall(portal.depositToAztecPrivate, (actor, _amount, bytes32(0), deadline, signature)));
+        }
+        if (ok || bytes4(reason) != refusal || permit2.calls() != permit2Calls) ghosts.foreignSignatureAccepted++;
+        _noopEnd(consumed);
+    }
+
+    /// A public deposit naming zero, the portal or the router as its refund address: no return could ever leave them.
+    function tokenPortal_depositToAztecPublic_badRefund(uint8 _which, uint256 _amount, uint256 _accountSeed) public {
+        _amount = clampBetween(_amount, 1, MAX_REALISTIC_AMOUNT);
+        _ensureFunds(actor, _amount);
+        _which = uint8(_which % 3);
+        address refund = _which == 0 ? address(0) : _which == 1 ? address(portal) : address(router);
+        bytes32 to = toL2Account(_accountSeed);
+        uint256 consumed = _noopBegin();
+        vm.prank(actor);
+        try portal.depositToAztecPublic(refund, to, _amount, bytes32(0)) {
+            ghosts.boundaryAccepted++;
+        } catch (bytes memory reason) {
+            _requireRefusal(reason, TokenPortal.InvalidDepositor.selector);
+        }
+        _noopEnd(consumed);
+    }
+
     /// A paid exit presented again, with the identical proof and caller.
     function tokenPortal_withdraw_replay(uint256 _exitSeed) public {
         uint256 n = paidExits.length;
@@ -241,6 +327,8 @@ abstract contract TokenPortalHandler is Properties {
         snapshotBefore();
         (, uint256 index) =
             portal.depositToAztecPrivate(actor, _amount, _secretHashForL2MessageConsumption, deadline, signature);
+        lastAuthorization =
+            Authorization(actor, actor, _amount, _secretHashForL2MessageConsumption, deadline, signature);
         _afterDirectDeposit(actor, bytes32(0), _amount, true);
         snapshotAfter();
         _directDepositProperties(_amount, _secretHashForL2MessageConsumption, index);
@@ -277,6 +365,7 @@ abstract contract TokenPortalHandler is Properties {
 
     /// Model update after a successful direct deposit by `depositor`.
     function _afterDirectDeposit(address depositor, bytes32 to, uint256 amount, bool isPrivate) internal {
+        if (!_canonical()) ghosts.staleDepositAccepted++;
         _recordDeposit(depositor, to, amount, isPrivate);
         ghosts.directDeposited += amount;
         _flagInexactDeposit(amount);
@@ -381,6 +470,7 @@ abstract contract TokenPortalHandler is Properties {
         address foreignTokenRouter =
             address(new Permit2DepositRouter(p2, ITokenPortal(address(fresh)), IERC20(address(inbox))));
         property_strangerInitKeepsSlot(fresh, validRouter, foreignTokenRouter, stranger);
-        property_freshPortalInitOnce(fresh, validRouter, stranger);
+        // initialize reads the canonical rollup's wiring, which a switched-away registry does not point at
+        if (_canonical()) property_freshPortalInitOnce(fresh, validRouter, stranger);
     }
 }

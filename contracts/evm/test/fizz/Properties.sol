@@ -300,6 +300,25 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
         eq(ghosts.foreignDomainPaid, 0, "GL-31: foreign-domain leaf paid out");
     }
 
+    /// @notice GL-32: no deposit lands while the registry's canonical rollup is not the portal's
+    function property_staleRollupRefusesDeposits() public {
+        eq(ghosts.staleDepositAccepted, 0, "GL-32: a deposit landed on a rollup that is no longer canonical");
+    }
+
+    /// @notice GL-33: a portal authorization deposits once, and only for the submitter it names
+    function property_authorizationsSingleUse() public {
+        eq(ghosts.authorizationMisused, 0, "GL-33: a spent or foreign-submitter authorization was not refused");
+    }
+
+    /// @notice GL-34: a private deposit carrying another key's signature reaches neither Permit2 nor the Inbox
+    function property_foreignSignaturesRefused() public {
+        eq(
+            ghosts.foreignSignatureAccepted,
+            0,
+            "GL-34: a foreign signature was not refused before Permit2 and the Inbox"
+        );
+    }
+
     // ――――――――――――――――――― Specific properties ――――――――――――――――――――
     // These properties must hold after specific function calls.
     // They MUST BE INTERNAL and called at the end of the relevant handlers.

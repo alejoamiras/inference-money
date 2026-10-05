@@ -117,9 +117,10 @@ abstract contract RoundTripHandler is AztecL2Handler, Permit2DepositRouterHandle
 
     // ――――――――――――――――――――――――― Probes ――――――――――――――――――――――――――
 
-    /// A funded, unblocked caller's in-range deposit in a Normal environment must go through, whatever the history.
+    /// A funded, unblocked caller's in-range deposit in a Normal environment with the portal's rollup still canonical
+    /// must go through, whatever the history.
     function adv_depositLiveness(uint8 which, uint256 amt, bool dust) public {
-        if (!_cleanEnv()) return;
+        if (!_depositEnvClean()) return;
         which = uint8(which % 4);
         uint256 amount = dust ? clampBetween(amt, 1, 99) : clampBetween(amt, 1, MAX_REALISTIC_AMOUNT);
         if (!_ensureFunds(actor, amount)) return;

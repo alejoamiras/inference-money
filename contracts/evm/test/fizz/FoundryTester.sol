@@ -4,6 +4,7 @@ pragma solidity >=0.6.2 <0.9.0;
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {Handlers} from "./handlers/Handlers.sol";
+import {TokenPortal} from "../../src/TokenPortal.sol";
 
 /// @notice Contract to be used for quick testing with Foundry
 contract FoundryTester is Test, Handlers {
@@ -117,6 +118,47 @@ contract FoundryTester is Test, Handlers {
         permit2DepositRouter_deposit_clamped(1e6, 0, bytes32(uint256(2)), true, 0);
         assertEq(usdc.hookFired(), 2, "both hooks fired");
         assertEq(usdc.hookReentrySucceeded(), 0, "a re-entry was not refused by the guard");
+    }
+
+    /// GL-29 and GL-32 under a rollup upgrade: deposits stop (liveness is not owed then), and a proven exit still
+    /// pays through the bound Outbox.
+    function test_harness_staleRollupStopsDepositsNotWithdrawals() public {
+        tokenPortal_depositToAztecPublic_clamped(0, 5e6, bytes32(uint256(1)));
+        l2_returnDeposit(0);
+        l2_proveEpoch(0, 0);
+        env_secondary(6, 0, 0, address(0));
+        _tokenPortal_freshBinding(address(0));
+        adv_depositLiveness(0, 1e6, false);
+        vm.expectRevert(TokenPortal.RollupNotCanonical.selector);
+        this.tokenPortal_depositToAztecPublic_clamped(0, 1e6, bytes32(uint256(2)));
+        tokenPortal_withdraw_clamped(0);
+        assertEq(ghosts.withdrawCount, 1, "the exit paid after the switch");
+        property_depositsLive();
+        property_staleRollupRefusesDeposits();
+        env_secondary(6, 1, 0, address(0));
+        adv_depositLiveness(0, 1e6, false);
+        assertEq(ghosts.depositCount, 2, "deposits resume once the rollup is canonical again");
+    }
+
+    /// The signed-path probes refuse with their own selectors: a periphery-submitted deposit names its signer, its
+    /// authorization cannot be replayed or used by another submitter, foreign signatures and unusable refund
+    /// addresses are refused.
+    function test_harness_signedPathProbes() public {
+        tokenPortal_depositToAztecPrivate_forSigner(3e6, bytes32(uint256(7)), 1);
+        assertEq(ghosts.depositCount, 1, "the periphery's deposit landed");
+        tokenPortal_authorizationMisuse(false, 0);
+        tokenPortal_authorizationMisuse(true, 1);
+        tokenPortal_foreignSignature(false, 1e6, 1);
+        tokenPortal_foreignSignature(true, 1e6, 1);
+        tokenPortal_depositToAztecPublic_badRefund(0, 1e6, 0);
+        tokenPortal_depositToAztecPublic_badRefund(1, 1e6, 0);
+        tokenPortal_depositToAztecPublic_badRefund(2, 1e6, 0);
+        assertEq(
+            ghosts.authorizationMisused + ghosts.foreignSignatureAccepted + ghosts.boundaryAccepted
+                + ghosts.misnamedMessages,
+            0,
+            "a signed-path probe was not refused for its own reason"
+        );
     }
 
     /// GL-26: the portal caps each deposit at u128, not the running total, so only the mock supply cap keeps a

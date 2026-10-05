@@ -7,16 +7,18 @@ import {
 	assertNetworkIdentity,
 	BRIDGE_CONTRACTS,
 	type BridgeManifest,
+	fundingAuthorizationTypedData,
 	instanceFromRecord,
 	isBridgePaused,
 	sponsorInstance,
 	syncMerchantList,
+	TOKEN_PORTAL_ABI,
 	tokenArtifact,
 	tokenBridgeArtifact,
 	tokenMinterProxyArtifact,
 } from "@inference-money/bridge-core"
 import { aztecAddressOf, castMember, MERCHANTS } from "@inference-money/demo"
-import { type Abi, type Address, erc20Abi, type Hex, type PublicClient } from "viem"
+import { type Abi, type Address, erc20Abi, type Hex, hashTypedData, type PublicClient, pad } from "viem"
 
 import { type BridgeEvmArtifacts, maskImmutables } from "./evm"
 import type { Check } from "./preflight"
@@ -73,7 +75,21 @@ async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeMani
 		pin("router.PORTAL", portalOfRouter, m.l1.portal),
 		pin("router.TOKEN", token, m.l1.usdc),
 		check("Permit2 has code", !!permit2Code && permit2Code.length > 2, `${((permit2Code?.length ?? 2) - 2) / 2} bytes`),
+		await fundingAuthorizationMatches(l1, m),
 	]
+}
+
+/** A domain or type drift would make every signature the SDK builds for the portal's signed path fail. */
+async function fundingAuthorizationMatches(l1: PublicClient, m: BridgeManifest): Promise<Check> {
+	const probe = { depositor: m.l1.deployer, submitter: m.l1.router, amount: 1n, secretHash: pad("0x1"), deadline: 1n }
+	const digest = await l1.readContract({
+		address: m.l1.portal,
+		abi: TOKEN_PORTAL_ABI,
+		functionName: "fundingAuthorizationDigest",
+		args: [probe.depositor, probe.submitter, probe.amount, probe.secretHash, probe.deadline],
+	})
+	const want = hashTypedData(fundingAuthorizationTypedData(probe, m.l1.portal, m.l1.chainId))
+	return pin("portal.fundingAuthorizationDigest == the SDK's typed data", digest, want)
 }
 
 async function verifyInstances(node: AztecNode, m: BridgeManifest): Promise<Check[]> {

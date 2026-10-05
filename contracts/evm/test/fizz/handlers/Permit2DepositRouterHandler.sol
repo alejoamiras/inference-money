@@ -109,6 +109,7 @@ abstract contract Permit2DepositRouterHandler is Properties {
 
     /// Model update after a successful router deposit by signer `depositor`.
     function _afterRouterDeposit(address depositor, bytes32 aztecRecipient, uint256 amount, bool isPrivate) internal {
+        if (!_canonical()) ghosts.staleDepositAccepted++;
         _recordDeposit(depositor, aztecRecipient, amount, isPrivate);
         ghosts.routerDeposited += amount;
         _flagInexactDeposit(amount);

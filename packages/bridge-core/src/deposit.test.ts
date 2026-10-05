@@ -3,23 +3,31 @@ import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import {
 	type Address,
+	concat,
 	encodeAbiParameters,
 	encodeEventTopics,
 	getAddress,
 	type Hex,
+	hexToBigInt,
+	hexToNumber,
+	keccak256,
 	type Log,
 	numberToHex,
 	type PublicClient,
 	pad,
 	parseEventLogs,
+	slice,
+	toHex,
 	type WalletClient,
 } from "viem"
+import { privateKeyToAccount } from "viem/accounts"
 import { PERMIT2_DEPOSIT_ROUTER_ABI } from "./abi"
 import { claimSecretHash } from "./claim-secret"
 import {
 	assertPublicRecipient,
 	confirmDeposit,
 	type DepositDraft,
+	KeyHolderRequiredError,
 	PublicDepositToUserError,
 	prepareDeposit,
 	reconcileDeposit,
@@ -28,6 +36,7 @@ import {
 } from "./deposit"
 import { NetworkMismatchError } from "./network"
 import { BridgePausedError, type PauseSource } from "./pause"
+import type { DepositTypedData } from "./permit2"
 import { a, MANIFEST as M } from "./test/fixtures"
 import type { L1Ctx } from "./types"
 
@@ -74,7 +83,7 @@ function depositLog(d: DepositDraft, o: { address?: Address; blockNumber?: bigin
 const blockHash = (n: bigint) => pad(numberToHex(n), { size: 32 })
 
 /** An L1 whose finalized block, tip, receipts and logs the test sets; counts every send. */
-function chain() {
+function chain(account: Address = ACCOUNT) {
 	const s = {
 		finalized: { number: 100n, timestamp: NOW },
 		/** What a switched provider reports for the finalized block's hash. */
@@ -89,12 +98,13 @@ function chain() {
 		sentOnChain: undefined as number | undefined,
 		sentGas: undefined as bigint | undefined,
 		estimateError: undefined as Error | undefined,
-		selected: ACCOUNT as Address,
+		selected: account,
 		sends: 0,
 		sendError: undefined as Error | undefined,
 		signError: undefined as Error | undefined,
 		signs: 0,
 		onSign: undefined as (() => void) | undefined,
+		sign: undefined as ((typedData: DepositTypedData) => Promise<Hex>) | undefined,
 	}
 	const receipt = async ({ hash }: { hash: Hex }) => {
 		const r = s.receipts.get(hash)
@@ -130,11 +140,11 @@ function chain() {
 		chain: undefined,
 		getChainId: async () => s.chainId,
 		getAddresses: async () => [s.selected],
-		signTypedData: async () => {
+		signTypedData: async ({ account: _, ...typedData }: DepositTypedData & { account: unknown }) => {
 			s.signs++
 			s.onSign?.()
 			if (s.signError) throw s.signError
-			return pad("0x5195", { size: 65 })
+			return s.sign ? s.sign(typedData) : pad("0x5195", { size: 65 })
 		},
 		writeContract: async (req: { chain: { id: number } | null; gas?: bigint }) => {
 			s.sentOnChain = req.chain?.id
@@ -144,7 +154,7 @@ function chain() {
 			return TX
 		},
 	} as unknown as WalletClient
-	const l1: L1Ctx = { publicClient, walletClient, account: ACCOUNT }
+	const l1: L1Ctx = { publicClient, walletClient, account }
 	return { s, l1 }
 }
 
@@ -262,6 +272,53 @@ describe("submitDeposit", () => {
 		await expect(submitDeposit(d, l1, M, flag.node)).rejects.toBeInstanceOf(BridgePausedError)
 		expect([s.signs, s.sends]).toEqual([1, 0])
 		expect(d.submission).toBeUndefined()
+	})
+})
+
+describe("the private deposit's key-holder pre-check", () => {
+	// Deterministic test keys; they hold nothing anywhere.
+	const holder = privateKeyToAccount(keccak256(toHex("depositor")))
+	const stranger = privateKeyToAccount(keccak256(toHex("stranger")))
+	const N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n
+	/** The same key's other valid signature: `s` mirrored, `v` flipped; viem recovers it, OpenZeppelin refuses it. */
+	const highS = (sig: Hex) => {
+		const v = hexToNumber(slice(sig, 64, 65))
+		return concat([
+			slice(sig, 0, 32),
+			numberToHex(N - hexToBigInt(slice(sig, 32, 64)), { size: 32 }),
+			numberToHex(v === 27 ? 28 : 27, { size: 1 }),
+		])
+	}
+	const yParity = (sig: Hex) => concat([slice(sig, 0, 64), numberToHex(hexToNumber(slice(sig, 64, 65)) - 27, { size: 1 })])
+
+	it("sends the account's own signature", async () => {
+		const { s, l1 } = chain(holder.address)
+		s.sign = (td) => holder.signTypedData(td)
+		expect(await submitDeposit(await draft("private"), l1, M, LIVE)).toBe(TX)
+	})
+
+	it("refuses a contract's, another key's, a compact, a high-s or a 0/1-v signature before estimating or sending", async () => {
+		const forms: ((td: DepositTypedData) => Promise<Hex>)[] = [
+			async () => pad("0x5195", { size: 65 }),
+			async () => "0x1234",
+			async (td) => slice(await holder.signTypedData(td), 0, 64),
+			(td) => stranger.signTypedData(td),
+			async (td) => highS(await holder.signTypedData(td)),
+			async (td) => yParity(await holder.signTypedData(td)),
+		]
+		for (const form of forms) {
+			const { s, l1 } = chain(holder.address)
+			s.sign = form
+			s.estimateError = new Error("estimated")
+			const d = await draft("private")
+			await expect(submitDeposit(d, l1, M, LIVE)).rejects.toBeInstanceOf(KeyHolderRequiredError)
+			expect([s.sends, d.submission]).toEqual([0, undefined])
+		}
+	})
+
+	it("leaves the public leg to the router, which never checks its signer", async () => {
+		const { l1 } = chain(holder.address)
+		expect(await submitDeposit(await draft("public"), l1, M, LIVE)).toBe(TX)
 	})
 })
 

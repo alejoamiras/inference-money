@@ -4,7 +4,8 @@ import { join } from "node:path"
 import { OutboxAbi } from "@aztec-foundation/l1-artifacts/OutboxAbi"
 import { RegistryAbi } from "@aztec-foundation/l1-artifacts/RegistryAbi"
 import { RollupAbi } from "@aztec-foundation/l1-artifacts/RollupAbi"
-import { OUTBOX_ABI, PERMIT2_DEPOSIT_ROUTER_ABI, REGISTRY_ABI, ROLLUP_ABI, TOKEN_PORTAL_ABI } from "./abi"
+import { encodeErrorResult } from "viem"
+import { OUTBOX_ABI, PERMIT2_DEPOSIT_ROUTER_ABI, PERMIT2_SIGNATURE_ERRORS, REGISTRY_ABI, ROLLUP_ABI, TOKEN_PORTAL_ABI } from "./abi"
 
 type Param = { name?: string; type: string; indexed?: boolean; components?: readonly Param[] }
 type Entry = { type: string; name?: string; stateMutability?: string; inputs?: readonly Param[]; outputs?: readonly Param[] }
@@ -43,13 +44,21 @@ const forgeAbi = (contract: string): Entry[] => {
 }
 
 describe("hand-written ABIs equal the compiled contracts", () => {
-	it("Permit2DepositRouter", () => expectPinned(PERMIT2_DEPOSIT_ROUTER_ABI, forgeAbi("Permit2DepositRouter")))
+	it("Permit2DepositRouter (Permit2's own errors are pinned by selector below)", () => {
+		const permit2Errors = new Set<string>(PERMIT2_SIGNATURE_ERRORS.map((e) => e.name))
+		const ours = (PERMIT2_DEPOSIT_ROUTER_ABI as readonly Entry[]).filter((e) => !permit2Errors.has(e.name ?? ""))
+		expectPinned(ours, forgeAbi("Permit2DepositRouter"))
+	})
 	it("TokenPortal (with the Outbox errors its withdraw bubbles)", () =>
 		expectPinned(TOKEN_PORTAL_ABI, [...forgeAbi("TokenPortal"), ...(OutboxAbi as readonly Entry[])]))
 	it("a drifted entry fails the pin", () => {
 		const deposit = PERMIT2_DEPOSIT_ROUTER_ABI[0]
 		const swapped = { ...deposit, inputs: [deposit.inputs[1], deposit.inputs[0], ...deposit.inputs.slice(2)] }
 		expect(() => expectPinned([swapped], forgeAbi("Permit2DepositRouter"))).toThrow()
+	})
+	it("Permit2's signature errors, by selector", () => {
+		expect(encodeErrorResult({ abi: PERMIT2_SIGNATURE_ERRORS, errorName: "InvalidContractSignature" })).toBe("0xb0669cbc")
+		expect(encodeErrorResult({ abi: PERMIT2_SIGNATURE_ERRORS, errorName: "InvalidSigner" })).toBe("0x815e1d64")
 	})
 	it("Outbox, Registry, Rollup", () => {
 		expectPinned(OUTBOX_ABI, OutboxAbi as readonly Entry[])

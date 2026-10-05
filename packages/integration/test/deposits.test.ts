@@ -4,16 +4,30 @@ import {
 	assertPublicRecipient,
 	type ClaimTicket,
 	claim,
+	claimBinding,
 	confirmDeposit,
+	fundingAddress,
+	fundingAuthorizationTypedData,
 	isClaimConsumed,
 	NetworkMismatchError,
 	PublicDepositToUserError,
 	prepareDeposit,
 	reconcileDeposit,
+	sendChain,
+	signerOf,
 	submitDeposit,
+	TOKEN_PORTAL_ABI,
 	waitClaimFinalized,
 } from "@inference-money/bridge-core"
-import { isAddressEqual, type PublicClient, WaitForTransactionReceiptTimeoutError, type WalletClient } from "viem"
+import {
+	erc20Abi,
+	type Hex,
+	isAddressEqual,
+	type PublicClient,
+	parseEventLogs,
+	WaitForTransactionReceiptTimeoutError,
+	type WalletClient,
+} from "viem"
 import {
 	claimable,
 	claimFor,
@@ -90,6 +104,69 @@ describe.skipIf(!INTEGRATION)("deposits and claims", () => {
 			expect(await claimFor(t), `${kind}: the signer's claim consumes the message`).toBe("claimed")
 		}
 		expect([(await l2Balances(shop)).public, (await l2Balances(bob)).private]).toEqual([USDC, USDC])
+	})
+
+	it("[A30] the portal's signed deposit, sent by another account, names its signer, and the claim binds to the signer", async () => {
+		const { manifest: m, wallet } = harness()
+		const [signer, submitter, bob] = await Promise.all([l1Actor(), l1Actor(), l2Actor()])
+		const books = await openBooks()
+		const amount = 2n * USDC
+		const mined = async (hash: Hex) => {
+			const r = await submitter.publicClient.waitForTransactionReceipt({ hash })
+			if (r.status !== "success") throw new Error(`${hash} reverted`)
+			return r
+		}
+		// The portal pulls from its caller, the submitter, with a plain allowance.
+		await mined(
+			await submitter.walletClient.writeContract({
+				address: m.l1.usdc,
+				abi: erc20Abi,
+				functionName: "approve",
+				args: [m.l1.portal, amount],
+				account: signerOf(submitter),
+				chain: sendChain(submitter, m.l1.chainId),
+			}),
+		)
+		const [signerBefore, submitterBefore] = await Promise.all([usdcOf(signer.account), usdcOf(submitter.account)])
+		// The claim reads only the intent, the salt, the leaf index and the depositor; the draft's router fields go unused.
+		const d = await prepareDeposit({ amount, recipient: bob, kind: "private" }, m, await l1Now())
+		const deadline = (await l1Now())() + 1_800n
+		const auth = { depositor: signer.account, submitter: submitter.account, amount, secretHash: d.witness.secretHash, deadline }
+		const signature = await signer.walletClient.signTypedData({
+			account: signerOf(signer),
+			...fundingAuthorizationTypedData(auth, m.l1.portal, m.l1.chainId),
+		})
+		const receipt = await mined(
+			await submitter.walletClient.writeContract({
+				address: m.l1.portal,
+				abi: TOKEN_PORTAL_ABI,
+				functionName: "depositToAztecPrivate",
+				args: [signer.account, amount, d.witness.secretHash, deadline, signature],
+				account: signerOf(submitter),
+				chain: sendChain(submitter, m.l1.chainId),
+			}),
+		)
+		const portalLogs = receipt.logs.filter((l) => isAddressEqual(l.address, m.l1.portal))
+		const [event, ...extra] = parseEventLogs({
+			abi: TOKEN_PORTAL_ABI,
+			eventName: "DepositToAztecPrivate",
+			logs: portalLogs,
+			strict: true,
+		})
+		if (!event || extra.length > 0) throw new Error("expected exactly one portal DepositToAztecPrivate log")
+		expect(isAddressEqual(event.args.depositor, signer.account), "the message names the signer, not the submitter").toBe(true)
+		expect([await usdcOf(signer.account), await usdcOf(submitter.account)], "the USDC came from the submitter").toEqual([
+			signerBefore,
+			submitterBefore - amount,
+		])
+		const t = books.deposit({ draft: d, messageHash: event.args.key, leafIndex: event.args.index, depositor: event.args.depositor })
+		await claimable(t, bob)
+		expect(await claimBinding(wallet, m, bob, t.depositor)).toBe("binds")
+		expect(await claimFor(t)).toBe("claimed")
+		const bound = await fundingAddress(wallet, m, bob)
+		expect(bound !== undefined && isAddressEqual(bound, signer.account), "bound to the signer").toBe(true)
+		expect((await l2Balances(bob)).private).toBe(amount)
+		await books.settle()
 	})
 
 	it("[A3] a second claim of the same deposit reports consumed-unknown, public and private, on its nullifier alone", async () => {

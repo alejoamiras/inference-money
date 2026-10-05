@@ -607,7 +607,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - It must pass before the first keyed deployment in Arc 5, through an endpoint the owner provides when asked.
 - It never runs during a keyed run, and nothing deploys while it is open.
 
-**P5. Fizz properties and campaign, and the L1 TypeScript mirror.**
+**P5. Fizz properties and campaign, and the L1 TypeScript mirror.** ✓
 - The rest of section 6's fizz changes. The call sites already moved in P3 and P4; this phase adds the new properties, the canonical-switch handler and the submitter cases.
 - **Deposit liveness under a rollup switch.** `_cleanEnv()` (`test/fizz/Base.sol:242`) gains a deposit-only precondition: the portal's rollup is still canonical. Without it, `adv_depositLiveness` (`handlers/RoundTripHandler.sol:121`) records the correct `RollupNotCanonical` refusal as `depositLivenessBroken`, and GL-29 (`Properties.sol:289`) fails. Withdrawal liveness stays independent of canonicality. `_cleanEnv()` also guards a withdrawal postcondition (`Properties.sol:469`), so the new precondition is added only where deposits are checked, never to that withdrawal guard. A regression sequence pins this: switch the canonical rollup, try a deposit, then check that GL-29 holds and a withdraw still pays.
 - `B/abi.ts`, `B/funding-authorization.ts` + its pinned test, `KeyHolderRequiredError` + `deposit.test.ts`.

@@ -1,7 +1,21 @@
 import type { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import type { Fr } from "@aztec-labs/aztec.js/fields"
 import { computeSecretHash } from "@aztec-labs/stdlib/hash"
-import { type Address, getAbiItem, type Hex, isAddressEqual, type Log, type PublicClient, pad, parseEventLogs } from "viem"
+import {
+	type Address,
+	getAbiItem,
+	type Hex,
+	hexToBigInt,
+	hexToNumber,
+	isAddressEqual,
+	type Log,
+	type PublicClient,
+	pad,
+	parseEventLogs,
+	recoverTypedDataAddress,
+	size,
+	slice,
+} from "viem"
 import { PERMIT2_DEPOSIT_ROUTER_ABI } from "./abi"
 import { deriveClaimSecret } from "./claim-secret"
 import { isUserRejection } from "./errors"
@@ -65,6 +79,31 @@ export class PublicDepositToUserError extends Error {
 	constructor(readonly recipient: AztecAddress) {
 		super(`Public deposits fund merchants only, and ${recipient} is not one. Deposit privately instead.`)
 		this.name = "PublicDepositToUserError"
+	}
+}
+
+/** The router accepts a private deposit only under its caller's own ECDSA signature, never a contract's approval. */
+export class KeyHolderRequiredError extends Error {
+	constructor(readonly account: Address) {
+		super(
+			`${account} did not sign as its own key holder (the wallet signed as a contract, or in a form the router refuses). ` +
+				"Private deposits need the key holder's own signature; a smart-contract wallet uses the portal's signed path.",
+		)
+		this.name = "KeyHolderRequiredError"
+	}
+}
+
+const SECP256K1_HALF_N = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n
+
+/** OpenZeppelin's ECDSA rules, stricter than viem's recovery: 65 bytes, `v` 27 or 28, low `s`, and the account's key. */
+async function signedByKeyHolder(d: DepositDraft, signature: Hex, account: Address): Promise<boolean> {
+	try {
+		if (size(signature) !== 65) return false
+		const v = hexToNumber(slice(signature, 64, 65))
+		if ((v !== 27 && v !== 28) || hexToBigInt(slice(signature, 32, 64)) > SECP256K1_HALF_N) return false
+		return isAddressEqual(await recoverTypedDataAddress({ ...d.typedData, signature }), account)
+	} catch {
+		return false
 	}
 }
 
@@ -136,6 +175,7 @@ async function signAndSend(d: DepositDraft, l1: L1Ctx, m: BridgeManifest, l2: Pa
 	const finalized = await l1.publicClient.getBlock({ blockTag: "finalized" })
 	on?.("signing")
 	const signature = await l1.walletClient.signTypedData({ account: signerOf(l1), ...d.typedData })
+	if (d.witness.isPrivate && !(await signedByKeyHolder(d, signature, l1.account))) throw new KeyHolderRequiredError(l1.account)
 	await Promise.all([assertSigningContext(l1, null, m, expected), assertBridgeLive(l2, m)])
 	const { message } = d.typedData
 	const call = {
