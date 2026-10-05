@@ -9,8 +9,9 @@
 //      is stamped, never padded;
 //   3. otherwise, of two merchants, prove the one whose read caps the tx's expiry latest (its horizon).
 // A payment into a request has its own order, by what each proof costs the tx's expiry: a stamp still unmarked (it
-// caps nothing a tx would not have anyway), else whichever of a merchant payer and a live stamp caps the tx later
-// (the payer on a tie), else NEITHER.
+// caps nothing a tx would not have anyway), else a merchant payer whose read leaves the standard expiry, else a live
+// stamp (its cap tells only the request's hour, where a shortened payer's would name the payer), else any merchant
+// payer, else NEITHER.
 use aztec::{
     oracle::{capsules, nullifiers::check_nullifier_exists, storage::raw_storage_read},
     protocol::{
@@ -23,8 +24,7 @@ use aztec::{
     state_vars::{Map, PublicImmutable, StateVariable},
 };
 use merchant_stamp::{
-    MERCHANT_SIDE_SLOT, stamp, stamp_bucket, STAMP_BUCKET_SLOT, stamp_deadline, STAMP_LIVE_BUCKETS,
-    stamp_unmarked_until,
+    MERCHANT_SIDE_SLOT, stamp, stamp_bucket, STAMP_BUCKET_SLOT, STAMP_LIVE_BUCKETS, stamp_unmarked_until,
 };
 
 // The switch-off delay's bounds. The floor is DelayedPublicMutable's minimum. Above the ceiling a delay changes nothing:
@@ -32,6 +32,8 @@ use merchant_stamp::{
 // DelayedPublicMutable whose delay is 86400).
 pub global MERCHANT_MIN_DELAY: u64 = 3600;
 pub global MERCHANT_MAX_DELAY: u64 = 86400;
+// That anchor + 86399, as the wallet commits it, rounded down to the hour: a read capping at or past it marks nothing.
+global STANDARD_TX_LIFETIME: u64 = 82800;
 
 pub global FIRST: u8 = 0;
 pub global SECOND: u8 = 1;
@@ -96,8 +98,8 @@ pub unconstrained fn payment_side_hint(
             FIRST
         } else {
             let payer = probe(list, from);
-            let stamp_cap = bucket.map(|b| stamp_deadline(b)).unwrap_or(0);
-            if payer.merchant & (payer.horizon >= stamp_cap) {
+            let unmarked_payer = payer.horizon >= list.anchor.timestamp() + STANDARD_TX_LIFETIME;
+            if payer.merchant & (bucket.is_none() | unmarked_payer) {
                 SECOND
             } else if bucket.is_some() {
                 FIRST

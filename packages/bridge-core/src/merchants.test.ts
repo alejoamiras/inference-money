@@ -15,7 +15,7 @@ import {
 	sideCapsule,
 	tokenEvent,
 } from "./merchants"
-import { MERCHANT_SIDE_SLOT, requestStampAt, stampBucket } from "./stamp"
+import { MERCHANT_SIDE_SLOT, requestStampAt, STANDARD_TX_LIFETIME, stampBucket } from "./stamp"
 
 const NOW = 1_000_000n
 const [m1, m2, alice, bob] = await Promise.all([AztecAddress.random(), AztecAddress.random(), AztecAddress.random(), AztecAddress.random()])
@@ -107,14 +107,14 @@ describe("the side a call proves", () => {
 		expect([merchantSide(decreasing, m1, m2, false), merchantSide(decreasing, m2, m1, false)]).toEqual([Side.Second, Side.First])
 	})
 
-	it("proves a fresh stamp, else the later cap of a merchant payer and a live stamp, and refuses a user with no live stamp", () => {
+	it("proves a fresh stamp, else an unmarked merchant payer, else a live stamp, and refuses a user with no live stamp", () => {
 		const [fresh, live] = [requestStampAt(stampBucket(NOW), NOW), requestStampAt(stampBucket(NOW) - 3n, NOW)]
 		expect([paymentSide(one, fresh, m1), paymentSide(one, fresh, alice)]).toEqual([Side.First, Side.First])
 		expect([paymentSide(one, live, m1), paymentSide(one, live, alice)]).toEqual([Side.Second, Side.First])
 		expect([paymentSide(one, undefined, m1), paymentSide(one, undefined, alice)]).toEqual([Side.Second, Side.Neither])
 		const offAt = (changeAt: bigint) => list([[m1, entry({ scheduledOff: true, changeAt })]])
-		expect(paymentSide(offAt(NOW + HOUR), live, m1)).toBe(Side.First)
-		expect(paymentSide(offAt(live.expiresAt + 1n), live, m1), "a tie proves the payer").toBe(Side.Second)
+		expect(paymentSide(offAt(live.expiresAt + HOUR), live, m1), "later than the stamp, still marked").toBe(Side.First)
+		expect(paymentSide(offAt(NOW + STANDARD_TX_LIFETIME + 1n), live, m1)).toBe(Side.Second)
 		expect(paymentSide(offAt(NOW + HOUR), undefined, m1)).toBe(Side.Second)
 	})
 

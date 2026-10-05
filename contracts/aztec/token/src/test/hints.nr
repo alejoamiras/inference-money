@@ -238,17 +238,19 @@ unconstrained fn the_payment_probe_follows_its_order() {
     assert_eq(payment_side(w, stamped, w.alice), (NEITHER, 0));
 }
 
-// A payer whose switch-off lands before a live stamp's deadline would cap the tx earlier, and name itself by the
-// change's public time, so the stamp is proven; a payer settled at 24 h caps later than any live stamp.
+// A payer whose pending switch-off shortens the tx would name itself by the change's public time, so the live stamp,
+// whose cap tells only the request's hour, is proven, even where the payer's cap is the later one; a payer settled at
+// 24 h marks nothing and is proven.
 #[test]
-unconstrained fn a_merchant_payer_capped_before_a_live_stamp_pays_through_it() {
+unconstrained fn a_marked_merchant_payer_pays_through_a_live_stamp() {
     let w = utils::setup_merchant_world(false);
-    let off_at = switch_off(w, w.m2);
     let (stamped, bucket) = stamped_request(w);
-    let anchor = stamp_unmarked_until(bucket);
+    utils::anchor_at(w.env, w.env.last_block_timestamp() + 5 * HOUR);
+    let off_at = switch_off(w, w.m2);
+    let anchor = stamp_deadline(bucket) - 6 * HOUR;
     utils::anchor_at(w.env, anchor);
     assert_horizon(w, w.m2, off_at - 1 - anchor);
-    assert(off_at - 1 < stamp_deadline(bucket));
+    assert(off_at - 1 > stamp_deadline(bucket));
     assert_eq(payment_side(w, stamped, w.m2), (FIRST, bucket));
     assert_eq(payment_side(w, stamped, w.m1), (SECOND, bucket));
 }

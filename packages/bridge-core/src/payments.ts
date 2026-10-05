@@ -37,17 +37,12 @@ import { tokenArtifact } from "./artifacts"
 import { L2_DONE, type L2Wait } from "./claim"
 import { type MerchantList, merchantSide, paymentSide, Side, sideCapsule, withFreshList } from "./merchants"
 import { TOKEN_REFUSALS } from "./rules"
-import { bucketCapsule, liveBuckets, REQUEST_OPENED_EFFECT, type RequestStamp, requestStampAt, stamp } from "./stamp"
+import { bucketCapsule, liveBuckets, REQUEST_OPENED_EFFECT, type RequestStamp, requestStampAt, STANDARD_TX_LIFETIME, stamp } from "./stamp"
 
 /** aztec-nr's DOM_SEP__NOTE_COMPLETION_LOG_TAG (`note/partial_note.nr`): tags the log every completion emits. */
 const DOM_SEP__NOTE_COMPLETION_LOG_TAG = 3372669888
 /** The kernel's cap on a tx's lifetime (MAX_TX_LIFETIME): no tx outlives its anchor by more. */
 const MAX_TX_LIFETIME = 86_400n
-/**
- * The expiry the PXE commits for a tx the kernel caps at its default update horizon (anchor + 86 399 s): rounded down
- * to whole hours. Every tx that reads no shorter-lived state commits it, so it marks nothing.
- */
-export const STANDARD_TX_LIFETIME = 82_800n
 /** How long a reservation blocks other clients before it counts as abandoned; the gate refuses a superseded one. */
 export const RESERVATION_TTL_MS = 10 * 60_000
 

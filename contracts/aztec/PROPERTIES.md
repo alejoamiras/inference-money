@@ -358,8 +358,7 @@
 - [ ] **GL-31** — An observer cannot spot merchant checks by their expiry: at D = 24 h with nothing pending, a tx that
   proves either merchant side, or a stamp, commits the same expiry as a tx at the same anchor that reads no entry
   (anchor + 82800 after PXE rounding). With a change pending at `toc`, the PXE rounds down from `toc − 1` (whole hours,
-  else half hours, else seconds). Doc discrepancy: docs/architecture.md says "one with a change pending, cuts the tx to
-  30 minutes or less", but a 24 h entry with a change 10 h away commits anchor + 9 h. (Category: HIGH_LEVEL; Guarantee:
+  else half hours, else seconds): a 24 h entry with a change 10 h away commits anchor + 9 h. (Category: HIGH_LEVEL; Guarantee:
   SHOULD-HOLD — docs/architecture.md "Expiry": "With D = 24 h and nothing pending, a merchant check lands on the 23 h
   every tx gets, so it neither shortens the tx nor stands out"; Priority: HIGH; Scope: always-on; Sources: RT-27,
   ADV-39, SPEC-49, ST-45)
@@ -1170,9 +1169,7 @@ merchant-to-merchant request, against docs/architecture.md), **GL-05** (a public
 the `Transfer`-event books). **GL-34** (TokenPortal accepted a zero deposit no L2 call can consume) is fixed on L1: every
 deposit path refuses zero.
 
-Documentation that disagrees with the code: docs/architecture.md "Expiry" (a pending change on a 24 h entry can leave
-far more than 30 minutes; GL-31) and its omission of the pending-decrease cap (SP-34); A7's "Only the bridge mints or
-burns" (holders can burn directly; GL-43); upstream's note in token/src/test/mint_to_commitment.nr that "the protocol still
+Documentation that disagrees with the code: A7's "Only the bridge mints or burns" (holders can burn directly; GL-43); upstream's note in token/src/test/mint_to_commitment.nr that "the protocol still
 prevents" double completion (GL-02).
 
 ## Coverage summary

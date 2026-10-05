@@ -20,7 +20,6 @@ import {
 	payRequest,
 	RESERVATION_TTL_MS,
 	requestStamp,
-	STANDARD_TX_LIFETIME,
 	siloedCompletionTag,
 } from "./payments"
 import { TOKEN_REFUSALS } from "./rules"
@@ -28,6 +27,7 @@ import {
 	MERCHANT_SIDE_SLOT,
 	REQUEST_OPENED_EFFECT,
 	STAMP_BUCKET_SLOT,
+	STANDARD_TX_LIFETIME,
 	stamp,
 	stampBucket,
 	stampDeadline,

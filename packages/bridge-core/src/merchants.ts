@@ -24,7 +24,7 @@ import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
 import { Capsule } from "@aztec-labs/stdlib/tx"
 import { tokenArtifact } from "./artifacts"
 import { type TokenRule, tokenRefusalOf } from "./rules"
-import { MERCHANT_SIDE_SLOT, type RequestStamp } from "./stamp"
+import { MERCHANT_SIDE_SLOT, type RequestStamp, STANDARD_TX_LIFETIME } from "./stamp"
 
 /** The switch-off delay's bounds: the token's MERCHANT_MIN_DELAY (DelayedPublicMutable's floor) and MERCHANT_MAX_DELAY. */
 export const MERCHANT_MIN_DELAY = 3600n
@@ -172,13 +172,14 @@ export function merchantSide(list: MerchantList, first: AztecAddress, second: Az
 
 /**
  * The side a payment into a request (its live stamp, if any) proves, by the token hint's order: a fresh stamp, which
- * caps no expiry; else whichever of a merchant payer and a live stamp caps the tx's expiry later, the payer on a tie,
- * its horizon taken when the stamp was read; else neither.
+ * caps no expiry; else a merchant payer whose read, taken when the stamp was read, leaves the standard expiry; else a
+ * live stamp, whose cap tells only the request's hour where a shortened payer's would name the payer; else any
+ * merchant payer; else neither.
  */
 export function paymentSide(list: MerchantList, stamp: RequestStamp | undefined, from: AztecAddress): Side {
 	if (stamp?.state === "fresh") return Side.First
 	const payer = merchantStatus(list, from).merchant
-	if (payer && (!stamp || merchantHorizon(list, from, stamp.at) >= stamp.expiresAt)) return Side.Second
+	if (payer && (!stamp || merchantHorizon(list, from, stamp.at) >= stamp.at + STANDARD_TX_LIFETIME)) return Side.Second
 	return stamp ? Side.First : Side.Neither
 }
 
