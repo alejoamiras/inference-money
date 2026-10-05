@@ -1,0 +1,12 @@
+# Phase 3: the signed private deposit (2026-10-05)
+
+| Attempt | Result | Consequence |
+|---|---|---|
+| `_submitter()` hook (plan) | Not added. The submitter's mutant (`PortalIgnoresSubmitter`) and the unsigned depositor's (`PortalUnsignedDepositor`) both override `_fundingStructHash`, which is where either bug would live; a `_submitter()` hook would only exist for a canary that does not need it. | `depositToAztecPrivate` hashes `msg.sender` directly. Plan deviation; same coverage. |
+| `deployCodeTo("TokenPortal.sol:TokenPortal", PIN)` for the literal pins | `vm.getCode: no bytecode for contract`. | Etch a deployed portal's runtime at the pinned address instead: OZ's EIP712 rebuilds its separator whenever `address(this)` differs from the deploy-time one. Literals: typehash `0x924f…88b2`, domain separator `0x8eec…37b9`, struct hash `0xc06a…38e9`, digest `0x42ce…acbc` (computed with `cast` from the spec). |
+| forge lint on `block.timestamp > _deadline` | `block-timestamp` warning fails `forge lint src -D warnings`. `disable-next-line` cannot share the line above with Slither's own `disable-next-line`. | `forge-lint: disable-start/disable-end(block-timestamp)` around the Slither-annotated line. |
+| Slither after P3 | 2 × `reentrancy-events` on the deposit events after `inbox.sendL2Message` (same shape as before P3, newly reported). | Inline `slither-disable-next-line reentrancy-events` with the reason: the event carries the send's key and index, and every entry point is nonReentrant. 0 results. |
+| Fizz actors | `Actor` contracts replaced by key-held EOAs (`vm.addr(keccak(label))`, `actorKey`); `_authorize` signs a fresh authorization per deposit (a nonce in the deadline keeps identical deposits from sharing a digest, which `adv_depositLiveness` would otherwise record as a liveness break). `Actor.sol` deleted (unused; its `selfdestruct` warned). | Third-party submitters and the new properties are P5's. |
+| `vm.prank`/`vm.expectRevert` before a call whose arguments read the portal | The digest read would consume the prank or the expectation. | Every test signs before pranking or expecting (`_signed`, `_authorize`). |
+
+Gate: `bun run lint` 0, `bun run typecheck` 0, `bun run test` 0, `bun run test:evm` 114 passed (FundingAuthorization 19/19 incl. five forge canaries), `bun run test:evm:formal` 15/15 + self-test (new `check_depositPrivate_rejectsExpired`, its canary), `bun run test:evm:slither` 0 results.

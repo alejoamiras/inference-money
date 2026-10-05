@@ -71,10 +71,11 @@ abstract contract TokenPortalHandler is Properties {
 
     function tokenPortal_deposit_zeroAmount(uint256 _accountSeed, bool _isPrivate) public {
         bytes32 to = toL2Account(_accountSeed);
+        (uint256 deadline, bytes memory signature) = _authorize(actor, actor, 0, bytes32(0));
         uint256 consumed = _noopBegin();
         vm.startPrank(actor);
         if (_isPrivate) {
-            try portal.depositToAztecPrivate(0, bytes32(0)) {
+            try portal.depositToAztecPrivate(actor, 0, bytes32(0), deadline, signature) {
                 ghosts.boundaryAccepted++;
             } catch (bytes memory reason) {
                 _requireRefusal(reason, TokenPortal.ZeroAmount.selector);
@@ -94,10 +95,11 @@ abstract contract TokenPortalHandler is Properties {
     /// Unfunded, so only the cap's own selector counts as a refusal: without the cap the pull would revert instead.
     function tokenPortal_deposit_overU128(bool _isPrivate) public {
         uint256 amount = uint256(type(uint128).max) + 1;
+        (uint256 deadline, bytes memory signature) = _authorize(actor, actor, amount, bytes32(0));
         uint256 consumed = _noopBegin();
         vm.startPrank(actor);
         if (_isPrivate) {
-            try portal.depositToAztecPrivate(amount, bytes32(0)) {
+            try portal.depositToAztecPrivate(actor, amount, bytes32(0), deadline, signature) {
                 ghosts.boundaryAccepted++;
             } catch (bytes memory reason) {
                 _requireRefusal(reason, TokenPortal.AmountExceedsL2Max.selector);
@@ -234,8 +236,11 @@ abstract contract TokenPortalHandler is Properties {
         public
         asActor
     {
+        (uint256 deadline, bytes memory signature) =
+            _authorize(actor, actor, _amount, _secretHashForL2MessageConsumption);
         snapshotBefore();
-        (, uint256 index) = portal.depositToAztecPrivate(_amount, _secretHashForL2MessageConsumption);
+        (, uint256 index) =
+            portal.depositToAztecPrivate(actor, _amount, _secretHashForL2MessageConsumption, deadline, signature);
         _afterDirectDeposit(actor, bytes32(0), _amount, true);
         snapshotAfter();
         _directDepositProperties(_amount, _secretHashForL2MessageConsumption, index);

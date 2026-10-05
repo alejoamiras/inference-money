@@ -13,6 +13,7 @@ EXPECTED=(
   "FormalPortalTest check_deposit_rejectsStaleRollup"
   "FormalPortalTest check_deposit_rejectsZeroAmount"
   "FormalPortalTest check_depositFor_rejectsNonRouter"
+  "FormalPortalTest check_depositPrivate_rejectsExpired"
   "FormalPortalTest check_depositPublic_rejectsBadRefund"
   "FormalPortalTest check_depositPublic_rejectsOutOfFieldRecipient"
   "FormalPortalTest check_initialize_rejectsNonInitializer"
@@ -50,16 +51,17 @@ self_test() {
   tmp=$(mktemp -d)
   # shellcheck disable=SC2064 # expand now: tmp is local
   trap "rm -rf '$tmp'" EXIT
-  good="Running 8 tests for test/FormalPortal.t.sol:FormalPortalTest
+  good="Running 9 tests for test/FormalPortal.t.sol:FormalPortalTest
 [PASS] check_deposit_rejectsAmountAboveU128(bytes32,uint256,bytes32) (paths: 1)
 [PASS] check_deposit_rejectsStaleRollup(address,bytes32,uint256,bytes32,address) (paths: 4)
 [PASS] check_deposit_rejectsZeroAmount(address,bytes32,bytes32) (paths: 2)
 [PASS] check_depositFor_rejectsNonRouter(address,address,bytes32,uint256,bytes32) (paths: 3)
+[PASS] check_depositPrivate_rejectsExpired(address,uint256,bytes32,uint256,uint256) (paths: 2)
 [PASS] check_depositPublic_rejectsBadRefund(uint8,bytes32,uint256,bytes32) (paths: 3)
 [PASS] check_depositPublic_rejectsOutOfFieldRecipient(address,bytes32,uint256,bytes32) (paths: 2)
 [PASS] check_initialize_rejectsNonInitializer(address,address,bytes32,address) (paths: 3)
 [PASS] check_initializedBindingsCannotChange(address,bytes32,address) (paths: 2)
-Symbolic test result: 8 passed; 0 failed; time: 0.31s
+Symbolic test result: 9 passed; 0 failed; time: 0.31s
 Running 6 tests for test/FormalRouter.t.sol:FormalRouterTest
 [PASS] check_deposit_conservesUserFunds(uint128,uint128,uint128,bool) (paths: 478)
 [PASS] check_deposit_namesItsCallerAsDepositor(address,uint128,bool) (paths: 8)

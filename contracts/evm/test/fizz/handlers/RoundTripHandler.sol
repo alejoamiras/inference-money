@@ -197,13 +197,15 @@ abstract contract RoundTripHandler is AztecL2Handler, Permit2DepositRouterHandle
         returns (bool ok)
     {
         bytes32 recipient = isPrivate ? bytes32(0) : to;
+        (uint256 deadline, bytes memory signature) =
+            !viaRouter && isPrivate ? _authorize(who, who, amount, secret) : (0, bytes(""));
         vm.prank(who);
         if (viaRouter) {
             try router.deposit(amount, recipient, secret, isPrivate, 0, block.timestamp + 1, "") {
                 ok = true;
             } catch {}
         } else if (isPrivate) {
-            try portal.depositToAztecPrivate(amount, secret) {
+            try portal.depositToAztecPrivate(who, amount, secret, deadline, signature) {
                 ok = true;
             } catch {}
         } else {

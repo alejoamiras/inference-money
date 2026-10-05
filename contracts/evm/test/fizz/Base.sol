@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.27 <0.9.0;
 
-import {Actor} from "./Actor.sol";
 import {Clamp} from "./utils/Clamp.sol";
 import {DecimalPrinter} from "./utils/DecimalPrinter.sol";
 import {Deployer} from "./utils/Deployer.sol";
@@ -33,7 +32,6 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     string[] internal ACTOR_LABELS = ["Alice", "Bob", "Charlie"];
     uint256 internal constant BLOCK_INTERVAL = 12 seconds;
-    uint256 internal constant INITIAL_ETH_BALANCE = 1_000 ether;
     /// 1B USDC (6 decimals) per actor: no realistic clamp ever runs a funded actor dry.
     uint256 internal constant INITIAL_TOKEN_BALANCE = 1e15;
     /// Upper clamp for "realistic" deposits and exits: 1M USDC.
@@ -129,6 +127,10 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     address[] internal actors;
     address internal actor;
+    /// Actors are key-held EOAs, so they can sign the portal's private-deposit authorizations.
+    mapping(address actor => uint256) internal actorKey;
+    /// Spent into each authorization's deadline, so two identical deposits never share a digest.
+    uint256 internal authorizationNonce;
     address internal admin;
 
     modifier asActor() virtual {
@@ -191,11 +193,11 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         vm.label(admin, "Admin");
 
         for (uint256 i; i < ACTOR_LABELS.length; i++) {
-            address _actor = address(new Actor{value: INITIAL_ETH_BALANCE}());
+            uint256 key = uint256(keccak256(bytes(ACTOR_LABELS[i])));
+            address _actor = vm.addr(key);
+            actorKey[_actor] = key;
             actors.push(_actor);
-            if (ACTOR_LABELS.length > i) {
-                vm.label(_actor, ACTOR_LABELS[i]);
-            }
+            vm.label(_actor, ACTOR_LABELS[i]);
             // Real holders approve both spenders once: the portal for direct deposits, Permit2 for signed ones.
             usdc.mint(_actor, INITIAL_TOKEN_BALANCE);
             vm.startPrank(_actor);
@@ -228,6 +230,17 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
     function _otherActor(address not, uint256 seed) internal view returns (address other) {
         other = actors[seed % actors.length];
         if (other == not) other = actors[(seed + 1) % actors.length];
+    }
+
+    /// `depositor`'s fresh authorization for `submitter`'s private deposit; the deadline it signed is returned with it.
+    function _authorize(address depositor, address submitter, uint256 amount, bytes32 secretHash)
+        internal
+        returns (uint256 deadline, bytes memory signature)
+    {
+        deadline = block.timestamp + 1 + authorizationNonce++;
+        bytes32 digest = portal.fundingAuthorizationDigest(depositor, submitter, amount, secretHash, deadline);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(actorKey[depositor], digest);
+        signature = abi.encodePacked(r, s, v);
     }
 
     /// A boundary probe's revert is a refusal only with its rule's own selector; any other revert could hide the rule.

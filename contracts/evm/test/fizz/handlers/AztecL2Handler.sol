@@ -151,7 +151,7 @@ abstract contract AztecL2Handler is Properties {
     function _env_armReentry(uint256 targetSeed, uint256 payloadSeed) internal {
         if (targetSeed % 2 == 0) {
             bytes memory payload = payloadSeed % 2 == 0
-                ? abi.encodeCall(TokenPortal.depositToAztecPrivate, (1, bytes32(0)))
+                ? abi.encodeCall(TokenPortal.depositToAztecPrivate, (actors[0], 1, bytes32(0), block.timestamp, ""))
                 : abi.encodeCall(TokenPortal.withdraw, (actors[0], 1, false, Epoch.wrap(0), 1, 0, new bytes32[](0)));
             usdc.arm(address(portal), address(portal), address(portal), payload);
         } else {

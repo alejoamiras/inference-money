@@ -8,6 +8,7 @@ import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
 import {
     PortalWithoutCanonicalCheck,
     PortalWithoutCap,
+    PortalWithoutDeadline,
     PortalWithoutDepositorCheck,
     PortalWithoutInitializerCheck,
     PortalWithoutInitOnce,
@@ -47,6 +48,7 @@ contract FormalPortalTest is ProofCanary {
     string internal constant ZERO_DEPOSITED = "a zero deposit succeeded";
     string internal constant STALE_DEPOSITED = "a deposit reached a rollup that is no longer canonical";
     string internal constant BAD_REFUND_DEPOSITED = "a public deposit named a refund address no return can leave";
+    string internal constant EXPIRED_DEPOSITED = "an expired authorization deposited";
 
     TokenPortal internal locked;
     StubRouter internal routerA;
@@ -131,6 +133,16 @@ contract FormalPortalTest is ProofCanary {
         proveRejectsBadRefund(funded, which, to, amount, secretHash);
     }
 
+    function check_depositPrivate_rejectsExpired(
+        address depositor,
+        uint256 amount,
+        bytes32 secretHash,
+        uint256 deadline,
+        uint256 timestamp
+    ) public {
+        proveRejectsExpired(funded, depositor, amount, secretHash, deadline, timestamp, new bytes(65));
+    }
+
     /// `p` was initialized against registry A by this contract, so the call clears the deployer-only guard and meets
     /// the init-once guard alone.
     function proveInitOnce(TokenPortal p, address candidateUnderlying, bytes32 candidateBridge, address candidateRouter)
@@ -163,7 +175,9 @@ contract FormalPortalTest is ProofCanary {
         }
     }
 
-    /// `p` is bound to registry A (so to `inboxA`) and may pull any amount from this contract.
+    /// `p` is bound to registry A (so to `inboxA`) and may pull any amount from this contract. The private leg goes
+    /// through the router: a direct private deposit checks its signature before the cap, which halmos cannot model
+    /// (FundingAuthorization.t.sol pins the signed cap refusal).
     function proveCap(TokenPortal p, bytes32 to, uint256 amount, bytes32 secretHash) public {
         vm.assume(amount > type(uint128).max);
         uint256 sent = inboxA.sent();
@@ -172,7 +186,8 @@ contract FormalPortalTest is ProofCanary {
         } catch (bytes memory reason) {
             assertEq(bytes4(reason), TokenPortal.AmountExceedsL2Max.selector, "public: rejected for the wrong reason");
         }
-        try p.depositToAztecPrivate(amount, secretHash) {
+        vm.prank(p.router());
+        try p.depositToAztecPrivateFor(address(this), amount, secretHash) {
             assertTrue(false, "private deposit above u128 succeeded");
         } catch (bytes memory reason) {
             assertEq(bytes4(reason), TokenPortal.AmountExceedsL2Max.selector, "private: rejected for the wrong reason");
@@ -317,6 +332,30 @@ contract FormalPortalTest is ProofCanary {
         assertEq(p.underlying().balanceOf(address(p)), reserve, "a refused deposit moved funds");
     }
 
+    /// `p` is bound to registry A (so to `inboxA`) and may pull any amount from this contract. Expiry is checked before
+    /// the signature, so any signature, valid or not, meets that rule alone.
+    function proveRejectsExpired(
+        TokenPortal p,
+        address depositor,
+        uint256 amount,
+        bytes32 secretHash,
+        uint256 deadline,
+        uint256 timestamp,
+        bytes memory signature
+    ) public {
+        vm.assume(deadline < timestamp);
+        vm.warp(timestamp);
+        uint256 sent = inboxA.sent();
+        uint256 reserve = p.underlying().balanceOf(address(p));
+        try p.depositToAztecPrivate(depositor, amount, secretHash, deadline, signature) {
+            assertTrue(false, EXPIRED_DEPOSITED);
+        } catch (bytes memory reason) {
+            assertEq(bytes4(reason), TokenPortal.AuthorizationExpired.selector, "rejected for the wrong reason");
+        }
+        assertEq(inboxA.sent(), sent, "an expired authorization sent a message");
+        assertEq(p.underlying().balanceOf(address(p)), reserve, "an expired authorization moved funds");
+    }
+
     function _assumeValidRefund(TokenPortal p, address depositor) internal view {
         vm.assume(depositor != address(0) && depositor != address(p) && depositor != p.router());
     }
@@ -414,6 +453,22 @@ contract FormalPortalTest is ProofCanary {
         _assertProofFails(
             abi.encodeCall(this.proveRejectsBadRefund, (mutant, 0, bytes32(uint256(1)), 1e6, bytes32(0))),
             BAD_REFUND_DEPOSITED
+        );
+    }
+
+    /// With the expiry rule deleted, a valid signature carries an expired authorization all the way to the Inbox.
+    function test_canary_expiry_failsWithoutTheGuard() public {
+        TokenPortal mutant = _fundedMutant(new PortalWithoutDeadline());
+        uint256 key = 0xA11CE;
+        uint256 deadline = block.timestamp + 1 days;
+        bytes32 digest = mutant.fundingAuthorizationDigest(vm.addr(key), address(this), 1e6, bytes32(0), deadline);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        _assertProofFails(
+            abi.encodeCall(
+                this.proveRejectsExpired,
+                (mutant, vm.addr(key), 1e6, bytes32(0), deadline, deadline + 1, abi.encodePacked(r, s, v))
+            ),
+            EXPIRED_DEPOSITED
         );
     }
 

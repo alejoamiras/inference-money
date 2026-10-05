@@ -18,6 +18,7 @@ import {StubRouter, initializedPortal} from "./mocks/MockPortal.sol";
 /// this covers every address and the whole u128 amount range the L2 side accepts.
 contract PortalRoundtripFuzzTest is Test {
     bytes32 internal constant BRIDGE = bytes32(uint256(0x1111));
+    uint256 internal constant SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
 
     CapturingInbox internal inbox;
     CapturingOutbox internal outbox;
@@ -71,17 +72,27 @@ contract PortalRoundtripFuzzTest is Test {
         assertEq(inbox.lastBridge(), BRIDGE, "l2Bridge actor mismatch");
     }
 
+    /// A direct deposit's depositor is the key holder of `key`, submitting its own authorization.
     function testFuzz_depositPrivate_contentHashMatchesIndependentModel(
         bool viaRouter,
         address depositor,
+        uint256 key,
         uint256 amount,
         bytes32 secret
     ) public {
         amount = bound(amount, 1, type(uint128).max);
+        bytes memory signature;
+        if (!viaRouter) {
+            key = bound(key, 1, SECP256K1_N - 1);
+            depositor = vm.addr(key);
+            bytes32 digest = portal.fundingAuthorizationDigest(depositor, depositor, amount, secret, block.timestamp);
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+            signature = abi.encodePacked(r, s, v);
+        }
         address payer = _payer(viaRouter, depositor, amount);
         vm.prank(payer);
         if (viaRouter) portal.depositToAztecPrivateFor(depositor, amount, secret);
-        else portal.depositToAztecPrivate(amount, secret);
+        else portal.depositToAztecPrivate(depositor, amount, secret, block.timestamp, signature);
 
         bytes memory preimage = abi.encodeWithSignature("mint_to_private(uint256,address)", amount, depositor);
         assertEq(inbox.lastContentHash(), _model(preimage), "private content hash drifted");

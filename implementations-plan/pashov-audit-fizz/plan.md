@@ -543,7 +543,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `bun run test:evm && bun run test:evm:formal && bun run test:evm:slither`.
 
-**P3. The signed private deposit.**
+**P3. The signed private deposit.** ✓
 - OZ `EIP712`/`ECDSA`, the struct, the used bit, the errors, `fundingAuthorizationDigest`, the hooks.
 - `FundingAuthorization.t.sol`:
   - literals for the typehash, domain separator, struct hash and digest, computed with `cast`;
