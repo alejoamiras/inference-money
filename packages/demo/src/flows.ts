@@ -42,7 +42,7 @@ import {
 	type WalletClient,
 } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import type { User } from "./actors"
+import type { Actor } from "./actors"
 import { DEMO_SEED } from "./amounts"
 import { ethereumKey } from "./keys"
 
@@ -63,15 +63,15 @@ export interface DemoL1 {
 	chain: Chain
 }
 
-/** A_demo (alice's) or B_demo (bob's). Their keys are public: anyone may sign as them. */
-export function demoL1(rpcUrl: string, m: BridgeManifest, user: User): DemoL1 {
+/** A cast member's Ethereum account: A_demo (alice's), B_demo (bob's) or a merchant's treasury. Its key is public. */
+export function demoL1(rpcUrl: string, m: BridgeManifest, actor: Actor): DemoL1 {
 	const chain = defineChain({
 		id: m.l1.chainId,
 		name: `chain-${m.l1.chainId}`,
 		nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
 		rpcUrls: { default: { http: [rpcUrl] } },
 	})
-	const account = privateKeyToAccount(ethereumKey(m.l2.bridge.address, user))
+	const account = privateKeyToAccount(ethereumKey(m.l2.bridge.address, actor))
 	const transport = http(rpcUrl)
 	return {
 		publicClient: createPublicClient({ chain, transport }) as PublicClient,
@@ -112,8 +112,8 @@ const tokenOf = (m: BridgeManifest): AztecAddress => AztecAddress.fromStringUnsa
 export const sponsoredFee = (m: BridgeManifest) => ({ paymentMethod: sponsoredPayment(m) })
 
 export interface DepositPlan {
-	/** A_demo (alice's) or B_demo (bob's). */
-	from: User
+	/** Whose Ethereum account pays ({@link demoL1}). */
+	from: Actor
 	to: AztecAddress
 	kind: DepositKind
 	amount: bigint
