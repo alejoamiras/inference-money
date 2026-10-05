@@ -8,12 +8,12 @@ Every Aztec account is either a **merchant** (on the token's list, curated by th
 
 | Action | If it's a user | If it's a merchant |
 |---|---|---|
-| Receive a deposit from Ethereum | Private deposits only. The account's first claim binds it, for good, to the Ethereum address that deposit came from (its **funding address**); every later deposit must come from that address. | Public or private deposits. Its first private claim binds it too, to whoever made that deposit, so a merchant binds its own treasury before it is listed: while listed it exits anywhere, but after a switch-off only there. |
+| Receive a deposit from Ethereum | Private deposits only. The account's first claim binds it, for good, to the depositor that deposit names, the Ethereum key holder that made it (its **funding address**); every later deposit must name that depositor. | Public or private deposits. Its first private claim binds it too, to whoever made that deposit, so a merchant binds its own treasury before it is listed: while listed it exits anywhere, but after a switch-off only there. |
 | Claim a deposit | Only itself, privately. Its first claim binds it, so bridge-core claims it only with the owner's consent (`allowBind`). | Its private deposits only itself, as a user; its public ones anyone, and the tokens always land with it. It claims a private deposit before delivering what it pays for: until then the depositor, who holds its claim data, can return it. |
 | Send privately | Only to a merchant, or into its own private balance. | To anyone. |
 | Open a payment request | Only with a merchant as the recipient. | With any recipient. |
 | Pay a request | Only one opened for a merchant (stamped), until its stamp expires a day later. | Any request. |
-| Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address. |
+| Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address but zero and the portal. |
 
 A stamp carries the hour its opening anchored in and expires 24 h to 25 h after that anchor (`stampDeadline`), and a switch-off does not end it sooner: a switched-off merchant is a user from then on, but a request stamped for it before the switch-off landed stays payable by the payer it names until the stamp expires, so under 25 h after the switch-off. A merchant payer can pay any request without a stamp, so no stamp's expiry binds it. A switch-off demotes, it does not freeze: the ex-merchant keeps its balance under a user's rules, so it can no longer pay users back privately: it refunds them from its public balance, or on Ethereum from its funding address.
 

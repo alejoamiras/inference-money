@@ -4,7 +4,7 @@
 // - a merchant list is appended (storage, events, the MERCHANTS section); upstream's storage slots, events and function
 //   signatures are unchanged (scripts/abi-superset.test.ts);
 // - the private transfers, request openings and payments refuse unless one side is a listed merchant or the request was
-//   opened for one; each check runs first in its function body.
+//   opened for one, except a transfer into the sender's own private balance; each check runs before any balance moves.
 pub mod hints;
 pub mod test;
 

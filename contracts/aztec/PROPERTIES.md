@@ -106,16 +106,18 @@
 
 - [x] **GL-08** — If it's a user, it can move value privately only to or from a merchant: user to user, and
   unshielding its own funds, are refused on every private entry point (private→private, private→public,
-  public→private, private→public with commitment), judged on `from` and `to`, never on the caller. Shielding its own
-  public tokens to itself moves value between no two accounts and is allowed, so an ex-merchant's public float is not
-  stranded. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — docs/architecture.md "The rules": "A private
-  transfer, through any entry point, needs a merchant on one side, unless it shields an account's own public tokens to
-  itself"; A21: "judged on `from`"; Priority: HIGH; Scope: always-on; Sources: ADV-12, SPEC-37)
+  public→private, private→public with commitment), judged on `from` and `to`, never on the caller. A transfer into
+  its own private balance (a shield of its own public tokens, or a private send to itself that merges notes) moves
+  value between no two accounts and is allowed, so an ex-merchant's public float is not stranded. (Category:
+  STATE_TRANSITION; Guarantee: SHOULD-HOLD — docs/architecture.md "The rules": "A private transfer, through any entry
+  point, needs a merchant on one side, unless it lands in the sender's own private balance"; A21: "judged on `from`";
+  Priority: HIGH; Scope: always-on; Sources: ADV-12, SPEC-37)
   Coverage: COVERED by token/src/test/rules_private.nr: user_to_user_private_to_private_is_refused,
   user_to_user_private_to_public_is_refused, user_to_user_public_to_private_is_refused,
   user_to_user_private_to_public_with_commitment_is_refused, a_user_cannot_unshield_its_own_funds,
   a_delegated_transfer_is_judged_on_from_not_the_caller (each `should_fail_with = "Transfer refused: neither sender nor
-  recipient is a merchant"`); the shield by a_user_and_an_ex_merchant_shield_their_own_funds.
+  recipient is a merchant"`); the shield by a_user_and_an_ex_merchant_shield_their_own_funds, the private send by
+  a_user_and_an_ex_merchant_send_privately_to_themselves.
 
 - [~] **GL-09** — A listed merchant contract cannot launder user-to-user moves for others: every delegated call is
   judged on `from` and the recipient side, never on the caller, on all four transfers and on both payments into a
@@ -155,7 +157,8 @@
   privately and publicly, after that merchant's switch-off lands. (Category: VALID_STATE — after the stamped request's
   merchant is switched off; Guarantee: SHOULD-HOLD — archived plan, accepted: "a request stamped while its recipient was
   a merchant stays payable after a switch-off"; Priority: LOW; Scope: always-on; Sources: ST-23)
-  Coverage: PARTIAL by token/src/test/rules_requests.nr:a_request_stamped_for_a_merchant_stays_payable_after_its_switch_off
+  Coverage: PARTIAL by
+  token/src/test/rules_requests.nr:a_request_stamped_for_a_merchant_stays_payable_after_its_switch_off_until_its_stamp_expires
   (`utils::check_private_balance(w.env, w.token, w.m1, mint_amount + AMOUNT);`) — the public payment is untested.
   Test goes in: token/src/test/rules_requests.nr :: a_request_stamped_for_a_merchant_stays_payable_publicly_after_its_switch_off
 
