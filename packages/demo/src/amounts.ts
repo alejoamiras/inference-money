@@ -8,12 +8,12 @@ export const USDC = 1_000_000n
 export const SMOKE_AMOUNTS = { deposit: 10n * USDC, refund: 3n * USDC, refused: USDC, exit: 3n * USDC } as const
 
 /**
- * What `demo setup` deposits: each merchant's binding deposit from its own treasury (one unit, private), alice's and
+ * What `demo setup` deposits: each merchant's binding deposit from its own treasury (a cent, private), alice's and
  * bob's binding deposits (private) and galactica's float (public).
  */
-export const DEMO_SEED = { merchantBind: 1n, alice: 10n * USDC, bob: 2n * USDC, galactica: 10n * USDC } as const
+export const DEMO_SEED = { merchantBind: USDC / 100n, alice: 10n * USDC, bob: 2n * USDC, galactica: 10n * USDC } as const
 
-/** What each cast member's Ethereum account is topped up to: together at most 0.04 ETH and 50.000002 USDC. */
+/** What each cast member's Ethereum account is topped up to: together at most 0.04 ETH and 50.02 USDC. */
 export const DEMO_L1_TARGET = {
 	alice: { eth: 10n ** 16n, usdc: 40n * USDC },
 	bob: { eth: 10n ** 16n, usdc: 10n * USDC },
