@@ -168,8 +168,6 @@ abstract contract TokenPortalHandler is Properties {
         try portal.depositToAztecPrivate(a.depositor, a.amount, a.secretHash, a.deadline, a.signature) {
             ghosts.authorizationMisused++;
         } catch (bytes memory reason) {
-            // Cutting the revert data to its selector is the point.
-            // forge-lint: disable-next-line(unsafe-typecast)
             if (bytes4(reason) != refusal) ghosts.authorizationMisused++;
         }
         _noopEnd(consumed);
@@ -200,8 +198,6 @@ abstract contract TokenPortalHandler is Properties {
             (ok, reason) = address(portal)
                 .call(abi.encodeCall(portal.depositToAztecPrivate, (actor, _amount, bytes32(0), deadline, signature)));
         }
-        // Cutting the revert data to its selector is the point.
-        // forge-lint: disable-next-line(unsafe-typecast)
         if (ok || bytes4(reason) != refusal || permit2.calls() != permit2Calls) ghosts.foreignSignatureAccepted++;
         _noopEnd(consumed);
     }
