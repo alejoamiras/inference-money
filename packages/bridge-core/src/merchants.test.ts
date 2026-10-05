@@ -92,9 +92,14 @@ describe("the side a call proves", () => {
 		expect(merchantSide(bothPending, m1, m2, false)).toBe(Side.First)
 	})
 
-	it("proves the merchant whose read caps later, unless the first is kept", () => {
+	it("proves the merchant whose read caps later, unless the first is kept or leaves the standard expiry", () => {
 		expect(merchantSide(firstPending, m1, m2, false)).toBe(Side.Second)
 		expect(merchantSide(firstPending, m1, m2, true)).toBe(Side.First)
+		const firstFarOff = list([
+			[m1, entry({ scheduledOff: true, changeAt: NOW + STANDARD_TX_LIFETIME + HOUR })],
+			[m2, on],
+		])
+		expect(merchantSide(firstFarOff, m1, m2, false)).toBe(Side.First)
 		const hourly = list([
 			[m1, entry({ delay: HOUR, scheduledDelay: HOUR })],
 			[m2, on],

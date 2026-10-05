@@ -43,6 +43,12 @@ describe.skipIf(!INTEGRATION)("transfers under the merchant rule", () => {
 		expect((await l2Balances(m1)).private).toBe(2n * AMOUNT)
 	})
 
+	it("[A21] a user sends privately to itself, proving no side", async () => {
+		const before = (await l2Balances(alice)).private
+		await transfer(alice, alice, Side.Neither)
+		expect((await l2Balances(alice)).private).toBe(before)
+	})
+
 	it("[A21] expiry: a settled 24 h entry leaves a tx's lifetime as a tx that reads nothing; 1 h, or a pending switch-off, shortens it", async () => {
 		const plain = () =>
 			SetPublicAuthwitContractInteraction.create(harness().wallet, alice, Fr.random(), false).then((c) => c.send(as(alice)))

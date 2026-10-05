@@ -290,7 +290,12 @@ pub contract Token {
         _nonce: Field,
     ) {
         let side = self.internal._prove_merchant_side(to, from, false);
-        assert(side != NEITHER, "Transfer refused: neither sender nor recipient is a merchant");
+        // A send to oneself moves value between no two accounts, and is how a user merges notes a payment cannot all
+        // spend in one tx.
+        assert(
+            (side != NEITHER) | (from == to),
+            "Transfer refused: neither sender nor recipient is a merchant",
+        );
 
         self.internal._call_auth_private(from, amount);
 
@@ -432,6 +437,8 @@ pub contract Token {
         amount: u128,
         _nonce: Field,
     ) {
+        // aztec-nr's public completion refuses zero only behind a TODO to remove the check.
+        assert(amount != 0, "Payment refused: the amount is zero");
         // The payer first: a merchant needs no stamp, which spares it the search.
         if !self.internal._is_merchant(from) {
             assert(

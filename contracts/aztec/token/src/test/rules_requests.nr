@@ -261,6 +261,14 @@ unconstrained fn a_private_payment_of_zero_is_refused() {
     w.env.call_private(w.alice, token.transfer_private_to_commitment(w.alice, c, 0, 0));
 }
 
+#[test(should_fail_with = "Payment refused: the amount is zero")]
+unconstrained fn a_public_payment_of_zero_is_refused() {
+    let w = utils::setup_merchant_world(false);
+    let token = Token::at(w.token);
+    let (c, _) = stamped_request(w, w.alice);
+    w.env.call_public(w.alice, token.transfer_public_to_commitment(w.alice, c, 0, 0));
+}
+
 // An opening is judged on its creator and recipient: a merchant completer does not make it a merchant's request.
 #[test(should_fail_with = "Request refused: neither creator nor recipient is a merchant")]
 unconstrained fn naming_a_merchant_completer_does_not_let_a_user_open_for_a_user() {

@@ -199,8 +199,9 @@ export async function openRequest(
 }
 
 /**
- * A private transfer, which the rules allow only to or from a merchant; refused before proving otherwise. Returns once
- * sent: the caller waits for the status it needs.
+ * A private transfer, which the rules allow only to or from a merchant, or to the sender itself (a note merge, which
+ * proves no side and so reads no entry); refused before proving otherwise. Returns once sent: the caller waits for the
+ * status it needs.
  */
 export async function transferPrivate(
 	wallet: Wallet,
@@ -208,9 +209,10 @@ export async function transferPrivate(
 	t: { from: AztecAddress; to: AztecAddress; amount: bigint },
 	opts: ListOptions,
 ): Promise<TxHash> {
+	const toSelf = t.from.equals(t.to)
 	const sent = await withFreshList(opts.list, opts.resync, async (list) => {
-		const side = merchantSide(list, t.to, t.from, false)
-		if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.transfer)
+		const side = toSelf ? Side.Neither : merchantSide(list, t.to, t.from, false)
+		if (side === Side.Neither && !toSelf) throw new Error(TOKEN_REFUSALS.transfer)
 		const call = Contract.at(token, tokenArtifact, wallet).methods.transfer_private_to_private!(t.from, t.to, t.amount, 0)
 		return call.with({ capsules: [sideCapsule(token, side)] }).send({ from: t.from, fee: opts.fee, wait: NO_WAIT })
 	})

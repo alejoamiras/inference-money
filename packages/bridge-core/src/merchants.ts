@@ -159,12 +159,13 @@ export function merchantHorizon(list: MerchantList, account: AztecAddress, at = 
 
 /**
  * The side a transfer or request proves, by the token hint's rules: a merchant side is always kept; a merchant
- * `first` is proven whenever `keepFirst` (the call publishes it, or opens a request for it, which is then stamped);
- * otherwise, of two merchants, the one whose read caps the tx's expiry latest, `first` on a tie.
+ * `first` is proven whenever `keepFirst` (the call publishes it, or opens a request for it, which is then stamped) or
+ * its read leaves the standard expiry; otherwise, of two merchants, the one whose read caps the tx's expiry latest,
+ * `first` on a tie.
  */
 export function merchantSide(list: MerchantList, first: AztecAddress, second: AztecAddress, keepFirst: boolean): Side {
 	const a = merchantStatus(list, first)
-	if (a.merchant && keepFirst) return Side.First
+	if (a.merchant && (keepFirst || merchantHorizon(list, first) >= list.at + STANDARD_TX_LIFETIME)) return Side.First
 	const b = merchantStatus(list, second)
 	if (b.merchant && (!a.merchant || merchantHorizon(list, second) > merchantHorizon(list, first))) return Side.Second
 	return a.merchant ? Side.First : Side.Neither

@@ -48,7 +48,7 @@ A claim must present the same depositor; any other address hashes to a message t
 `contracts/aztec/token` is aztec-standards' Token with a merchant list and its rules. Every upstream function keeps its ABI and upstream's storage comes first, so integrations written against upstream keep working.
 
 **The rules.**
-- A private transfer, through any entry point, needs a merchant on one side, unless it shields an account's own public tokens to itself. Public-to-public transfers, mints and burns are upstream's.
+- A private transfer, through any entry point, needs a merchant on one side, unless it lands in the sender's own private balance (a shield of its public tokens, or a note merge). Public-to-public transfers, mints and burns are upstream's.
 - Opening a payment request (a partial note's commitment `c`) needs a merchant on one side too, and records which: the token pushes `stamp(c, b)` when the recipient is a merchant, `b` the hour its anchor block falls in, and `pad(c)` otherwise. Both are one token-siloed nullifier, so an observer can't tell them apart.
 - A user may pay only into a request whose stamp is live, until `(b + 25) h − 1 s`: 24 h to 25 h after the opening's anchor. Privately the circuit proves the stamp settled and caps the tx's expiry at that deadline; publicly the token searches the 25 live hours. A merchant may pay into any request. Either payment pushes `paid(c)`, so a request takes one payment.
 

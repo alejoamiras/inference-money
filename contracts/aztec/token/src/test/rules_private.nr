@@ -1,5 +1,5 @@
 // The transfer rule: a private transfer needs a merchant on at least one side, judged on `from` and `to`, unless it
-// shields an account's own public tokens.
+// lands in the sender's own private balance.
 use crate::{test::utils::{self, mint_amount}, Token};
 use aztec::test::helpers::authwit as authwit_cheatcodes;
 use generic_proxy::GenericProxy;
@@ -54,6 +54,17 @@ unconstrained fn a_user_and_an_ex_merchant_shield_their_own_funds() {
         w.env.call_private(holder, token.transfer_public_to_private(holder, holder, AMOUNT, 0));
         utils::check_public_balance(w.env, w.token, holder, mint_amount - AMOUNT);
         utils::check_private_balance(w.env, w.token, holder, mint_amount + AMOUNT);
+    }
+}
+
+#[test]
+unconstrained fn a_user_and_an_ex_merchant_send_privately_to_themselves() {
+    let w = utils::setup_merchant_world(false);
+    utils::anchor_at(w.env, utils::switch_off(w, w.m1));
+    let token = Token::at(w.token);
+    for holder in [w.alice, w.m1] {
+        w.env.call_private(holder, token.transfer_private_to_private(holder, holder, AMOUNT, 0));
+        utils::check_private_balance(w.env, w.token, holder, mint_amount);
     }
 }
 

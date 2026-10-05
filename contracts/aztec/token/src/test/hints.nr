@@ -126,13 +126,17 @@ unconstrained fn between_two_settled_merchants_the_probe_proves_the_recipient() 
 unconstrained fn of_two_merchants_the_probe_proves_the_one_with_the_later_cap() {
     let w = utils::setup_merchant_world(false);
     let _ = switch_off(w, w.m1);
+    // A second on, m1's read still leaves the standard expiry, so it is proven without asking about m2.
     utils::anchor_at(w.env, w.env.last_block_timestamp() + 1);
+    assert_eq(side(w, w.m1, w.m2, false), FIRST);
+    // Four hours on, m1's read shortens the tx and m2's, settled, does not.
+    utils::anchor_at(w.env, w.env.last_block_timestamp() + 4 * HOUR);
     assert_eq(side(w, w.m1, w.m2, false), SECOND);
     // A kept side is proven whatever its cap, so a merchant's request is stamped.
     assert_eq(side(w, w.m1, w.m2, true), FIRST);
-    // m2's switch-off lands a second after m1's, so its read caps a second later.
+    // m2's switch-off lands later than m1's; four hours on, both reads shorten the tx, m2's less.
     let _ = switch_off(w, w.m2);
-    utils::anchor_at(w.env, w.env.last_block_timestamp() + 1);
+    utils::anchor_at(w.env, w.env.last_block_timestamp() + 4 * HOUR);
     assert_eq(side(w, w.m1, w.m2, false), SECOND);
     assert_eq(side(w, w.m2, w.m1, false), FIRST);
 }

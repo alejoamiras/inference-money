@@ -3,11 +3,12 @@
 // Advice only: the token proves whichever side the hint names, so a wrong hint yields an unprovable tx, never a false
 // pass. A tx's capsule decides when present (bridge-core and the showcase attach one, computed from the list's events).
 // Without one the hint probes the anchor block, first side first, and queries the node about the second side unless
-// the first is kept or its read already allows the longest expiry. Both follow the same three rules:
+// the first is kept or its read already leaves the standard expiry. Both follow the same three rules:
 //   1. a merchant side is always kept, and the answer is NEITHER only when no side is a merchant;
 //   2. the side a call already publishes, or a request's merchant recipient, is always proven, so a merchant's request
 //      is stamped, never padded;
-//   3. otherwise, of two merchants, prove the one whose read caps the tx's expiry latest (its horizon).
+//   3. otherwise the first merchant if its read leaves the standard expiry, else of two merchants the one whose read
+//      caps the tx's expiry latest (its horizon).
 // A payment into a request has its own order, by what each proof costs the tx's expiry: a stamp still unmarked (it
 // caps nothing a tx would not have anyway), else a merchant payer whose read leaves the standard expiry, else a live
 // stamp (its cap tells only the request's hour, where a shortened payer's would name the payer), else any merchant
@@ -57,8 +58,8 @@ pub unconstrained fn merchant_side_hint(
 ) -> u8 {
     capsule_side(list.this).unwrap_or_else(|| {
         let a = probe(list, first);
-        let longest = list.anchor.timestamp() + MERCHANT_MAX_DELAY - 1;
-        if a.merchant & (keep_first | (a.horizon == longest)) {
+        let unmarked = a.horizon >= list.anchor.timestamp() + STANDARD_TX_LIFETIME;
+        if a.merchant & (keep_first | unmarked) {
             FIRST
         } else {
             let b = probe(list, second);

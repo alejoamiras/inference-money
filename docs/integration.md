@@ -10,7 +10,7 @@ Every Aztec account is either a **merchant** (on the token's list, curated by th
 |---|---|---|
 | Receive a deposit from Ethereum | Private deposits only. The account's first claim binds it, for good, to the Ethereum address that deposit came from (its **funding address**); every later deposit must come from that address. | Public or private deposits. A private claim binds the account too, but a merchant's exits ignore the binding. |
 | Claim a deposit | Only the recipient itself may submit a private claim. | Anyone may submit a public claim; the tokens always land with the merchant the deposit names. |
-| Send privately | Only to a merchant, or its own public tokens to itself. | To anyone. |
+| Send privately | Only to a merchant, or into its own private balance. | To anyone. |
 | Open a payment request | Only with a merchant as the recipient. | With any recipient. |
 | Pay a request | Only one opened for a merchant (stamped), until its stamp expires a day later. | Any request. |
 | Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address. |
