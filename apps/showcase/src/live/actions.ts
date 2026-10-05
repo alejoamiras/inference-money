@@ -273,19 +273,18 @@ async function openFor(ctx: LiveCtx, d: ValidDraft, key: string, opts: ListOptio
 async function pay(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
 	const since = ctx.demo.sent.length
 	const key = `${d.to}>${d.actor}`
-	const opts = await listOptions(ctx)
 	const amount = d.amount as bigint
 	const payInto = async (commitment: Fr) => {
 		const payment = { from: address(ctx, d.actor), commitment, amount, kind: "private" } as const
 		try {
-			await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, opts)
+			await payRequest(ctx.demo.gate, ctx.demo.wallet, token(ctx), payment, await listOptions(ctx))
 		} catch (e) {
 			// Refused before any send: a request opened at a proposed block that a prune removed holds no stamp any more.
 			if (message(e) === TOKEN_REFUSALS.payment) ctx.requests.delete(key)
 			throw e
 		}
 	}
-	const reopen = () => openFor(ctx, d, key, opts)
+	const reopen = async () => openFor(ctx, d, key, await listOptions(ctx))
 	const stored = ctx.requests.get(key)
 	await (stored ? payReplacingStale(ctx.demo.gate, token(ctx), stored, payInto, reopen) : payInto(await reopen()))
 	ctx.requests.delete(key)

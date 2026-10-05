@@ -126,3 +126,50 @@ unconstrained fn claim_public_unpause_restores_claims() {
     utils::fund_public(env, to, 250_000, 9, bridge);
     assert_eq(env.view_public(Token::at(token).balance_of_public(to)), 250_000);
 }
+
+// The bridge consumes only what its portal sent: the same content and secret hash from any other L1 address, an
+// attacker's contract say, hash to a message that does not exist, for each of the four consumers.
+global FORGER: EthAddress = EthAddress::from_field(0xF0F0);
+
+#[test(should_fail_with = "Tried to consume nonexistent L1-to-L2 message")]
+unconstrained fn a_message_from_another_l1_sender_cannot_be_claimed() {
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let to = utils::merchant(&mut env, admin, token);
+    let leaf = utils::send_mint_to_public_message_via(env, to, 1_000, 42, FORGER, bridge);
+    env.call_public(to, TokenBridge::at(bridge).claim_public(to, 1_000, 42, leaf, utils::depositor()));
+}
+
+#[test(should_fail_with = "No L1 to L2 message found")]
+unconstrained fn a_message_from_another_l1_sender_cannot_be_claimed_privately() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let recipient = env.create_contract_account();
+    let leaf =
+        utils::send_mint_to_private_message_via(env, recipient, 1_000, 5, utils::depositor(), FORGER, bridge);
+    env.call_private(
+        recipient,
+        TokenBridge::at(bridge).claim_private(recipient, 1_000, 5, leaf, utils::depositor(), true),
+    );
+}
+
+#[test(should_fail_with = "Tried to consume nonexistent L1-to-L2 message")]
+unconstrained fn a_message_from_another_l1_sender_cannot_be_returned() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let user = env.create_light_account();
+    let leaf = utils::send_mint_to_public_message_via(env, user, 1_000, 42, FORGER, bridge);
+    env.call_public(
+        user,
+        TokenBridge::at(bridge).return_deposit_public(user, 1_000, 42, leaf, utils::depositor()),
+    );
+}
+
+#[test(should_fail_with = "No L1 to L2 message found")]
+unconstrained fn a_message_from_another_l1_sender_cannot_be_returned_privately() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let recipient = env.create_contract_account();
+    let leaf =
+        utils::send_mint_to_private_message_via(env, recipient, 1_000, 5, utils::depositor(), FORGER, bridge);
+    env.call_private(
+        recipient,
+        TokenBridge::at(bridge).return_deposit_private(recipient, 1_000, 5, leaf, utils::depositor()),
+    );
+}

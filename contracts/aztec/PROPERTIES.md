@@ -91,16 +91,13 @@
   Coverage: TXE-UNREACHABLE — TXE exposes no public logs; an event replay in packages/integration could check it; not
   covered.
 
-- [ ] **GL-06** — No outside caller, whether a user, a merchant or a stranger, can call the token's own helpers:
+- [x] **GL-06** — No outside caller, whether a user, a merchant or a stranger, can call the token's own helpers:
   `increase_public_balance_internal` (a public credit with no supply write), `decrease_public_balance_internal`,
   `increase_total_supply_internal`, `decrease_total_supply_internal`, `recurse_subtract_balance_internal`. (Category:
   STATE_TRANSITION; Guarantee: SHOULD-HOLD — docs/assurance-map.md A7: "`#[only_self]` helpers are unreachable
   directly"; Priority: HIGH; Scope: always-on; Sources: ADV-02, SPEC-05)
-  Coverage: UNCOVERED — A7 cites the `guards` suite, but token_bridge/src/test/guards.nr probes only the bridge's
-  `_assert_not_paused` and the proxy's `assert_bridge`; scripts/abi-superset.test.ts pins the attribute in the
-  artifact, not the behaviour.
-  Test goes in: token/src/test/guards.nr (new, mirroring token_bridge/src/test/guards.nr) ::
-  increase_public_balance_internal_rejects_a_stranger, and one per helper
+  Coverage: COVERED by token/src/test/guards.nr, one probe per helper (a user, a merchant, a stranger, the minter, the
+  owner), each with arguments under which the body would succeed.
 
 - [~] **GL-07** — Every write-once value keeps its first value for good: the token's name, symbol, decimals, minter and
   authorization contract; the bridge's config (proxy, token, portal); the proxy's owner, token and bridge, across every
@@ -113,17 +110,18 @@
 
 ### Token: who may move value
 
-- [x] **GL-08** — If it's a user, it can move value privately only to or from a merchant: user to user, and shielding
-  or unshielding its own funds, are refused on every private entry point (private→private, private→public,
-  public→private, private→public with commitment), judged on `from` and `to`, never on the caller. (Category:
-  STATE_TRANSITION; Guarantee: SHOULD-HOLD — docs/architecture.md "The rules": "A private transfer, through any entry
-  point, needs a merchant on one side"; A21: "judged on `from`"; Priority: HIGH; Scope: always-on; Sources: ADV-12,
-  SPEC-37)
+- [x] **GL-08** — If it's a user, it can move value privately only to or from a merchant: user to user, and
+  unshielding its own funds, are refused on every private entry point (private→private, private→public,
+  public→private, private→public with commitment), judged on `from` and `to`, never on the caller. Shielding its own
+  public tokens to itself moves value between no two accounts and is allowed, so an ex-merchant's public float is not
+  stranded. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — docs/architecture.md "The rules": "A private
+  transfer, through any entry point, needs a merchant on one side, unless it shields an account's own public tokens to
+  itself"; A21: "judged on `from`"; Priority: HIGH; Scope: always-on; Sources: ADV-12, SPEC-37)
   Coverage: COVERED by token/src/test/rules_private.nr: user_to_user_private_to_private_is_refused,
   user_to_user_private_to_public_is_refused, user_to_user_public_to_private_is_refused,
-  user_to_user_private_to_public_with_commitment_is_refused, a_user_cannot_shield_its_own_funds,
-  a_user_cannot_unshield_its_own_funds, a_delegated_transfer_is_judged_on_from_not_the_caller (each
-  `should_fail_with = "Transfer refused: neither sender nor recipient is a merchant"`).
+  user_to_user_private_to_public_with_commitment_is_refused, a_user_cannot_unshield_its_own_funds,
+  a_delegated_transfer_is_judged_on_from_not_the_caller (each `should_fail_with = "Transfer refused: neither sender nor
+  recipient is a merchant"`); the shield by a_user_and_an_ex_merchant_shield_their_own_funds.
 
 - [~] **GL-09** — A listed merchant contract cannot launder user-to-user moves for others: every delegated call is
   judged on `from` and the recipient side, never on the caller, on all four transfers and on both payments into a
@@ -325,16 +323,15 @@
   Test goes in: token/src/test/hints.nr :: a_capsule_naming_a_user_fails_every_restricted_entry_point
 
 - [~] **GL-28** — Without a capsule, the probe mirrors the token's state at the anchor and picks by the documented
-  rules: keep a merchant side and answer NEITHER only when there is none; when opening, prove a merchant recipient;
-  between two merchants, prefer the one with no change scheduled ahead; when paying, check the stamp before the payer.
-  Its pending flag is set exactly while an entry's change time is after the anchor, including the marks a cancel or a
-  switch-on leave; a capsule, when present, overrides it. (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — archived plan
-  "The side hint": "The choice follows three rules, the same in the SDK and in the fallback probe"; Priority: LOW; Scope:
-  always-on; Sources: ST-20, SPEC-45)
+  rules: keep a merchant side and answer NEITHER only when there is none; keep a merchant first side the call publishes
+  or opens a request for; between two merchants, prefer the one whose read caps later (its horizon, which counts the
+  marks a cancel or a switch-on leave); when paying, check the stamp before the payer. A capsule, when present,
+  overrides it. (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — archived plan "The side hint": "The choice follows three
+  rules, the same in the SDK and in the fallback probe"; Priority: LOW; Scope: always-on; Sources: ST-20, SPEC-45)
   Coverage: PARTIAL by token/src/test/hints.nr: the_probe_finds_the_one_merchant_side_or_neither,
-  between_two_settled_merchants_the_probe_proves_the_recipient, the_probe_prefers_a_merchant_with_no_change_pending,
-  a_switched_off_merchant_is_never_picked, the_payment_probe_checks_the_stamp_before_the_payer,
-  a_capsule_overrides_the_probe — the pending flag on an entry marked by a cancel or a switch-on is untested.
+  between_two_settled_merchants_the_probe_proves_the_recipient, of_two_merchants_the_probe_proves_the_one_with_the_later_cap,
+  a_switched_off_merchant_is_never_picked, the_payment_probe_follows_its_order, a_capsule_overrides_the_probe — the
+  horizon of an entry marked by a cancel or a switch-on is untested.
   Test goes in: token/src/test/hints.nr :: a_cancelled_entry_reads_pending_until_its_mark_lands
 
 ### Token: privacy and expiry
@@ -361,8 +358,7 @@
 - [ ] **GL-31** — An observer cannot spot merchant checks by their expiry: at D = 24 h with nothing pending, a tx that
   proves either merchant side, or a stamp, commits the same expiry as a tx at the same anchor that reads no entry
   (anchor + 82800 after PXE rounding). With a change pending at `toc`, the PXE rounds down from `toc − 1` (whole hours,
-  else half hours, else seconds). Doc discrepancy: docs/architecture.md says "one with a change pending, cuts the tx to
-  30 minutes or less", but a 24 h entry with a change 10 h away commits anchor + 9 h. (Category: HIGH_LEVEL; Guarantee:
+  else half hours, else seconds): a 24 h entry with a change 10 h away commits anchor + 9 h. (Category: HIGH_LEVEL; Guarantee:
   SHOULD-HOLD — docs/architecture.md "Expiry": "With D = 24 h and nothing pending, a merchant check lands on the 23 h
   every tx gets, so it neither shortens the tx nor stands out"; Priority: HIGH; Scope: always-on; Sources: RT-27,
   ADV-39, SPEC-49, ST-45)
@@ -592,14 +588,15 @@
   public_transfer_to_self, rules_requests.nr:a_user_pays_a_merchants_request_privately and
   a_user_pays_a_merchants_request_publicly.
 
-- [ ] **SP-02** — Only mints and burns change total supply: transfers, request openings and payments, every
+- [x] **SP-02** — Only mints and burns change total supply: transfers, request openings and payments, every
   merchant-list call and `cancel_authwit` leave it unchanged and move no balance beyond their own debit and credit.
   (Category: VARIABLE_TRANSITION — `total_supply`; Guarantee: SHOULD-HOLD — docs/integration.md "What each action makes
   public": "Aztec shows claim and withdrawal amounts (total-supply writes)", and "Direct private transfers show only
   counts"; Priority: MEDIUM; Scope: after every transfer, opening, payment, list call and cancel_authwit; Sources: CON-03,
   ST-28, RT-10)
-  Coverage: UNCOVERED — no transfer, request or list test reads `total_supply` or a third party's balance.
-  Test goes in: token/src/test/rules_private.nr :: no_transfer_or_request_moves_the_total_supply
+  Coverage: COVERED by token/src/test/rules_private.nr:no_transfer_or_request_moves_the_total_supply (every transfer
+  kind, a request and its payment, two list calls and cancel_authwit; then the supply and every party's balances,
+  a bystander's included).
 
 - [~] **SP-03** — A mint by the minter raises supply by exactly `amount` and credits exactly `amount` to one account
   (`to`'s public or private balance, or the request owner's for `mint_to_commitment`), every other balance unchanged; a
@@ -646,14 +643,12 @@
   initialize_transfer_commitment.nr:initialize_transfer_commitment asserts only the validity nullifier.
   Test goes in: token/src/test/initialize_transfer_commitment.nr :: opening_a_request_moves_no_balance_and_no_supply
 
-- [ ] **SP-07** — A zero-amount private payment into a request is refused, like its public twin.
+- [x] **SP-07** — A zero-amount private payment into a request is refused, like its public twin.
   `transfer_public_to_commitment` and `mint_to_commitment` revert on 0 (aztec-nr's `complete`: "Cannot complete a
-  PartialUintNote with a value of 0"), but `complete_from_private` has no such check, so a private payment of 0
-  completes the request; since the recipient discovers only the first completion, a later real payment into it is lost.
-  Only the designated completer can do this. (Category: STATE_TRANSITION; Guarantee: EXPLORATORY; Priority: MEDIUM;
-  Scope: after transfer_private_to_commitment with amount 0; Sources: RT-12, SPEC-52; EXPECTED-FAIL today)
-  Coverage: UNCOVERED.
-  Test goes in: token/src/test/rules_requests.nr :: a_zero_private_payment_into_a_request_is_refused
+  PartialUintNote with a value of 0"), and `transfer_private_to_commitment` refuses it before `complete_from_private`,
+  which has no such check. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD; Priority: MEDIUM; Scope: after
+  transfer_private_to_commitment with amount 0; Sources: RT-12, SPEC-52)
+  Coverage: COVERED by token/src/test/rules_requests.nr:a_private_payment_of_zero_is_refused.
 
 - [x] **SP-08** — If it's a merchant, moving its own funds private→public and back leaves both its balances where they
   started. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — exact identity: both legs debit and credit the same
@@ -711,13 +706,11 @@
   stamped…" compares nullifier counts only.
   Test goes in: token/src/test/rules_requests.nr :: stamped_and_padded_openings_leave_the_same_effect_counts
 
-- [ ] **SP-14** — If it's a user, it cannot open a request for another user by naming a merchant as the completer: the
+- [x] **SP-14** — If it's a user, it cannot open a request for another user by naming a merchant as the completer: the
   opening is judged on its creator and recipient only. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD —
   docs/integration.md "Who may do what", open a payment request, if it's a user: "Only with a merchant as the
   recipient"; Priority: MEDIUM; Scope: after initialize_transfer_commitment; Sources: ADV-19)
-  Coverage: UNCOVERED — token/src/test/rules_requests.nr:a_user_cannot_open_a_request_for_a_user names the user creator
-  as completer, never a merchant.
-  Test goes in: token/src/test/rules_requests.nr :: naming_a_merchant_completer_does_not_let_a_user_open_for_a_user
+  Coverage: COVERED by token/src/test/rules_requests.nr:naming_a_merchant_completer_does_not_let_a_user_open_for_a_user.
 
 - [x] **SP-15** — A payment into a request goes through iff its payer may pay it: if it's a user (judged on `from`),
   only into a stamped request, privately or publicly; if it's a merchant, into any request. (Category: STATE_TRANSITION;
@@ -830,13 +823,14 @@
   removal, each checked a second before and at landing), a_scheduled_guardian_cannot_cancel_before_taking_office,
   the_guardian_is_scheduled_by_the_admin_only.
 
-- [ ] **SP-26** — Only the current merchant admin can propose the next one: a user, a merchant, a stranger or the
+- [x] **SP-26** — Only the current merchant admin can propose the next one: a user, a merchant, a stranger or the
   guardian proposing itself is refused, so none can reach `accept_merchant_admin` and take the list, and with it every
   rule. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — A20: "the admin role moves in two steps"; archived plan,
   admin-only additions: `propose_merchant_admin(new)`; Priority: HIGH; Scope: after propose_merchant_admin; Sources:
   SPEC-29, ADV-27, ST-15)
-  Coverage: UNCOVERED — token/src/test/merchants.nr only ever proposes as the admin.
-  Test goes in: token/src/test/merchants.nr :: only_the_admin_proposes_the_next_admin
+  Coverage: COVERED by token/src/test/merchants.nr: propose_merchant_admin_is_admin_only (a stranger),
+  propose_merchant_admin_refuses_a_merchant, propose_merchant_admin_refuses_the_guardian (in office) and
+  the_proposed_admin_cannot_propose_before_accepting.
 
 ### Token: the side hint
 
@@ -856,8 +850,8 @@
   "How a check proves": "A wrong hint only makes the tx unprovable"; Priority: MEDIUM; Scope: after an opening between
   two merchants; Sources: SPEC-40; EXPECTED-FAIL today)
   Coverage: PARTIAL by token/src/test/rules_requests.nr:a_request_a_merchant_opens_for_a_merchant_is_stamped and
-  hints.nr:the_probe_prefers_a_merchant_with_no_change_pending (`assert_eq(side(w, w.m1, w.m2, true), FIRST);`) — honest
-  hint only.
+  hints.nr:of_two_merchants_the_probe_proves_the_one_with_the_later_cap (`assert_eq(side(w, w.m1, w.m2, true), FIRST);`)
+  — honest hint only.
   Test goes in: token/src/test/hints.nr :: a_capsule_naming_the_creator_still_stamps_a_merchants_request
 
 - [~] **SP-29** — `try_prove_merchant` returns true only after proving the account a merchant at the anchor, and its
@@ -871,53 +865,51 @@
   capsule, and no test makes its probe lie (an `OracleMock` on the nullifier-existence oracle could).
   Test goes in: token/src/test/hints.nr :: a_lying_probe_cannot_make_try_prove_merchant_grant
 
-- [ ] **SP-30** — Between two merchants, the capsule-less hint proves the one whose read keeps the tx's expiry longest,
-  the purpose its rule 3 states. It compares only pending value changes: it ignores each entry's delay (a 1 h recipient
-  is preferred to a 24 h sender) and pending delay decreases (whose read caps at t_s + D_old − 1), so it can prove the
-  merchant with the earlier expiry and fingerprint the tx. Quality, not soundness. (Category: HIGH_LEVEL; Guarantee:
-  EXPLORATORY — the archived plan's rule 3 says "the one whose entry has no change scheduled ahead, which keeps the tx's
-  expiry longest", and the code meets its letter; Priority: MEDIUM; Scope: after merchant_side_hint between two
-  merchants; Sources: RT-28, SYN (audit finding 3); EXPECTED-FAIL today)
-  Coverage: UNCOVERED — token/src/test/hints.nr:the_probe_prefers_a_merchant_with_no_change_pending covers a pending
-  value change only.
-  Test goes in: token/src/test/hints.nr :: of_two_merchants_the_probe_proves_the_one_with_the_later_cap
+- [x] **SP-30** — Between two merchants, the capsule-less hint proves the one whose read keeps the tx's expiry longest,
+  the purpose its rule 3 states: it compares each entry's horizon, the cap its read sets, so a shorter delay or a
+  pending delay decrease (whose read caps at t_s + D_old − 1) loses to a longer cap, and equal caps keep the first side.
+  Quality, not soundness. (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — hints.nr rule 3; Priority: MEDIUM; Scope:
+  after merchant_side_hint between two merchants; Sources: RT-28, SYN (audit finding 3))
+  Coverage: COVERED by token/src/test/hints.nr:of_two_merchants_the_probe_proves_the_one_with_the_later_cap (pending
+  switch-offs) and of_two_merchants_a_shortened_delay_is_proven_last (a decrease two hours in, then landed); the
+  bridge-core mirror (merchants.test.ts) asserts the same cases.
 
-- [~] **SP-31** — Without a capsule, if it's a user paying a merchant, the hint never asks the node about the user's
-  own entry, as hints.nr's header promises ("a merchant counterparty spares the sender's own address a query to the
-  node"). Today, while the merchant has a change pending (up to D), rule 3 probes the sender, so the user's node learns
-  its address. (Category: VALID_STATE — when the counterparty is a merchant; Guarantee: EXPLORATORY; Priority: MEDIUM;
-  Scope: after merchant_side_hint; Sources: ADV-40; EXPECTED-FAIL today)
-  Coverage: PARTIAL by token/src/test/hints.nr:the_probe_prefers_a_merchant_with_no_change_pending
+- [~] **SP-31** — Accepted: without a capsule, the hint asks the node about the second side unless the first is kept or
+  its read already allows the longest expiry, so a user paying a merchant whose cap is shorter than the longest has its
+  own address queried. The query buys the later expiry on chain; bridge-core always attaches a capsule, which queries
+  nothing. hints.nr's header and docs/integration.md ("Your node") say so. (Category: VALID_STATE — when the counterparty
+  is a merchant; Guarantee: EXPLORATORY; Priority: MEDIUM; Scope: after merchant_side_hint; Sources: ADV-40)
+  Coverage: PARTIAL by token/src/test/hints.nr:of_two_merchants_the_probe_proves_the_one_with_the_later_cap
   (`assert_eq(side(w, w.m1, w.m2, false), SECOND);`) — it checks the side picked, never which accounts were queried.
-  Test goes in: token/src/test/hints.nr :: a_merchant_counterparty_with_a_pending_change_spares_the_sender_a_query
 
 - [~] **SP-32** — Paying a stamped request proves only the stamp: the payer's own entry is not read, no expiry cap is
   added, and no witness is fetched for it, so merchant payers look like user payers. (Category: VALID_STATE — when the
   request is stamped; Guarantee: SHOULD-HOLD — archived plan "The side hint": "It probes the counterparty before the
   sender, and the stamp before `from` when paying a request"; Priority: LOW; Scope: after transfer_private_to_commitment
   into a stamped request; Sources: ADV-41)
-  Coverage: PARTIAL by token/src/test/hints.nr:the_payment_probe_checks_the_stamp_before_the_payer
+  Coverage: PARTIAL by token/src/test/hints.nr:the_payment_probe_follows_its_order
   (`assert_eq(payment_side(w, stamped, w.m2), FIRST);`) — the side, not the absence of a query for `from`.
   Test goes in: token/src/test/hints.nr :: paying_a_stamped_request_never_queries_the_payer
 
-- [ ] **SP-33** — SYN. In a public→private transfer the sender is already public (its balance write is enqueued) and the
-  recipient is hidden, so when the sender is a merchant the check should prove the sender, and the probe should ask
-  about it first. Today `transfer_public_to_private` passes `(to, from)` like the private transfers: it probes the
-  hidden recipient first and, when it is a merchant, proves it, so the node learns the recipient and the tx's expiry
-  depends on its entry. (Category: VALID_STATE — when the public sender is a merchant; Guarantee: EXPLORATORY; Priority:
-  MEDIUM; Scope: after transfer_public_to_private; Sources: SYN (audit finding 2); EXPECTED-FAIL today)
-  Coverage: UNCOVERED.
-  Test goes in: token/src/test/hints.nr :: public_to_private_proves_a_merchant_sender_not_the_hidden_recipient
+- [x] **SP-33** — SYN. In a public→private transfer the sender is already public (its balance write is enqueued) and the
+  recipient is hidden, so when the sender is a merchant the check proves the sender and the probe asks about it first;
+  its private→public twin keeps the published recipient the same way. Both calls pass the published side first, kept.
+  (Category: VALID_STATE — when the published side is a merchant; Guarantee: SHOULD-HOLD; Priority: MEDIUM; Scope:
+  after transfer_public_to_private, transfer_private_to_public; Sources: SYN (audit finding 2))
+  Coverage: COVERED by token/src/test/hints.nr:public_to_private_proves_a_merchant_sender_not_the_hidden_recipient and
+  private_to_public_proves_a_merchant_recipient_not_the_hidden_sender (the hint in each call's order, then the real
+  call), with scripts/check-stamp-constraint.sh pinning each call's argument order: TXE cannot see which entry a real
+  call read.
 
-- [ ] **SP-34** — A private merchant read caps the tx's in-circuit expiry exactly: anchor + D − 1 with nothing pending
+- [x] **SP-34** — A private merchant read caps the tx's in-circuit expiry exactly: anchor + D − 1 with nothing pending
   (D = 86400 or 3600), the change time − 1 with a value change pending, and t_s + D_old − 1 while a delay decrease
-  synced at t_s is pending. A payment proven by its stamp reads no entry and adds no cap, and two merchants settled at
-  the same D give the same cap. (Category: VARIABLE_TRANSITION — the private context's expiration timestamp; Guarantee:
-  SHOULD-HOLD — docs/architecture.md "Expiry": "Reading an entry caps the tx's expiry at `anchor + D − 1`, or at the
-  pending change − 1"; Priority: MEDIUM; Scope: after any private merchant read; Sources: RT-26, ST-45)
-  Coverage: UNCOVERED — no TXE test reads an expiry, though `private_context_at` around the entry read and
-  `ctx.finish().expiration_timestamp` can. docs/architecture.md and A21 omit the pending-decrease case.
-  Test goes in: token/src/test/hints.nr :: a_merchant_read_caps_expiry_at_the_entrys_horizon
+  synced at t_s is pending. A payment proven by its stamp reads no entry and caps the tx at the stamp's deadline
+  (`_prove_payment_side`), and two merchants settled at the same D give the same cap. (Category: VARIABLE_TRANSITION —
+  the private context's expiration timestamp; Guarantee: SHOULD-HOLD — docs/architecture.md "Expiry"; Priority:
+  MEDIUM; Scope: after any private merchant read; Sources: RT-26, ST-45)
+  Coverage: COVERED by token/src/test/hints.nr:a_merchant_read_caps_expiry_at_the_entrys_horizon, which reads the cap
+  an entry read sets (`private_context_at`, then `finish().expiration_timestamp`) and requires the hint's horizon to
+  equal it, settled, with a switch-off pending, two hours into a delay decrease and around its landing.
 
 ### Bridge: messages
 
@@ -931,15 +923,14 @@
   Test goes in: token_bridge/src/test/claims_private.nr :: a_public_deposit_cannot_be_claimed_privately;
   token_bridge/src/test/returns.nr :: a_private_deposit_cannot_be_returned_publicly
 
-- [ ] **SP-36** — The bridge consumes only messages whose L1 sender is its configured portal: the same content and
+- [x] **SP-36** — The bridge consumes only messages whose L1 sender is its configured portal: the same content and
   secret hash sent by any other L1 address, an attacker's contract say, cannot be claimed publicly or privately, or
   returned. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — archived plan "Non-obvious mechanics" 8: the sole
   consumer guard requires that "the message sender is `config.portal`"; Priority: HIGH; Scope: after each of the four
   consumers; Sources: SPEC-10, ADV-01)
-  Coverage: UNCOVERED — every TXE helper injects from `utils::PORTAL`; only scripts/check-sole-consumer.sh pins it, in
-  the source text.
-  Test goes in: token_bridge/src/test/claims.nr :: a_message_from_another_l1_sender_cannot_be_claimed, with private-claim
-  and return twins
+  Coverage: COVERED by token_bridge/src/test/claims.nr: a_message_from_another_l1_sender_cannot_be_claimed, its
+  `_privately` twin, a_message_from_another_l1_sender_cannot_be_returned and its `_privately` twin (the message helpers'
+  `_via` siblings send from another L1 address), with scripts/check-sole-consumer.sh pinning the text.
 
 - [~] **SP-37** — A claim consumes its message only when every committed field matches: for a public claim the
   recipient, amount, depositor and secret; for a private one the amount, the depositor, and the recipient and salt
@@ -1059,23 +1050,22 @@
   Test goes in: token_bridge/src/test/exits.nr :: a_switched_off_merchant_cannot_exit_as_a_merchant;
   token_bridge/src/test/claims.nr :: a_switched_off_merchant_cannot_claim_publicly
 
-- [ ] **SP-49** — SYN. A switch-off stops a merchant's cash-outs: once it lands, a merchant that never bound a funding
-  address cannot bind a fresh L1 address with a small private deposit and then exit its private balance (say, users'
-  payments) there. Today it can: its first private claim binds any depositor, and the user rule then sends everything to
-  that address. (Category: STATE_TRANSITION; Guarantee: EXPLORATORY — the docs let any account's first private claim
-  bind it; only the docs/operations.md "Emergency" runbook (pause, switch off, wait D, unpause) implies a switch-off
-  ends cash-outs; Priority: HIGH; Scope: after claim_private(bind = true) and exit_to_l1_private by a switched-off
-  merchant; Sources: SYN (audit finding 1); EXPECTED-FAIL today)
-  Coverage: UNCOVERED.
-  Test goes in: token_bridge/src/test/exits.nr :: a_switched_off_merchant_cannot_bind_a_new_address_and_exit_there
+- [x] **SP-49** — Accepted behaviour (owner): a switch-off demotes a merchant to a user, it does not freeze it, so a
+  merchant that never bound a funding address binds one on its first private claim, from any L1 address, and exits
+  there. Onboarding closes the gap instead: a merchant binds before it is listed (docs/operations.md), and an
+  ex-merchant with no binding must still be able to withdraw somewhere. (Category: STATE_TRANSITION; Guarantee:
+  SHOULD-HOLD as pinned; Priority: HIGH; Scope: after claim_private(bind = true) and exit_to_l1_private by a
+  switched-off merchant; Sources: SYN (audit finding 1))
+  Coverage: COVERED by token_bridge/src/test/exits.nr:a_switched_off_merchant_that_never_bound_binds_late_and_exits_there.
 
-- [ ] **SP-50** — An exit only burns its own sender's balance: a burn authwit a victim granted the proxy and has not
+- [x] **SP-50** — An exit only burns its own sender's balance: a burn authwit a victim granted the proxy and has not
   used gives a stranger nothing. The stranger's exit burns the stranger's own balance or fails, and the victim can still
-  exit with that authwit. (Category: STATE_TRANSITION; Guarantee: EXPLORATORY — A4 says only "needs the holder's
-  authwit"; Priority: HIGH; Scope: after exit_to_l1_public, exit_to_l1_private; Sources: ADV-09, SPEC-25)
-  Coverage: UNCOVERED — token_bridge/src/test/exits.nr:exit_public_without_authwit_rejected and
-  exit_private_without_authwit_rejected cover a holder without its own authwit, not a stranger spending someone else's.
-  Test goes in: token_bridge/src/test/exits.nr :: a_strangers_exit_cannot_spend_a_victims_burn_authwit
+  exit with that authwit. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD; Priority: HIGH; Scope: after
+  exit_to_l1_public, exit_to_l1_private; Sources: ADV-09, SPEC-25)
+  Coverage: COVERED by token_bridge/src/test/exits.nr:a_strangers_exit_cannot_spend_a_victims_burn_authwit and
+  a_strangers_private_exit_cannot_spend_a_victims_burn_authwit (the stranger's exit under the same amount and nonce
+  burns its own balance, then the victim's authwit still pays the victim's exit); a holder without its own authwit is
+  refused by exit_public_without_authwit_rejected and exit_private_without_authwit_rejected.
 
 - [ ] **SP-51** — An exit's burn authwit works once: repeating the exit with the same nonce fails even when the balance
   covers it, and an authwit cancelled with `cancel_authwit` cannot drive an exit. (Category: STATE_TRANSITION;
@@ -1155,48 +1145,47 @@
 ## Known audit findings these properties would catch
 
 1. **A switched-off merchant with no binding binds a new address with a small private deposit and withdraws there**
-   (`TokenBridge.claim_private` / `exit_to_l1_private`). Caught by **SP-49** (SYN, EXPECTED-FAIL today). SP-48, SP-46
-   and GL-45 frame the rule and pass today: a switched-off merchant falls back to the user rule, and the user rule binds
-   whatever its first private claim names.
-2. **`transfer_public_to_private` proves, and probes first, the hidden recipient instead of the already-public sender.**
-   Caught by **SP-33** (SYN, EXPECTED-FAIL today). GL-28 (the hint's rules as written) passes; SP-31 is the same class
-   of node leak on the private entry points.
-3. **The side hint ignores entry delays and pending delay decreases** (`hints.probe` / `merchant_side_hint`), so it can
-   prove the merchant with the earlier expiry. Caught by **SP-30** (EXPECTED-FAIL today). SP-34 measures the caps the
-   pick should compare; GL-31 is the expiry parity the pick protects.
+   (`TokenBridge.claim_private` / `exit_to_l1_private`). Accepted by the owner: a switch-off demotes, it does not
+   freeze, and onboarding binds a merchant before listing it. **SP-49** pins the accepted behaviour. SP-48, SP-46 and
+   GL-45 frame the rule: a switched-off merchant falls back to the user rule, and the user rule binds whatever its
+   first private claim names.
+2. **`transfer_public_to_private` proved, and probed first, the hidden recipient instead of the already-public
+   sender.** Fixed: both calls that publish one side pass it first, kept. **SP-33** covers it; SP-31 is the accepted
+   query on the private entry points.
+3. **The side hint ignored entry delays and pending delay decreases** (`hints.probe` / `merchant_side_hint`). Fixed:
+   the probe compares each entry's horizon. **SP-30** covers it; SP-34 pins the caps the pick compares; GL-31 is the
+   expiry parity the pick protects.
 4. **A stamped request stays payable after its merchant's switch-off, for any amount and with no end date** (accepted
    by the owner). **GL-12** pins the accepted behaviour (SHOULD-HOLD, passes); **GL-13** is its converse (EXPLORATORY,
    EXPECTED-FAIL today), to implement only if the residual is revisited. GL-02 bounds the residual: every payment into
    such a request is debited from its payer and lands only with the request's owner.
-5. **A private completion of amount 0 is accepted, and the recipient's PXE discovers only the first completion.**
-   Caught by **SP-07** (EXPECTED-FAIL today). GL-02 holds the "first completion only" half (accepted, upstream; its
-   discovery half is unreliable in TXE), and SP-17 limits who can do it to the designated completer.
+5. **A private completion of amount 0 was accepted, and the recipient's PXE discovers only the first completion.**
+   Fixed: `transfer_private_to_commitment` refuses a zero amount; **SP-07** covers it. GL-02 holds the "first
+   completion only" half (accepted, upstream; its discovery half is unreliable in TXE), and SP-17 limits who can do it
+   to the designated completer.
 
 Other properties the current code would fail, outside that list: **SP-28** (a capsule naming the creator pads a
-merchant-to-merchant request, against docs/architecture.md), **SP-31** (without a capsule, a merchant counterparty with
-a pending change makes the hint query the paying user), **GL-34** (TokenPortal accepts a zero deposit no L2 call can
-consume), **GL-05** (a public payment to the zero address breaks the `Transfer`-event books).
+merchant-to-merchant request, against docs/architecture.md), **GL-05** (a public payment to the zero address breaks
+the `Transfer`-event books). **GL-34** (TokenPortal accepted a zero deposit no L2 call can consume) is fixed on L1: every
+deposit path refuses zero.
 
-Documentation that disagrees with the code: docs/architecture.md "Expiry" (a pending change on a 24 h entry can leave
-far more than 30 minutes; GL-31) and its omission of the pending-decrease cap (SP-34); A7's "Only the bridge mints or
-burns" (holders can burn directly; GL-43) and its citation of the `guards` suite for the token's `#[only_self]` helpers,
-which it never probes (GL-06); upstream's note in token/src/test/mint_to_commitment.nr that "the protocol still
+Documentation that disagrees with the code: A7's "Only the bridge mints or burns" (holders can burn directly; GL-43); upstream's note in token/src/test/mint_to_commitment.nr that "the protocol still
 prevents" double completion (GL-02).
 
 ## Coverage summary
 
 108 properties: 49 global, 59 specific; 105 merged from the five lenses' 197 raw properties, 3 added (SYN). Priority: 52
 HIGH, 38 MEDIUM, 18 LOW. Guarantee: 89 SHOULD-HOLD, 19 EXPLORATORY. Category: 15 VALID_STATE, 69 STATE_TRANSITION, 9
-VARIABLE_TRANSITION, 15 HIGH_LEVEL. EXPECTED-FAIL today: 9 (GL-05, GL-13, GL-34, SP-07, SP-28, SP-30, SP-31, SP-33,
-SP-49).
+VARIABLE_TRANSITION, 15 HIGH_LEVEL. EXPECTED-FAIL today: 3 (GL-05, GL-13, SP-28); SP-07, SP-30, SP-33 and GL-34 are
+fixed, SP-31 and SP-49 accepted.
 
 | Crate | COVERED | PARTIAL | UNCOVERED | TXE-UNREACHABLE | Total |
 |---|---|---|---|---|---|
-| token (merchant Token, hints) | 15 | 34 | 10 | 8 | 67 |
-| token_bridge (with token_minter_proxy) | 6 | 21 | 8 | 3 | 38 |
+| token (merchant Token, hints) | 23 | 34 | 2 | 8 | 67 |
+| token_bridge (with token_minter_proxy) | 9 | 21 | 5 | 3 | 38 |
 | keystone (portal_messages vectors) | 0 | 1 | 0 | 0 | 1 |
 | cross-chain (L1 portal and L2 together) | 0 | 0 | 0 | 2 | 2 |
-| **All** | **21** | **56** | **18** | **13** | **108** |
+| **All** | **32** | **56** | **7** | **13** | **108** |
 
 The largest PARTIAL gap is the supply: no TXE test reads `total_supply` after a claim, an exit, a private burn, a
 transfer or a payment (GL-01, GL-42, SP-02, SP-04, SP-42, SP-44), so the L2 half of the books has no Noir check.
@@ -1207,19 +1196,6 @@ ST-06 (no private proof at the last second, no switch-on mirror; GL-17), ST-23 (
 COVERED halves merged into wider properties (SPEC-44 into GL-27, SPEC-45 into GL-28, SPEC-46 into SP-29, ADV-03 into
 GL-41, CON-04 into SP-03, CON-06 into SP-05, ADV-43 into GL-35, SPEC-55 into GL-49).
 
-Highest-priority UNCOVERED properties:
-
-1. **SP-36** — only the configured portal's messages are consumed (one argument at four call sites guards unbacked
-   mints; no behavioural test).
-2. **GL-06** — the token's `#[only_self]` helpers refuse outside callers (`increase_public_balance_internal` is a free
-   public credit if its attribute is lost; A7 cites a suite that never probes it).
-3. **SP-49** — a switched-off merchant cannot bind a fresh address and exit there (audit finding 1, EXPECTED-FAIL).
-4. **SP-26** — only the merchant admin proposes the next admin (the shortest path to owning the list).
-5. **SP-50** — a stranger's exit cannot spend a victim's standing burn authwit.
-6. **SP-33** — public→private proves the public merchant sender, not the hidden recipient (audit finding 2,
-   EXPECTED-FAIL).
-7. **SP-30** — between two merchants, the hint proves the one with the later expiry cap (audit finding 3,
-   EXPECTED-FAIL).
-8. **SP-07** — a zero private payment into a request is refused (audit finding 5, EXPECTED-FAIL).
-9. **SP-02** — transfers, requests and list calls never move the supply.
-10. **SP-14** — naming a merchant completer does not let a user open a request for a user.
+The ten highest-priority UNCOVERED properties this list named are now covered: SP-36, GL-06, SP-49 (as accepted
+behaviour), SP-26, SP-50, SP-33, SP-30, SP-07, SP-02 and SP-14. Still UNCOVERED: GL-13 (the converse of an accepted
+residual), GL-25, SP-39, SP-51, SP-52, SP-55 and SP-59.

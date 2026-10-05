@@ -34,8 +34,8 @@ pub contract Token {
     use arc403_interface::Arc403Authorizer;
     // merchant list
     use crate::hints::{
-        FIRST, is_merchant_at_anchor, merchant_side_hint, MerchantList, NEITHER, payment_side_hint,
-        SECOND,
+        FIRST, is_merchant_at_anchor, MERCHANT_MAX_DELAY, MERCHANT_MIN_DELAY, merchant_side_hint,
+        MerchantList, NEITHER, payment_side_hint, SECOND,
     };
     use aztec::{
         context::{NullifierExistenceRequest, PrivateContext},
@@ -46,11 +46,6 @@ pub contract Token {
     use merchant_stamp::{
         pad, paid, REQUEST_OPENED_EFFECT, stamp, stamp_bucket, stamp_deadline, STAMP_LIVE_BUCKETS,
     };
-
-    // The switch-off delay's bounds. The floor is DelayedPublicMutable's minimum; above the ceiling a delay changes
-    // nothing, because the kernel already caps every tx at anchor + 86399 (MAX_TX_LIFETIME).
-    global MERCHANT_MIN_DELAY: u64 = 3600;
-    global MERCHANT_MAX_DELAY: u64 = 86400;
 
     // gas-optimized max notes for initial transfer call
     global INITIAL_TRANSFER_CALL_MAX_NOTES: u32 = 2;
@@ -238,7 +233,7 @@ pub contract Token {
         amount: u128,
         _nonce: Field,
     ) {
-        let side = self.internal._prove_merchant_side(to, from, false);
+        let side = self.internal._prove_merchant_side(to, from, true);
         assert(side != NEITHER, "Transfer refused: neither sender nor recipient is a merchant");
 
         self.internal._call_auth_private(from, amount);
@@ -295,7 +290,12 @@ pub contract Token {
         _nonce: Field,
     ) {
         let side = self.internal._prove_merchant_side(to, from, false);
-        assert(side != NEITHER, "Transfer refused: neither sender nor recipient is a merchant");
+        // A send to oneself moves value between no two accounts, and is how a user merges notes a payment cannot all
+        // spend in one tx.
+        assert(
+            (side != NEITHER) | (from == to),
+            "Transfer refused: neither sender nor recipient is a merchant",
+        );
 
         self.internal._call_auth_private(from, amount);
 
@@ -355,8 +355,12 @@ pub contract Token {
         amount: u128,
         _nonce: Field,
     ) {
-        let side = self.internal._prove_merchant_side(to, from, false);
-        assert(side != NEITHER, "Transfer refused: neither sender nor recipient is a merchant");
+        let side = self.internal._prove_merchant_side(from, to, true);
+        // A shield to oneself moves value between no two accounts, so a user or an ex-merchant may make one.
+        assert(
+            (side != NEITHER) | (from == to),
+            "Transfer refused: neither sender nor recipient is a merchant",
+        );
 
         self.internal._call_auth_private(from, amount);
 
@@ -433,6 +437,8 @@ pub contract Token {
         amount: u128,
         _nonce: Field,
     ) {
+        // aztec-nr's public completion refuses zero only behind a TODO to remove the check.
+        assert(amount != 0, "Payment refused: the amount is zero");
         // The payer first: a merchant needs no stamp, which spares it the search.
         if !self.internal._is_merchant(from) {
             assert(
@@ -1103,20 +1109,20 @@ pub contract Token {
     }
 
     /// @notice Proves `first` or `second` a merchant, whichever the side hint picks
-    /// @param first The recipient
-    /// @param second The sender or request creator
-    /// @param opening Whether the call opens a request, which always proves a merchant recipient
-    /// @return The side proven; NEITHER proves nothing, and the caller refuses
+    /// @param first The side probed first: the recipient, or the side the call publishes
+    /// @param keep_first Whether a merchant `first` is always proven: the call publishes it, or opens a request for it
+    /// @return The side proven; NEITHER proves nothing, so callers accept it only for a transfer into the sender's own
+    ///         private balance
     #[internal("private")]
-    fn _prove_merchant_side(first: AztecAddress, second: AztecAddress, opening: bool) -> u8 {
-        // Safety: the hint only picks which side is proven below; a wrong pick is unprovable, never a pass. Every value
-        // proves a side or refuses: FIRST the first, NEITHER nothing (the caller refuses), any other the second.
+    fn _prove_merchant_side(first: AztecAddress, second: AztecAddress, keep_first: bool) -> u8 {
+        // Safety: the hint only picks which side is proven below; a wrong pick is unprovable, never a pass. FIRST
+        // proves the first, NEITHER nothing, any other value the second.
         let side = unsafe {
             merchant_side_hint(
                 merchant_list(self.context, self.storage),
                 first,
                 second,
-                opening,
+                keep_first,
             )
         };
         if side != NEITHER {

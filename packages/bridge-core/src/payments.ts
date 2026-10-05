@@ -37,17 +37,12 @@ import { tokenArtifact } from "./artifacts"
 import { L2_DONE, type L2Wait } from "./claim"
 import { type MerchantList, merchantSide, paymentSide, Side, sideCapsule, withFreshList } from "./merchants"
 import { TOKEN_REFUSALS } from "./rules"
-import { bucketCapsule, liveBuckets, REQUEST_OPENED_EFFECT, type RequestStamp, requestStampAt, stamp } from "./stamp"
+import { bucketCapsule, liveBuckets, REQUEST_OPENED_EFFECT, type RequestStamp, requestStampAt, STANDARD_TX_LIFETIME, stamp } from "./stamp"
 
 /** aztec-nr's DOM_SEP__NOTE_COMPLETION_LOG_TAG (`note/partial_note.nr`): tags the log every completion emits. */
 const DOM_SEP__NOTE_COMPLETION_LOG_TAG = 3372669888
 /** The kernel's cap on a tx's lifetime (MAX_TX_LIFETIME): no tx outlives its anchor by more. */
 const MAX_TX_LIFETIME = 86_400n
-/**
- * The expiry the PXE commits for a tx the kernel caps at its default update horizon (anchor + 86 399 s): rounded down
- * to whole hours. Every tx that reads no shorter-lived state commits it, so it marks nothing.
- */
-export const STANDARD_TX_LIFETIME = 82_800n
 /** How long a reservation blocks other clients before it counts as abandoned; the gate refuses a superseded one. */
 export const RESERVATION_TTL_MS = 10 * 60_000
 
@@ -163,6 +158,10 @@ export function openedCommitment(effects: readonly OffchainEffect[], token: Azte
 type SendFee = { paymentMethod: FeePaymentMethod } | undefined
 
 export interface ListOptions {
+	/**
+	 * Synced just before the call ({@link syncMerchantList}): sides are judged at its block, so a list kept for hours can
+	 * prove a merchant whose read has since come to cap the tx early, naming it.
+	 */
 	list: MerchantList
 	/** Re-syncs the list; a call refused on a merchant rule is retried once on the fresh one. */
 	resync?: () => Promise<MerchantList>
@@ -204,8 +203,9 @@ export async function openRequest(
 }
 
 /**
- * A private transfer, which the rules allow only to or from a merchant; refused before proving otherwise. Returns once
- * sent: the caller waits for the status it needs.
+ * A private transfer, which the rules allow only to or from a merchant, or to the sender itself (a note merge, which
+ * proves no side and so reads no entry); refused before proving otherwise. Returns once sent: the caller waits for the
+ * status it needs.
  */
 export async function transferPrivate(
 	wallet: Wallet,
@@ -213,9 +213,10 @@ export async function transferPrivate(
 	t: { from: AztecAddress; to: AztecAddress; amount: bigint },
 	opts: ListOptions,
 ): Promise<TxHash> {
+	const toSelf = t.from.equals(t.to)
 	const sent = await withFreshList(opts.list, opts.resync, async (list) => {
-		const side = merchantSide(list, t.to, t.from, false)
-		if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.transfer)
+		const side = toSelf ? Side.Neither : merchantSide(list, t.to, t.from, false)
+		if (side === Side.Neither && !toSelf) throw new Error(TOKEN_REFUSALS.transfer)
 		const call = Contract.at(token, tokenArtifact, wallet).methods.transfer_private_to_private!(t.from, t.to, t.amount, 0)
 		return call.with({ capsules: [sideCapsule(token, side)] }).send({ from: t.from, fee: opts.fee, wait: NO_WAIT })
 	})
@@ -227,7 +228,7 @@ interface Expected {
 	token: AztecAddress
 	commitment: Fr
 	siloedTag: Fr
-	/** A private payment through the stamp: refused unless it commits the standard expiry. */
+	/** A private payment into a stamped request: refused unless it commits the standard expiry. */
 	unmarked: boolean
 }
 
@@ -478,7 +479,8 @@ function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side
 /**
  * Pays `amount` into a request with a wallet built by `gate.bindWallet`. Refused before anything is proven when the
  * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), has no live stamp and
- * a user pays it, or, for a user's private payment, its stamp is no longer fresh (`stale`: open a new request). Returns
+ * a user pays it, or a private payment would prove a stamp no longer fresh (`stale`: open a new request); a private
+ * payment into a stamped request is refused as `stale` too if its proof commits a shortened expiry. Returns
  * once the payment reaches `opts.wait` (a checkpoint by default); its record turns `paid` when finalized
  * ({@link PaymentGate.status}).
  */
@@ -496,13 +498,14 @@ export async function payRequest(
 		if ((await completionCount(gate.node, token, p.commitment)) > 0) throw new PaymentRefusedError("completed-on-chain")
 		const found = await requestStamp(gate.node, token, p.commitment)
 		const txHash = await withFreshList(opts.list, opts.resync, async (list) => {
-			const side = paymentSide(list, found?.state ?? "none", p.from)
+			const side = paymentSide(list, found, p.from)
 			if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.payment)
 			const throughStamp = p.kind === "private" && side === Side.First
 			if (throughStamp && found?.state === "live") await gate.refuseStale(key, owner)
 			const call = paymentCall(wallet, token, p, side, throughStamp ? found?.bucket : undefined)
 			const send = async () => (await call.send({ from: p.from, fee: opts.fee, wait: NO_WAIT })).txHash
-			return gate.sending(key, owner, token, p.commitment, send, throughStamp)
+			// A merchant payer's read can shorten between `found.at` and the proving anchor; a stamp it could have used would not name it.
+			return gate.sending(key, owner, token, p.commitment, send, p.kind === "private" && found !== undefined)
 		})
 		const receipt = await waitForTx(gate.node, txHash, { ...(opts.wait ?? L2_DONE), dontThrowOnRevert: true })
 		if (receipt.hasExecutionReverted()) {

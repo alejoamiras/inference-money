@@ -80,9 +80,22 @@ pub unconstrained fn send_mint_to_private_message_from(
     depositor: EthAddress,
     bridge: AztecAddress,
 ) -> Field {
+    send_mint_to_private_message_via(env, recipient, amount, salt, depositor, PORTAL, bridge)
+}
+
+/// The same message sent by `sender` on L1, which the bridge consumes only when it is the portal.
+pub unconstrained fn send_mint_to_private_message_via(
+    env: TestEnvironment,
+    recipient: AztecAddress,
+    amount: u128,
+    salt: Field,
+    depositor: EthAddress,
+    sender: EthAddress,
+    bridge: AztecAddress,
+) -> Field {
     let content = mint_to_private_content_hash(amount, depositor);
     let secret_hash = aztec::hash::compute_secret_hash([derive_claim_secret(salt, recipient)]);
-    env.send_l1_to_l2_message_from_secret_hash(content, secret_hash, PORTAL, bridge)
+    env.send_l1_to_l2_message_from_secret_hash(content, secret_hash, sender, bridge)
 }
 
 /// Injects an L1→L2 `mint_to_public` message exactly as TokenPortal would commit it, and
@@ -94,11 +107,23 @@ pub unconstrained fn send_mint_to_public_message(
     secret: Field,
     bridge: AztecAddress,
 ) -> Field {
+    send_mint_to_public_message_via(env, to, amount, secret, PORTAL, bridge)
+}
+
+/// The same message sent by `sender` on L1, which the bridge consumes only when it is the portal.
+pub unconstrained fn send_mint_to_public_message_via(
+    env: TestEnvironment,
+    to: AztecAddress,
+    amount: u128,
+    secret: Field,
+    sender: EthAddress,
+    bridge: AztecAddress,
+) -> Field {
     let content = mint_to_public_content_hash(to, amount, DEPOSITOR);
     env.send_l1_to_l2_message_from_secret_hash(
         content,
         aztec::hash::compute_secret_hash([secret]),
-        PORTAL,
+        sender,
         bridge,
     )
 }

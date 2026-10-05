@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { MERCHANT_MAX_DELAY, merchantStatus, TOKEN_REFUSALS } from "@inference-money/bridge-core"
+import { MERCHANT_MAX_DELAY, merchantHorizon, merchantStatus, TOKEN_REFUSALS } from "@inference-money/bridge-core"
 import { l2Actor } from "./actors"
 import { INTEGRATION } from "./harness"
 import { as, asAdmin, blockTimestamp, listMerchant, merchantList, token } from "./token"
@@ -23,7 +23,13 @@ describe.skipIf(!INTEGRATION)("the merchant list", () => {
 		const { receipt } = await token().methods.schedule_merchant_off!(m1, true).send(asAdmin())
 		const changeAt = (await blockTimestamp(receipt)) + MERCHANT_MAX_DELAY
 		let list = await merchantList()
-		expect(list.entries.get(m1.toString())).toEqual({ off: false, scheduledOff: true, changeAt })
+		expect(list.entries.get(m1.toString())).toMatchObject({
+			off: false,
+			scheduledOff: true,
+			changeAt,
+			scheduledDelay: MERCHANT_MAX_DELAY,
+		})
+		expect(merchantHorizon(list, m1), "a read caps the tx just before the switch-off").toBe(changeAt - 1n)
 		expect(merchantStatus(list, m1)).toEqual({ merchant: true, pending: true })
 		expect(merchantStatus(list, m1, changeAt)).toEqual({ merchant: false, pending: false })
 		await token().methods.schedule_merchant_off!(m1, true).send(asAdmin())

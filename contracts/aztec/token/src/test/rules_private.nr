@@ -1,4 +1,5 @@
-// The transfer rule: a private transfer needs a merchant on at least one side, judged on `from` and `to`.
+// The transfer rule: a private transfer needs a merchant on at least one side, judged on `from` and `to`, unless it
+// lands in the sender's own private balance.
 use crate::{test::utils::{self, mint_amount}, Token};
 use aztec::test::helpers::authwit as authwit_cheatcodes;
 use generic_proxy::GenericProxy;
@@ -42,13 +43,29 @@ unconstrained fn user_to_user_private_to_public_with_commitment_is_refused() {
     );
 }
 
-#[test(should_fail_with = "Transfer refused: neither sender nor recipient is a merchant")]
-unconstrained fn a_user_cannot_shield_its_own_funds() {
+// A shield to another user is refused above; to oneself it needs no merchant, so an ex-merchant's public float is not
+// stranded.
+#[test]
+unconstrained fn a_user_and_an_ex_merchant_shield_their_own_funds() {
     let w = utils::setup_merchant_world(false);
-    w.env.call_private(
-        w.alice,
-        Token::at(w.token).transfer_public_to_private(w.alice, w.alice, AMOUNT, 0),
-    );
+    utils::anchor_at(w.env, utils::switch_off(w, w.m1));
+    let token = Token::at(w.token);
+    for holder in [w.alice, w.m1] {
+        w.env.call_private(holder, token.transfer_public_to_private(holder, holder, AMOUNT, 0));
+        utils::check_public_balance(w.env, w.token, holder, mint_amount - AMOUNT);
+        utils::check_private_balance(w.env, w.token, holder, mint_amount + AMOUNT);
+    }
+}
+
+#[test]
+unconstrained fn a_user_and_an_ex_merchant_send_privately_to_themselves() {
+    let w = utils::setup_merchant_world(false);
+    utils::anchor_at(w.env, utils::switch_off(w, w.m1));
+    let token = Token::at(w.token);
+    for holder in [w.alice, w.m1] {
+        w.env.call_private(holder, token.transfer_private_to_private(holder, holder, AMOUNT, 0));
+        utils::check_private_balance(w.env, w.token, holder, mint_amount);
+    }
 }
 
 #[test(should_fail_with = "Transfer refused: neither sender nor recipient is a merchant")]
@@ -172,4 +189,32 @@ unconstrained fn public_to_public_is_unrestricted() {
         Token::at(w.token).transfer_public_to_public(w.alice, w.bob, AMOUNT, 0),
     );
     utils::check_public_balance(w.env, w.token, w.bob, AMOUNT);
+}
+
+// Only mints and burns write the total supply: every transfer kind, a request and its payment, list calls and
+// cancel_authwit move value only between their own parties, and a bystander's balances never move.
+#[test]
+unconstrained fn no_transfer_or_request_moves_the_total_supply() {
+    let w = utils::setup_merchant_world(false);
+    let token = Token::at(w.token);
+    let supply = utils::get_total_supply(w.env, w.token);
+    w.env.call_private(w.alice, token.transfer_private_to_private(w.alice, w.m1, AMOUNT, 0));
+    w.env.call_private(w.m1, token.transfer_private_to_public(w.m1, w.m2, AMOUNT, 0));
+    w.env.call_private(w.m2, token.transfer_public_to_private(w.m2, w.alice, AMOUNT, 0));
+    w.env.call_public(w.alice, token.transfer_public_to_public(w.alice, w.m1, AMOUNT, 0));
+    let c = w.env.call_private(w.alice, token.initialize_transfer_commitment(w.m1, w.alice));
+    w.env.call_private(w.alice, token.transfer_private_to_commitment(w.alice, c, AMOUNT, 0));
+    w.env.call_public(w.admin, token.add_merchant(w.bob));
+    w.env.call_public(w.admin, token.schedule_merchant_off(w.bob, true));
+    w.env.call_private(w.alice, token.cancel_authwit(0));
+
+    utils::check_total_supply(w.env, w.token, supply);
+    utils::check_private_balance(w.env, w.token, w.alice, mint_amount - AMOUNT);
+    utils::check_public_balance(w.env, w.token, w.alice, mint_amount - AMOUNT);
+    utils::check_private_balance(w.env, w.token, w.m1, mint_amount + AMOUNT);
+    utils::check_public_balance(w.env, w.token, w.m1, mint_amount + AMOUNT);
+    utils::check_private_balance(w.env, w.token, w.m2, mint_amount);
+    utils::check_public_balance(w.env, w.token, w.m2, mint_amount);
+    utils::check_private_balance(w.env, w.token, w.bob, 0);
+    utils::check_public_balance(w.env, w.token, w.bob, 0);
 }

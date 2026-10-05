@@ -657,7 +657,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 ### Arc 3: Aztec hints, mirror, tests, tripwire (`pashov-audit-fizz-aztec`)
 
-**P8. Hint horizons and call sites.**
+**P8. Hint horizons and call sites.** ✓
 - First, spikes S4 and S5 (Phase 0's table). Record them in `lessons/phase-0.md`.
 - The `Entry`/`probe`/`merchant_side_hint` rewrite, the two call sites, the rename, the moved globals and the comment fix.
 - Promote `switch_off` from `test/hints.nr:76-80` into `utils.nr`.
@@ -675,14 +675,14 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `bash contracts/aztec/scripts/check-sole-consumer.sh --self-test && bash contracts/aztec/scripts/check-sole-consumer.sh`;
 - `bun run --cwd contracts/aztec test` (artifact identity, ABI superset).
 
-**P9. The bridge-core horizon mirror.**
+**P9. The bridge-core horizon mirror.** ✓
 - The `MerchantEntry` fields and the helpers; `merchantSide`.
 - The same literal cases.
 - The `payments.ts` rename; the literals in `deposit.test.ts` and `payments.test.ts`; the integration `toMatchObject`.
 
 **Gate:** the base gate.
 
-**P10. The top-10 property tests.**
+**P10. The top-10 property tests.** ✓
 
 | Property | Test |
 |---|---|
@@ -702,7 +702,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** as P8.
 
-**P11. Held exit and tripwire.**
+**P11. Held exit and tripwire.** ✓
 - `packages/integration/clock/merchant-exit-expiry.test.ts`, from the `stamp-expiry.test.ts:139-173` template:
   - `holdSends`;
   - an un-awaited `exitToL1({asMerchant: true})` proven while a switch-off is scheduled;
@@ -718,7 +718,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `bash contracts/aztec/scripts/check-stamp-constraint.sh --self-test && bash contracts/aztec/scripts/check-stamp-constraint.sh`;
 - `bun run lint:actions`.
 
-**P12. Aztec docs.**
+**P12. Aztec docs.** ✓
 - `docs/architecture.md:45-52`: Expiry gains the pending-delay-decrease cap, the horizon rule and "the hint is advice".
 - `docs/integration.md:18,58,99`: the linkability section names the remaining fingerprint.
 - `docs/operations.md:72,75,79-87`.
@@ -727,7 +727,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `bun run lint`.
 
-**P13. Aztec re-audit.**
+**P13. Aztec re-audit.** ✓
 - The Aztec.nr lens, 3 passes, through `reaudit/setup-noir.sh`, `build-bundles.sh - <bundle> <refs> reaudit/aztec-nr-overlay.md` and `record-pass.sh`, over the changed Noir.
 - Triage into this arc, and record verdicts in **Re-audit verdicts**.
 
@@ -758,6 +758,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **P16. The remaining leads, in docs.**
 - F-03 by design: the stolen-key race, bind-before-listing, a switch-off demotes rather than freezes. The Emergency runbook (`operations.md:79-87`) no longer implies that a switch-off ends every cash-out.
+- An ex-merchant still paid through live stamps refunds users on Ethereum, through its exit (P13).
 - Merchants claim before they deliver, because a private deposit is clawable until it is claimed.
 - A public deposit is returnable while its merchant is off.
 - Keep one delay for every merchant (the admin delay fingerprint).
@@ -971,6 +972,39 @@ Two items became gate confirmations (Asks A1, A2).
 | The debit check accepts a zero payout to the portal itself | Accepted, comment fix | Unreachable: every L2 exit and return asserts `amount > 0`. The comment at `TokenPortal.sol:250` overclaimed; it now says so, and GL-18 quotes it |
 | Harness: fizz switches the canonical rollup back, which the real Registry cannot | Rejected | Switching back only adds states. Every sequence that stays switched is a prefix the campaign also runs |
 
+**P13, Aztec.nr (2026-10-05).** The solidity-auditor with the Aztec.nr overlay ran 3 passes of 12 agents over the token, the bridge, the proxy and the four libraries, seeded with the earlier Noir ledger (22 records). Pass 1 (at `09ad306`) reported **2 findings**; both are fixed, and passes 2 (at `0570aab`) and 3 (at `f5a5a5e`) re-audited the fixed code. Passes 2 and 3 reported **0 findings**, and the ledger grew from 22 records to 47. Three of pass 3's leads were one-line fixes, made in this phase. The integration suite ran on the final token (P8 + P11 gate).
+
+| Finding or lead (location) | Verdict | Reason and action |
+|---|---|---|
+| A merchant payer with a pending switch-off is proven before a live stamp, so the shortened expiry names it (`hints.payment_side_hint`, bridge-core `paymentSide`) | **Finding, fixed** (`0570aab`, refined in `f5a5a5e`) | The payer is proven only when its read leaves the standard 82 800 s; otherwise a live stamp is, whose cap tells only the request's hour, and bridge-core then replaces the request as stale. TXE `a_marked_merchant_payer_pays_through_a_live_stamp`, bridge-core `paymentSide` and `payRequest` cases |
+| A switched-off merchant can neither exit nor shield its public balance (`Token.transfer_public_to_private`, `TokenBridge.exit_to_l1_public`) | **Finding, fixed** (`0570aab`, owner decision: ledger #27) | Any account may shield its own public tokens to itself; the ex-merchant then exits through its funding address like its private balance. TXE `a_user_and_an_ex_merchant_shield_their_own_funds` |
+| A guessable burn nonce lets an observer name a private exit's sender through the authwit nullifier (`exitToL1`) | Accepted, fixed | The nonce comes from `randomSecret()`, the rule for anything that must stay secret |
+| User-to-user public tokens now shield and exit to the recipient's funding address; a public send then a self-shield equals the refused one-tx shield to another user (`transfer_public_to_private`) | Accepted, by design (owner) | The public hop publishes both accounts and the amount, so no user-to-user link is hidden; the refused one-tx form hides the recipient. A consequence of ledger #27 and the unrestricted public-to-public transfer |
+| A merchant's self-shield still proves its entry, so a pending switch-off shortens it | Accepted, residual | `from` is public in that call, so nothing hidden is revealed; liveness only |
+| Users pay a switched-off merchant through stamps opened before it, privately and publicly, up to 25 h after it lands, and any account may open them until then | Accepted, residual (owner, GL-12) | Documented ("revokes no stamp"; `docs/integration.md`); one payment per request |
+| Near a switch-off, or under a 1 h delay, a merchant check's expiry matches the public change time | Accepted, documented | `docs/integration.md` "Linkable". Refusing every capped merchant tx in the SDK would stop a merchant's private txs for the whole delay. The architecture doc's "30 minutes or less" for a pending switch-off was wrong for 24 h and now says whole hours |
+| The hint compares raw horizons while the PXE publishes rounded ones | Rejected | Rounding down is monotonic, so the later raw cap never rounds below the other |
+| Without a capsule, the hint's early exit tests the raw maximum, so it probes the hidden second account even when the first merchant's read already leaves the standard expiry (`hints.merchant_side_hint`, bridge-core `merchantSide`) | Accepted, fixed (pass 3) | The early exit tests `anchor + 82 800`, and bridge-core mirrors it. TXE `of_two_merchants_the_probe_proves_the_one_with_the_later_cap`, bridge-core `merchantSide` |
+| The public payment refuses zero only through aztec-nr's completion check, which is marked for removal (`transfer_public_to_commitment`) | Accepted, fixed (pass 3) | An explicit assert, as the private payment has. TXE `a_public_payment_of_zero_is_refused` |
+| A user cannot send privately to itself, its only way to merge notes; one tx spends at most about 61 notes, and a request takes one payment (`transfer_private_to_private`) | Accepted, fixed (pass 3) | A send to oneself passes like a self-shield (ledger #27's reasoning: no value moves between accounts); bridge-core sends it with a NEITHER capsule, so it reads no entry. TXE `a_user_and_an_ex_merchant_send_privately_to_themselves`, integration `[A21] a user sends privately to itself` |
+| An ex-merchant still paid through live stamps cannot pay users back on Aztec (`transfer_private_to_commitment`) | Accepted, documented (P16) | A switch-off demotes it to a user; it refunds on Ethereum, through its exit |
+| A public send to the zero address emits a burn-like Transfer without lowering supply (`transfer_public_to_public`) | Rejected | Upstream's behaviour, and public-to-public stays unrestricted (owner). Supply is `total_supply`, not a replay of events |
+| With a merchant's authwit, a user opens a padded request for a user (`transfer_private_to_public_with_commitment`) | Rejected | The merchant authorized it, and only a merchant can pay a padded request |
+| A cancel reschedules the change, so the entry stays marked one more delay (`cancel_merchant_change`) | Accepted, documented | `docs/operations.md` "Cancel"; admin and guardian only |
+| A binding first claim has extra side effects, and its public amount matches an L1 deposit (`claim_private`) | Accepted, documented | `docs/integration.md` "Visible": an account's first claim is distinguishable, and claim amounts are public |
+| The admin toggles a merchant off and on daily so its proofs stay marked | Rejected | An admin power the design grants, and every toggle emits a public event |
+| An opening for a merchant with a pending switch-off shows it in the expiry | Accepted, documented | A stamp must prove its merchant recipient; a pad would leave the request unpayable by users |
+| The opener or recipient reopens a request for a new completer and pays it first | Rejected | Only the request's own parties know its randomness, and they gain nothing; `payRequest` refuses a request completed on chain before proving |
+| A SECOND capsule lets a merchant opener pad its own request for another merchant; one capsule serves every restricted call in a tx | Rejected | Self-chosen by the prover (SDK bypass); bridge-core sends one restricted call per tx |
+| A stamp pushed earlier in the same tx makes the hint pick an unprovable side | Rejected | Liveness only; no flow opens and pays in one tx, and a capsule overrides |
+| A depositor holding the claim data returns a private or public deposit before the merchant claims it; a failed public claim publishes the secret | Accepted, documented (Arc 4, P16) | The return pays only the depositor the message names; "merchants claim before they deliver" and "a public deposit is returnable while its merchant is off" |
+| First-claim binding to a stranger, a merchant bound to its first customer, and late binding by an ex-merchant (now with its shielded float) | Accepted | P14's consent, P15's bind before listing, and the owner's "a switch-off demotes, not freezes" |
+| `try_prove_merchant`'s `false` is unproven | Accepted, documented (P16) | Its doc comment says so; the bridge only refuses on it |
+| A payer opening a merchant's request can deliver a wrong note randomness | Rejected | Merchants open their own requests in every SDK flow; a payer that lies only freezes its own payment |
+| `mint_to_commitment` pushes no paid nullifier | Rejected | Unreachable: the minter is the proxy, which has no forwarder for it |
+| A public payment publishes the commitment, so its stamp or pad is findable | Accepted, documented | `docs/integration.md` "Inferable": whoever knows a commitment can tell whether it was opened for a merchant |
+| A blocklisted funding address blocks its account's exits | Accepted, documented | As P7: the withdraw stays retriable once Circle clears the address |
+
 ## Decision ledger
 
 | # | Decision | Source | Rejected alternative, and why |
@@ -1001,3 +1035,4 @@ Two items became gate confirmations (Asks A1, A2).
 | 24 | EIP-712 domain name `"InferenceMoneyTokenPortal"`, version `"1"` (25 chars, fits OZ ShortStrings). It is a permanent vector input | Main + Codex | `"TokenPortal"` (Fable): a wallet showing it can't tell this portal from the canonical Aztec one. The domain is separated by address anyway |
 | 26 | `_requireDepositor` also refuses the router as a refund address | Fable audit | Leaving it to the caller (the threat appetite): it is one comparison against a protocol-owned sink |
 | 25 | Contradiction-check fixes, applied: signature-first refusal + `PortalUnsignedDepositor` canary; field-tamper tests on the router; formal helpers sign and keep valid unrelated inputs; fizz call sites move in the phase that breaks them; `--test-limit 0`; merchant bindings finalized and read back before listing; `actors.ts` consent; Permit2's errors decoded; `smoke` never consents; held exit on a 1 h merchant with equality; SP-26/SP-50 cases restored; a broken-property CI check | Codex + Fable | — |
+| 27 | Any account may shield its own public tokens to itself: `transfer_public_to_private(X, X)` needs no merchant side | **owner, 2026-10-05** (P13: a switched-off merchant could neither exit nor shield its public float) | Ex-merchants only, public exits for ex-merchants, or documenting the freeze. It reverses the original spec's "users can't self-shield" residual: public tokens a merchant or, publicly, another user sent a user now shield and exit to its funding address |

@@ -28,37 +28,22 @@ aztec_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bridge_main="$aztec_root/token_bridge/src/main.nr"
 lib_src="$aztec_root/claim_secret/src"
 messages_src="$aztec_root/portal_messages/src"
-
-# Drops block and line comments and empties string literals (matched first in one alternation, so a comment opener
-# inside a string is never read as one): no check can match commented-out or quoted text as code.
-strip_comments() {
-  LC_ALL=C perl -0pe 's{("(?:[^"\\]|\\.)*")|/\*.*?\*/|//[^\n]*}{defined $1 ? q("") : ""}gse'
-}
+# shellcheck source=noir-text.sh
+source "$aztec_root/scripts/noir-text.sh"
 
 violation() {
   echo "SOLE-CONSUMER VIOLATION: $*" >&2
   return 1
 }
 
-S='[[:space:]]*'
 config_read="let config${S}=${S}self\\.storage\\.config\\.read\\(\\)"
 # The context's own call: a lookalike (`not_message_portal(...)`) would pass a bare `message_portal(` match.
 pay_portal="(^|[^A-Za-z0-9_.])self\\.context\\.message_portal${S}\\(${S}config\\.portal${S},${S}"
 token_view="self\\.view\\(${S}Token::at\\(${S}config\\.token${S}\\)"
 
-# fn_body <flat source> <name>: the text from `fn <name>` up to the next ` fn `.
-fn_body() {
-  printf '%s' "$1" | sed -E "s/.*fn $2${S}\(/(/; s/ fn .*//"
-}
-
 # bound_to <body> <call regex>: the variable a `let X = <call>` binds, if any.
 bound_to() {
   printf '%s' "$1" | sed -nE "s/.*let[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)${S}=${S}$2.*/\\1/p" | head -1
-}
-
-# need <fn> <body> <regex> <reason>: a violation unless the body matches.
-need() {
-  printf '%s' "$2" | grep -qE "$3" || violation "$1 $4"
 }
 
 # consumes_public <fn> <body>: hashes mint_to_public(to, amount, depositor) and consumes it with `secret` from
@@ -96,18 +81,6 @@ consumes_derived() {
     "does not consume its private content hash with the derived secret ($derived) from config.portal"
 }
 
-# flow_is <fn> <body> <conditions>: the body branches only on the rule conditions given (space-separated, in order) and
-# has no loop, match or closure: `if false { assert(…) }` keeps exactly the text the other checks match, but never runs.
-flow_is() {
-  local ifs
-  if printf '%s' "$2" | grep -qE '(^|[^A-Za-z0-9_])(for|while|loop|match)([^A-Za-z0-9_]|$)|[|]'; then
-    violation "$1 has a loop, match or closure" || return 1
-  fi
-  ifs=$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])if[^A-Za-z0-9_{][^{]*[{]" | sed -E "s/^[^i]*if${S}//; s/${S}[{]$//" |
-    tr '\n' ' ' | sed -E 's/ $//')
-  [ "$ifs" = "$3" ] || violation "$1 branches on [$ifs], not exactly on the rule conditions [$3]"
-}
-
 # A claim mints and nothing else: a withdraw from the same consumption would pay the deposit out twice.
 no_portal_message() {
   if printf '%s' "$2" | grep -q message_portal; then
@@ -139,7 +112,7 @@ config_once() {
 # hash names its parameters by text, so none may be rebound; and `flow_is` only lists branch conditions, so a payout
 # moved into one branch would pass without the depth check.
 pays_recipient() {
-  local content prefix depth
+  local content
   content=$(bound_to "$2" "withdraw_content_hash${S}\\(${S}recipient${S},${S}amount${S},${S}caller_on_l1${S}\\)")
   [ -n "$content" ] || violation "$1 does not hash withdraw(recipient, amount, caller_on_l1)" || return 1
   need "$1" "$2" \
@@ -153,9 +126,7 @@ pays_recipient() {
   need "$1" "$2" "${pay_portal}${content}${S}\\)" "does not pay the hashed withdraw to config.portal" || return 1
   [ "$(printf '%s' "$2" | grep -o message_portal | wc -l | tr -d ' ')" -eq 1 ] ||
     violation "$1 messages the portal more than once" || return 1
-  prefix=$(printf '%s' "$2" | sed -E 's/message_portal.*//')
-  depth=$(($(printf '%s' "$prefix" | tr -cd '{' | wc -c) - $(printf '%s' "$prefix" | tr -cd '}' | wc -c)))
-  [ "$depth" -eq 1 ] || violation "$1 pays out inside a branch"
+  [ "$(depth_at "$2" message_portal)" -eq 1 ] || violation "$1 pays out inside a branch"
 }
 
 check_claim_public() {

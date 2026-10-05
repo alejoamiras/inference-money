@@ -26,6 +26,7 @@ bash scripts/compile.sh              # rebuild the contract artifacts (nargo + A
 bash scripts/compile.sh --check      # fail unless the committed artifacts are exactly what the source builds
 bun run test:noir                    # TXE suites for token, token_bridge and keystone, each gated by its txe-manifest.txt
 bash scripts/check-sole-consumer.sh  # static guard: four consume sites and the bridge's rules (add --self-test to prove it bites)
+bash scripts/check-stamp-constraint.sh # static guard: a stamped payment proves its stamp settled and caps at its deadline (--self-test)
 ```
 
 Never run a bare `nargo compile`: it overwrites a committed artifact with an untranspiled one that aztec.js rejects.

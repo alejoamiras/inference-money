@@ -228,3 +228,62 @@ unconstrained fn exit_private_zero_amount_rejected() {
         TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 0, EthAddress::zero(), NONCE, false),
     );
 }
+
+// An exit burns only its own sender's balance: a stranger exiting the same amount under the same nonce burns its own,
+// and the victim's unused burn authwit still pays the victim's exit afterwards.
+#[test]
+unconstrained fn a_strangers_exit_cannot_spend_a_victims_burn_authwit() {
+    let (mut env, admin, proxy, token, bridge) = utils::setup();
+    let victim = utils::merchant(&mut env, admin, token);
+    let stranger = utils::merchant(&mut env, admin, token);
+    utils::fund_public(env, victim, 1_000_000, 42, bridge);
+    utils::fund_public(env, stranger, 1_000_000, 43, bridge);
+    add_public_authwit_from_call(env, victim, proxy, Token::at(token).burn_public(victim, 400_000, NONCE));
+    add_public_authwit_from_call(env, stranger, proxy, Token::at(token).burn_public(stranger, 400_000, NONCE));
+
+    let exit = TokenBridge::at(bridge).exit_to_l1_public(ELSEWHERE, 400_000, EthAddress::zero(), NONCE);
+    env.call_public(stranger, exit);
+    assert_eq(env.view_public(Token::at(token).balance_of_public(victim)), 1_000_000);
+    env.call_public(victim, exit);
+    assert_eq(env.view_public(Token::at(token).balance_of_public(victim)), 600_000);
+    assert_eq(env.view_public(Token::at(token).balance_of_public(stranger)), 600_000);
+}
+
+#[test]
+unconstrained fn a_strangers_private_exit_cannot_spend_a_victims_burn_authwit() {
+    let (mut env, _admin, proxy, token, bridge) = utils::setup();
+    let victim = env.create_contract_account();
+    let stranger = env.create_contract_account();
+    utils::fund_private(env, victim, 1_000_000, 51, bridge);
+    utils::fund_private(env, stranger, 1_000_000, 52, bridge);
+    add_private_authwit_from_call(env, victim, proxy, Token::at(token).burn_private(victim, 400_000, NONCE));
+    add_private_authwit_from_call(env, stranger, proxy, Token::at(token).burn_private(stranger, 400_000, NONCE));
+
+    let exit = TokenBridge::at(bridge).exit_to_l1_private(utils::depositor(), 400_000, EthAddress::zero(), NONCE, false);
+    env.call_private(stranger, exit);
+    assert_eq(env.execute_utility(Token::at(token).balance_of_private(victim)), 1_000_000);
+    env.call_private(victim, exit);
+    assert_eq(env.execute_utility(Token::at(token).balance_of_private(victim)), 600_000);
+    assert_eq(env.execute_utility(Token::at(token).balance_of_private(stranger)), 600_000);
+}
+
+// Accepted behaviour: a switch-off demotes a merchant to a user, it does not freeze it, so one that never bound binds
+// on its first private claim, from any L1 address, and exits there. Onboarding binds a merchant before listing it.
+#[test]
+unconstrained fn a_switched_off_merchant_that_never_bound_binds_late_and_exits_there() {
+    let (mut env, admin, proxy, token, bridge) = utils::setup();
+    let merchant = utils::merchant(&mut env, admin, token);
+    env.call_public(admin, Token::at(token).schedule_merchant_off(merchant, true));
+    env.mine_block_at(env.last_block_timestamp() + 86_400);
+    assert(!env.view_public(Token::at(token).is_merchant(merchant)));
+
+    let late = EthAddress::from_field(0x1A7E);
+    let leaf = utils::send_mint_to_private_message_from(env, merchant, 300_000, 9, late, bridge);
+    env.call_private(merchant, TokenBridge::at(bridge).claim_private(merchant, 300_000, 9, leaf, late, true));
+    add_private_authwit_from_call(env, merchant, proxy, Token::at(token).burn_private(merchant, 300_000, NONCE));
+    env.call_private(
+        merchant,
+        TokenBridge::at(bridge).exit_to_l1_private(late, 300_000, EthAddress::zero(), NONCE, false),
+    );
+    assert_eq(env.execute_utility(Token::at(token).balance_of_private(merchant)), 0);
+}

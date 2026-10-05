@@ -1,4 +1,4 @@
-use crate::Token;
+use crate::{hints::MERCHANT_MAX_DELAY, Token};
 use authorization_contract::AuthorizationContract;
 use authorization_contract::AuthorizationContract::AuthCall;
 use aztec::{
@@ -111,6 +111,13 @@ unconstrained fn create_account(
 /// Mines a block at `timestamp`, so the next private call anchors there.
 pub unconstrained fn anchor_at(env: TestEnvironment, timestamp: u64) {
     env.mine_block_at(timestamp);
+}
+
+/// Schedules `merchant`'s switch-off and returns when it lands, on the default 24 h delay.
+pub unconstrained fn switch_off(w: MerchantWorld, merchant: AztecAddress) -> u64 {
+    let t0 = w.env.last_block_timestamp();
+    w.env.call_public(w.admin, Token::at(w.token).schedule_merchant_off(merchant, true));
+    t0 + MERCHANT_MAX_DELAY
 }
 
 /// Lists `accounts` as merchants, signed by `admin` (the token's deployer): the merchant rules would otherwise refuse

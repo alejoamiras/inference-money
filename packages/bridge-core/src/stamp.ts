@@ -30,6 +30,12 @@ export const STAMP_BUCKET_SLOT = new Fr(0x2781e8e10232a75d18a5d66dda25e487067dcf
 /** `poseidon2_hash_bytes("merchant_token_request_opened")`: heads the offchain effect `[tag, c]` an opening emits. */
 export const REQUEST_OPENED_EFFECT = new Fr(0x2c0264a3f3d089a68139762c50b6f5f68e6cc5d8662de00195b492d228a73f73n)
 
+/**
+ * The expiry the PXE commits for a tx the kernel caps at its default update horizon (anchor + 86 399 s): rounded down
+ * to whole hours. Every tx that reads no shorter-lived state commits it, so it marks nothing.
+ */
+export const STANDARD_TX_LIFETIME = 82_800n
+
 /** Seconds per stamp bucket. */
 export const STAMP_BUCKET = 3600n
 /** How many buckets hold a stamp still payable: the current one and the 24 before it. */
@@ -60,11 +66,13 @@ export interface RequestStamp {
 	expiresAt: bigint
 	/** At that block: "fresh" before `unmarkedUntil`, else "live" (it was found among the live buckets). */
 	state: "fresh" | "live"
+	/** That block's timestamp, the anchor a payment proven now reads at. */
+	at: bigint
 }
 
 export function requestStampAt(bucket: bigint, at: bigint): RequestStamp {
 	const unmarkedUntil = stampUnmarkedUntil(bucket)
-	return { bucket, unmarkedUntil, expiresAt: stampDeadline(bucket), state: at < unmarkedUntil ? "fresh" : "live" }
+	return { bucket, unmarkedUntil, expiresAt: stampDeadline(bucket), state: at < unmarkedUntil ? "fresh" : "live", at }
 }
 
 /** The buckets whose stamps are live at `timestamp`, newest first. */

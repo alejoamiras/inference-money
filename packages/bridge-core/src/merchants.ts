@@ -24,7 +24,7 @@ import { deriveStorageSlotInMap } from "@aztec-labs/stdlib/hash"
 import { Capsule } from "@aztec-labs/stdlib/tx"
 import { tokenArtifact } from "./artifacts"
 import { type TokenRule, tokenRefusalOf } from "./rules"
-import { MERCHANT_SIDE_SLOT, type RequestStamp } from "./stamp"
+import { MERCHANT_SIDE_SLOT, type RequestStamp, STANDARD_TX_LIFETIME } from "./stamp"
 
 /** The switch-off delay's bounds: the token's MERCHANT_MIN_DELAY (DelayedPublicMutable's floor) and MERCHANT_MAX_DELAY. */
 export const MERCHANT_MIN_DELAY = 3600n
@@ -40,11 +40,17 @@ export function delayAt(sdc: ScheduledDelayChange, at: bigint): bigint {
 export const Side = { First: 0, Second: 1, Neither: 2 } as const
 export type Side = (typeof Side)[keyof typeof Side]
 
-/** An entry's switch-off state: `off` holds before `changeAt`, `scheduledOff` from then on. */
+/**
+ * An entry's switch-off state: `off` holds before `changeAt`, `scheduledOff` from then on. Its delay likewise: `delay`
+ * before `delayChangeAt`, `scheduledDelay` from then on, either MERCHANT_MIN_DELAY while unset.
+ */
 export interface MerchantEntry {
 	off: boolean
 	scheduledOff: boolean
 	changeAt: bigint
+	delay: bigint | undefined
+	scheduledDelay: bigint | undefined
+	delayChangeAt: bigint
 }
 
 /** Every listed account's entry, read at `block`, whose timestamp is `at`. */
@@ -104,10 +110,19 @@ export async function syncMerchantList(node: MerchantNode, token: AztecAddress, 
 	const entries = await Promise.all(
 		accounts.map(async (account): Promise<[string, MerchantEntry]> => {
 			const slot = await deriveStorageSlotInMap(offSlot, account)
-			const { svc } = await DelayedPublicMutableValues.readFromTree(slot, (s) => node.getPublicStorageAt(BlockNumber(at), token, s))
+			const { svc, sdc } = await DelayedPublicMutableValues.readFromTree(slot, (s) =>
+				node.getPublicStorageAt(BlockNumber(at), token, s),
+			)
 			return [
 				account.toString(),
-				{ off: !svc.previous[0]!.isZero(), scheduledOff: !svc.post[0]!.isZero(), changeAt: svc.timestampOfChange },
+				{
+					off: !svc.previous[0]!.isZero(),
+					scheduledOff: !svc.post[0]!.isZero(),
+					changeAt: svc.timestampOfChange,
+					delay: sdc.pre,
+					scheduledDelay: sdc.post,
+					delayChangeAt: sdc.timestampOfChange,
+				},
 			]
 		}),
 	)
@@ -121,30 +136,52 @@ export function merchantStatus(list: MerchantList, account: AztecAddress, at = l
 	return { merchant: !(at < e.changeAt ? e.off : e.scheduledOff), pending: e.changeAt > at }
 }
 
+/** How long a read of `e` at `at` must assume its value holds: aztec's `get_effective_minimum_delay_at`. */
+export function effectiveMinimumDelayAt(e: MerchantEntry, at: bigint): bigint {
+	const pre = e.delay ?? MERCHANT_MIN_DELAY
+	const post = e.scheduledDelay ?? MERCHANT_MIN_DELAY
+	if (e.delayChangeAt <= at) return post - 1n
+	const throughChange = e.delayChangeAt - at + post
+	return (pre < throughChange ? pre : throughChange) - 1n
+}
+
+/** The last second a read of `e` at `at` holds, given its effective minimum delay `d`: aztec's `get_time_horizon`. */
+export function timeHorizon(e: MerchantEntry, at: bigint, d: bigint): bigint {
+	if (at >= e.changeAt) return at + d
+	return at + d < e.changeAt - 1n ? at + d : e.changeAt - 1n
+}
+
+/** The expiry cap proving `account` a merchant at `at` puts on the tx (the token hint's horizon); 0n if unlisted. */
+export function merchantHorizon(list: MerchantList, account: AztecAddress, at = list.at): bigint {
+	const e = list.entries.get(account.toString())
+	return e ? timeHorizon(e, at, effectiveMinimumDelayAt(e, at)) : 0n
+}
+
 /**
- * The side a transfer or request proves, by the token hint's rules: a merchant side is always kept; opening a
- * request, a merchant recipient is always proven (so its request is stamped); otherwise, of two merchants, the one
- * with no change pending, whose read keeps the tx's expiry longest. `first` is the recipient, `second` the sender.
+ * The side a transfer or request proves, by the token hint's rules: a merchant side is always kept; a merchant
+ * `first` is proven whenever `keepFirst` (the call publishes it, or opens a request for it, which is then stamped) or
+ * its read leaves the standard expiry; otherwise, of two merchants, the one whose read caps the tx's expiry latest,
+ * `first` on a tie.
  */
-export function merchantSide(list: MerchantList, first: AztecAddress, second: AztecAddress, opening: boolean): Side {
+export function merchantSide(list: MerchantList, first: AztecAddress, second: AztecAddress, keepFirst: boolean): Side {
 	const a = merchantStatus(list, first)
-	if (a.merchant && (opening || !a.pending)) return Side.First
+	if (a.merchant && (keepFirst || merchantHorizon(list, first) >= list.at + STANDARD_TX_LIFETIME)) return Side.First
 	const b = merchantStatus(list, second)
-	if (b.merchant && (!a.merchant || !b.pending)) return Side.Second
+	if (b.merchant && (!a.merchant || merchantHorizon(list, second) > merchantHorizon(list, first))) return Side.Second
 	return a.merchant ? Side.First : Side.Neither
 }
 
-/** A request's stamp as a payment sees it: still unmarked, live but no longer fresh, or none live. */
-export type StampState = RequestStamp["state"] | "none"
-
 /**
- * The side a payment into a request proves, by the token hint's order: a fresh stamp, which caps no expiry; else a
- * merchant payer; else a live stamp, whose proof shortens the tx's expiry; else neither.
+ * The side a payment into a request (its live stamp, if any) proves, by the token hint's order: a fresh stamp, which
+ * caps no expiry; else a merchant payer whose read, taken when the stamp was read, leaves the standard expiry; else a
+ * live stamp, whose cap tells only the request's hour where a shortened payer's would name the payer; else any
+ * merchant payer; else neither.
  */
-export function paymentSide(list: MerchantList, stamp: StampState, from: AztecAddress): Side {
-	if (stamp === "fresh") return Side.First
-	if (merchantStatus(list, from).merchant) return Side.Second
-	return stamp === "live" ? Side.First : Side.Neither
+export function paymentSide(list: MerchantList, stamp: RequestStamp | undefined, from: AztecAddress): Side {
+	if (stamp?.state === "fresh") return Side.First
+	const payer = merchantStatus(list, from).merchant
+	if (payer && (!stamp || merchantHorizon(list, from, stamp.at) >= stamp.at + STANDARD_TX_LIFETIME)) return Side.Second
+	return stamp ? Side.First : Side.Neither
 }
 
 /** The capsule that tells the token which side to prove; one serves every restricted call in its tx. */

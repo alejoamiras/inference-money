@@ -8,7 +8,7 @@ import type { Wallet } from "@aztec-labs/aztec.js/wallet"
 import { siloNullifier } from "@aztec-labs/stdlib/hash"
 import type { ExecutionPayload, Tx } from "@aztec-labs/stdlib/tx"
 import { L2_PROPOSED } from "./claim"
-import type { MerchantList } from "./merchants"
+import { MERCHANT_MAX_DELAY, MERCHANT_MIN_DELAY, type MerchantList } from "./merchants"
 import {
 	memoryPaymentStore,
 	openedCommitment,
@@ -20,7 +20,6 @@ import {
 	payRequest,
 	RESERVATION_TTL_MS,
 	requestStamp,
-	STANDARD_TX_LIFETIME,
 	siloedCompletionTag,
 } from "./payments"
 import { TOKEN_REFUSALS } from "./rules"
@@ -28,6 +27,7 @@ import {
 	MERCHANT_SIDE_SLOT,
 	REQUEST_OPENED_EFFECT,
 	STAMP_BUCKET_SLOT,
+	STANDARD_TX_LIFETIME,
 	stamp,
 	stampBucket,
 	stampDeadline,
@@ -40,7 +40,19 @@ const [merchant, alice, elsewhere] = await Promise.all([AztecAddress.random(), A
 const LIST: MerchantList = {
 	block: 1,
 	at: 0n,
-	entries: new Map([[merchant.toString(), { off: false, scheduledOff: false, changeAt: 0n }]]),
+	entries: new Map([
+		[
+			merchant.toString(),
+			{
+				off: false,
+				scheduledOff: false,
+				changeAt: 0n,
+				delay: MERCHANT_MAX_DELAY,
+				scheduledDelay: MERCHANT_MAX_DELAY,
+				delayChangeAt: 0n,
+			},
+		],
+	]),
 }
 const MINED = [TxStatus.PROPOSED, TxStatus.CHECKPOINTED, TxStatus.PROVEN, TxStatus.FINALIZED]
 /** The first second of an hour bucket, so a stamp opened now stays fresh for two hours. */
@@ -383,13 +395,36 @@ describe("payRequest", () => {
 		expect(w.chain.included).toHaveLength(1)
 	})
 
-	it("refuses at the gate a payment through the stamp whose proof came out marked, releasing the request", async () => {
+	it("refuses as stale a merchant's payment whose own read, its switch-off pending, would cap earlier than a live stamp", async () => {
+		const w = fakeChain()
+		const c = await stampedRequest(w)
+		w.chain.ts = stampUnmarkedUntil(stampBucket(w.chain.ts))
+		const t = await tab(memoryPaymentStore(), w)
+		const settled = LIST.entries.get(merchant.toString())!
+		const switchingOff = { ...settled, scheduledOff: true, changeAt: w.chain.ts + MERCHANT_MIN_DELAY }
+		const list = { ...LIST, entries: new Map([[merchant.toString(), switchingOff]]) }
+		const intent = { from: merchant, commitment: c, amount: 5n, kind: "private" as const }
+		await expect(payRequest(t.gate, t.wallet, token, intent, { list })).rejects.toEqual(refusal("stale"))
+		expect(w.chain.payloads).toEqual([])
+	})
+
+	it("refuses at the gate a private payment into a stamped request whose proof came out marked, a merchant's too", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
 		const c = await stampedRequest(w)
 		const marked = await tab(store, w, { lifetime: STANDARD_TX_LIFETIME - 3_600n })
 		await expect(marked.pay(c)).rejects.toEqual(refusal("stale"))
-		expect([w.chain.included.length, await store.get(paymentKey(token, c))]).toEqual([0, undefined])
+		const bucket = stampBucket(w.chain.ts)
+		w.chain.ts = stampUnmarkedUntil(bucket)
+		const live = await stampedRequest(w, bucket)
+		await expect(marked.pay(live, merchant), "its read shortened after the list's").rejects.toEqual(refusal("stale"))
+		expect([w.chain.included.length, await store.get(paymentKey(token, c)), await store.get(paymentKey(token, live))]).toEqual([
+			0,
+			undefined,
+			undefined,
+		])
+		await marked.pay(Fr.random(), merchant)
+		expect(w.chain.included, "with no stamp to use instead, a merchant's marked payment goes").toHaveLength(1)
 	})
 })
 

@@ -2,19 +2,24 @@
 //
 // Advice only: the token proves whichever side the hint names, so a wrong hint yields an unprovable tx, never a false
 // pass. A tx's capsule decides when present (bridge-core and the showcase attach one, computed from the list's events).
-// Without one the hint probes the anchor block, counterparty first, so a merchant counterparty spares the sender's own
-// address a query to the node. Both follow the same three rules:
+// Without one the hint probes the anchor block, first side first, and queries the node about the second side unless
+// the first is kept or its read already leaves the standard expiry. Both follow the same three rules:
 //   1. a merchant side is always kept, and the answer is NEITHER only when no side is a merchant;
-//   2. opening a request, a merchant recipient is always proven, so a merchant's request is stamped, never padded;
-//   3. otherwise, of two merchants, prove the one with no change scheduled ahead: its read keeps the tx's expiry longest.
+//   2. the side a call already publishes, or a request's merchant recipient, is always proven, so a merchant's request
+//      is stamped, never padded;
+//   3. otherwise the first merchant if its read leaves the standard expiry, else of two merchants the one whose read
+//      caps the tx's expiry latest (its horizon).
 // A payment into a request has its own order, by what each proof costs the tx's expiry: a stamp still unmarked (it
-// caps nothing a tx would not have anyway), else a merchant payer, else a live stamp (it shortens the expiry), else
-// NEITHER.
+// caps nothing a tx would not have anyway), else a merchant payer whose read leaves the standard expiry, else a live
+// stamp (its cap tells only the request's hour, where a shortened payer's would name the payer), else any merchant
+// payer, else NEITHER.
 use aztec::{
     oracle::{capsules, nullifiers::check_nullifier_exists, storage::raw_storage_read},
     protocol::{
         abis::block_header::BlockHeader, address::AztecAddress,
-        delayed_public_mutable::delayed_public_mutable_values::unpack_value_change,
+        delayed_public_mutable::delayed_public_mutable_values::{
+            unpack_delay_change, unpack_value_change,
+        },
         storage::map::derive_storage_slot_in_map, traits::Hash,
     },
     state_vars::{Map, PublicImmutable, StateVariable},
@@ -22,6 +27,14 @@ use aztec::{
 use merchant_stamp::{
     MERCHANT_SIDE_SLOT, stamp, stamp_bucket, STAMP_BUCKET_SLOT, STAMP_LIVE_BUCKETS, stamp_unmarked_until,
 };
+
+// The switch-off delay's bounds. The floor is DelayedPublicMutable's minimum. Above the ceiling a delay changes nothing:
+// every private call already caps its tx at anchor + 86399, through the read of its contract's class id (a
+// DelayedPublicMutable whose delay is 86400).
+pub global MERCHANT_MIN_DELAY: u64 = 3600;
+pub global MERCHANT_MAX_DELAY: u64 = 86400;
+// That anchor + 86399, as the wallet commits it, rounded down to the hour: a read capping at or past it marks nothing.
+global STANDARD_TX_LIFETIME: u64 = 82800;
 
 pub global FIRST: u8 = 0;
 pub global SECOND: u8 = 1;
@@ -35,21 +48,22 @@ pub struct MerchantList {
     pub merchant_off_slot: Field,
 }
 
-/// Which of two accounts a transfer or request proves a merchant: FIRST, SECOND or NEITHER. `first` is the recipient
-/// (the counterparty, probed first) and `second` the sender or creator; `opening` applies rule 2.
+/// Which of two accounts a transfer or request proves a merchant: FIRST, SECOND or NEITHER. `keep_first` applies rule
+/// 2 to `first`, the side the call publishes or the request's recipient.
 pub unconstrained fn merchant_side_hint(
     list: MerchantList,
     first: AztecAddress,
     second: AztecAddress,
-    opening: bool,
+    keep_first: bool,
 ) -> u8 {
     capsule_side(list.this).unwrap_or_else(|| {
         let a = probe(list, first);
-        if a.merchant & (opening | !a.pending) {
+        let unmarked = a.horizon >= list.anchor.timestamp() + STANDARD_TX_LIFETIME;
+        if a.merchant & (keep_first | unmarked) {
             FIRST
         } else {
             let b = probe(list, second);
-            if b.merchant & (!a.merchant | !b.pending) {
+            if b.merchant & (!a.merchant | (b.horizon > a.horizon)) {
                 SECOND
             } else if a.merchant {
                 FIRST
@@ -58,6 +72,11 @@ pub unconstrained fn merchant_side_hint(
             }
         }
     })
+}
+
+/// The latest expiry proving `account` a merchant would leave the tx: its entry's horizon at the anchor, 0 if unlisted.
+pub unconstrained fn merchant_horizon(list: MerchantList, account: AztecAddress) -> u64 {
+    probe(list, account).horizon
 }
 
 /// Which proof a payment into a request makes, and of which stamp: FIRST (the stamp in the returned bucket), SECOND
@@ -78,12 +97,16 @@ pub unconstrained fn payment_side_hint(
             & (list.anchor.timestamp() < stamp_unmarked_until(bucket.unwrap_unchecked()));
         if unmarked {
             FIRST
-        } else if probe(list, from).merchant {
-            SECOND
-        } else if bucket.is_some() {
-            FIRST
         } else {
-            NEITHER
+            let payer = probe(list, from);
+            let unmarked_payer = payer.horizon >= list.anchor.timestamp() + STANDARD_TX_LIFETIME;
+            if payer.merchant & (bucket.is_none() | unmarked_payer) {
+                SECOND
+            } else if bucket.is_some() {
+                FIRST
+            } else {
+                NEITHER
+            }
         }
     });
     (side, bucket.unwrap_or(0))
@@ -124,24 +147,26 @@ unconstrained fn capsule_side(this: AztecAddress) -> Option<u8> {
 
 struct Entry {
     merchant: bool,
-    pending: bool,
+    horizon: u64,
 }
 
-// Mirrors the token's private read: the register's initialization nullifier, then the switch-off slot's value change
-// (the first 2 * 1 + 1 fields of a DelayedPublicMutable<bool>) evaluated at the anchor's timestamp.
+// Mirrors the token's private read: the register's initialization nullifier, then the switch-off slot (the first
+// 2 * 1 + 1 fields of a DelayedPublicMutable<bool>) at the anchor, with the expiry cap aztec-nr's
+// `DelayedPublicMutable::get_current_value` sets for that read.
 unconstrained fn probe(list: MerchantList, account: AztecAddress) -> Entry {
     let merchants: Map<AztecAddress, PublicImmutable<bool, ()>, ()> =
         Map::new((), list.merchants_slot);
     if !check_nullifier_exists(
         merchants.at(account).compute_initialization_inner_nullifier(),
     ) {
-        Entry { merchant: false, pending: false }
+        Entry { merchant: false, horizon: 0 }
     } else {
         let slot = derive_storage_slot_in_map(list.merchant_off_slot, account);
-        let change =
-            unpack_value_change::<bool, 1>(raw_storage_read(list.anchor.hash(), list.this, slot));
+        let raw: [Field; 3] = raw_storage_read(list.anchor.hash(), list.this, slot);
+        let value = unpack_value_change::<bool, 1>(raw);
+        let delay = unpack_delay_change::<MERCHANT_MIN_DELAY>(raw[0]);
         let now = list.anchor.timestamp();
-        let (_, change_at) = change.get_scheduled();
-        Entry { merchant: !change.get_current_at(now), pending: change_at > now }
+        let horizon = value.get_time_horizon(now, delay.get_effective_minimum_delay_at(now));
+        Entry { merchant: !value.get_current_at(now), horizon }
     }
 }
