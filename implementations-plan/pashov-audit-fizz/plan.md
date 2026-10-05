@@ -771,7 +771,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** `bun run lint`.
 
-**P17. End-to-end.**
+**P17. End-to-end.** ✓
 
 **Gate:**
 - `bun run test:e2e`, in which try-happy still settles and `demo setup` binds and then lists on local;

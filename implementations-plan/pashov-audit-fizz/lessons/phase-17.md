@@ -1,0 +1,13 @@
+# Phase 17: end-to-end, the Arc 4 loop and the cross-arc pass (2026-10-05)
+
+| Attempt | Result | Consequence |
+|---|---|---|
+| `bun run test:e2e`, first run | 5/7. "Reset balances" and try-happy failed on galactica's balance, shown as "0.020001": the one-base-unit binding deposit left it off whole cents, the showcase prints such a balance to six decimals, and the suite reads cents. | The merchant binding deposit became one cent (`DEMO_SEED.merchantBind`); the runbook's USDC budget is 50.02. |
+| `bun run test:e2e`, rerun | 7/7. `demo setup` bound both merchants, then listed them, and try-happy's deposit, claim, payment, refund and withdrawal settled. | — |
+| Arc 4 Codex round 1 (session `codex-WpZvpIWZ`) | 7 findings: (1) `demo fund` would fund the public cast keys on any chain a manifest names; (2) a binding found already in place skips its finality; (3) a resume with a stored binding ticket skipped the poisoned-binding refusal; (4) a missing sponsor masked the consent refusal; (5) the ETH budget left out the deploy's gas; (6) "an ex-merchant cannot pay users back on Aztec" ignored its public balance; (7) two narrating comments. | Fixed 1 (Sepolia only), 3 (`ops.bound` runs for every binding seed first), 4 (consent before `feeFor`), 5, 6 and 7. **Rejected** 2: only a stranger's fresh binding of a merchant to its own treasury is unfinal there, and a prune of it leaves the merchant exactly as exposed as accepted residual A2. |
+| Arc 4 Codex round 2 (resumed) | **Converged**: "No new material findings. The fixes hold, and finding 2 remains within the accepted demo residual. MATERIAL FINDINGS: 0". | — |
+| Cross-arc pass, round 1 (fresh session `codex-72Ui4gCA`, `git diff 6fd8f98...HEAD`) | 3 low findings: the consent error called the depositor "the address it came from" (on the signed path someone else pays); `PROPERTIES.md` GL-02 still described repeat payments and GL-13 "no end date"; four narrating fizz harness comments. It found no seam, ABI drift, consent gap, artifact or onboarding-order problem. | All three fixed. |
+| Cross-arc pass, round 2 (resumed) | 1: the findings summary in `PROPERTIES.md` still said "no end date". | Fixed, along with the summary's repeat-completion line. |
+| Cross-arc pass, round 3 (resumed) | **Converged**: "No new material findings. All previously reported findings are resolved. MATERIAL FINDINGS: 0". | The code is final for the keyed redeploy. |
+
+Gate: `bun run test:e2e` 7/7, exit 0; `bun run --cwd apps/showcase test:components` 39 passed, 5 skipped; `bun run test:integration` on the final Arc 4 code 46/46 + 6/6, exit 0; `bun run lint`, `typecheck`, `test` and `test:evm` exit 0.
