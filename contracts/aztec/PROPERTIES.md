@@ -50,22 +50,16 @@
   re-reads the supply after a transfer, a private burn, a payment or any mixed sequence.
   Test goes in: token/src/test/rules_private.nr :: the_total_supply_equals_every_balance_after_a_mixed_sequence
 
-- [~] **GL-02** — Paying into a request is never free, even the second time: each completion debits its payer exactly
-  what it adds to the request's owner (the recipient it was opened for, never the payer, the completer or anyone else),
-  leaves the supply alone (a minter's completion adds to it instead), and leaves the request open, its validity
-  commitment and its stamp or pad in place. The recipient discovers only the first completion, so a repeat is lost to
-  it (accepted, upstream). (Category: HIGH_LEVEL; Guarantee: SHOULD-HOLD — aztec-nr uint-note `PartialUintNote::complete`:
-  "Every completion must therefore be independently paid for or authorized in the completing function itself";
-  docs/architecture.md "Paying a request": "Completion isn't single-use, and the recipient discovers only the first, so
-  a second payment into one request is lost"; Priority: HIGH; Scope: always-on; Sources: CON-08, ST-25, RT-11, SPEC-51,
-  ADV-17)
-  Coverage: PARTIAL by token/src/test/rules_requests.nr:a_user_pays_a_merchants_request_privately and
-  a_request_stamped_for_a_merchant_stays_payable_after_its_switch_off (one completion each) — no TXE test completes a
-  request twice. Upstream's was removed (token/src/test/mint_to_commitment.nr: TXE "no longer catches
-  double-completion"; its "the protocol still prevents this" contradicts docs/architecture.md), and
-  mint_to_private_failure_balance_overflow's second completion fails on the supply overflow before it completes.
-  packages/integration/test/requests.test.ts "[A22] a second payment…" pins payer −2×, recipient +1× off TXE.
-  Test goes in: token/src/test/rules_requests.nr :: a_second_payment_into_a_request_debits_its_payer_and_keeps_the_request_open
+- [x] **GL-02** — A request takes one payment: its first positive completion, privately or publicly, debits its payer
+  exactly what it adds to the request's owner (the recipient it was opened for), leaves the supply alone, and pushes
+  `paid(c)`, so the token refuses any later completion through either path, and a zero one. A minter's completion
+  (`mint_to_commitment`) pushes no `paid(c)`; the minter is the proxy, which has no forwarder for it. (Category:
+  HIGH_LEVEL; Guarantee: SHOULD-HOLD — docs/integration.md: "Every request takes one payment, privately or publicly";
+  Priority: HIGH; Scope: always-on; Sources: CON-08, ST-25, RT-11, SPEC-51, ADV-17)
+  Coverage: token/src/test/rules_requests.nr:a_request_paid_privately_cannot_be_paid_publicly,
+  a_request_paid_publicly_cannot_be_paid_privately, a_private_payment_of_zero_is_refused,
+  a_public_payment_of_zero_is_refused; packages/integration/test/requests.test.ts "[A22] a request takes one payment…"
+  and "[A22] a private and a public payment into one request, … sent together: one lands".
 
 - [~] **GL-03** — A zero-amount move through any entry point changes no balance or supply and adds no value note, and
   the merchant rule still applies: if it's a user sending to a user, it is refused even at 0. (Category:
@@ -166,7 +160,8 @@
   Test goes in: token/src/test/rules_requests.nr :: a_request_stamped_for_a_merchant_stays_payable_publicly_after_its_switch_off
 
 - [ ] **GL-13** — SYN. The converse of GL-12, for the owner to weigh: once a merchant's switch-off lands, users can no
-  longer pay requests stamped for it. Today such a request stays payable for any amount, with no end date. (Category:
+  longer pay requests stamped for it. Today such a request stays payable until its stamp expires, under 25 h after the
+  switch-off lands. (Category:
   VALID_STATE — after the switch-off has landed; Guarantee: EXPLORATORY — it contradicts an accepted residual;
   Priority: LOW; Scope: always-on; Sources: SYN (audit finding 4); EXPECTED-FAIL today)
   Coverage: UNCOVERED (GL-12's test asserts the opposite).

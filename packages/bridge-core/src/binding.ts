@@ -36,7 +36,7 @@ export class BindConsentRequiredError extends Error {
 		readonly depositor: Address,
 	) {
 		super(
-			`Claiming this deposit binds ${recipient}, for good, to ${depositor}, the address it came from. Claim with allowBind once its owner agrees.`,
+			`Claiming this deposit binds ${recipient}, for good, to its depositor ${depositor}, the key holder that signed it. Claim with allowBind once its owner agrees.`,
 		)
 		this.name = "BindConsentRequiredError"
 	}

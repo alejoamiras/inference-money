@@ -26,7 +26,6 @@ import {MockPermit2} from "../mocks/MockPermit2.sol";
 import {ModalUsdc} from "./mocks/ModalUsdc.sol";
 import {RealOutboxStack} from "./mocks/RealOutboxStack.sol";
 
-/// @notice Base contract with state variables and setup functions
 abstract contract Base is StringUtils, Clamp, Deployer, Math {
     using DecimalPrinter for uint256;
 
@@ -329,14 +328,12 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
         return bytes32(uint256(value) % (Constants.MAX_FIELD_VALUE + 1));
     }
 
-    // Sums the native token balances of all actors
     function sumActorsBalances() internal view returns (uint256 sumOfBalances) {
         for (uint256 i; i < actors.length; i++) {
             sumOfBalances += actors[i].balance;
         }
     }
 
-    // Sums the ERC-20 token balances of all actors for a given token
     function sumActorsERC20Balances(address _token) internal view returns (uint256 sumOfBalances) {
         for (uint256 i; i < actors.length; i++) {
             bytes memory data = abi.encodeWithSignature("balanceOf(address)", actors[i]);
