@@ -749,7 +749,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 
 **Gate:** base gate; `bun run test:integration`; `bun run --cwd apps/showcase test:components`.
 
-**P15. Bind before listing.**
+**P15. Bind before listing.** ✓
 - The demo seeds and their order; `demo fund` funds the merchants; the `merchants add` reminder.
 - The two-phase testnet stop, with a unit test of the seed order and the "list now" stop.
 - The `docs/operations.md:13,51,71,89-97` runbook.
