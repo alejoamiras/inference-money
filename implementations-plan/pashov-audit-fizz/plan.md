@@ -718,7 +718,7 @@ GitHub dispatches a workflow only from the default branch, so the first `workflo
 - `bash contracts/aztec/scripts/check-stamp-constraint.sh --self-test && bash contracts/aztec/scripts/check-stamp-constraint.sh`;
 - `bun run lint:actions`.
 
-**P12. Aztec docs.**
+**P12. Aztec docs.** ✓
 - `docs/architecture.md:45-52`: Expiry gains the pending-delay-decrease cap, the horizon rule and "the hint is advice".
 - `docs/integration.md:18,58,99`: the linkability section names the remaining fingerprint.
 - `docs/operations.md:72,75,79-87`.

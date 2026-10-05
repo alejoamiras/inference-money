@@ -132,8 +132,8 @@ fn _assert_not_paused() {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
 }
 
-// Both claims and both returns hash the depositor the L1 message names, so each must present the Ethereum address the
-// deposit came from; any other consumes nothing.
+// Both claims and both returns hash the depositor the deposit names, which need not be the address that paid, so each
+// must present it; any other consumes nothing.
 
 // Relayable: the mint goes to the merchant the message commits to, whoever submits it.
 #[external("public")]

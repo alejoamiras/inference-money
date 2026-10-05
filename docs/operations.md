@@ -69,10 +69,10 @@ It checks the L1 bytecode against a fresh build, every binding between portal, r
 ## Merchants
 
 - **Add**: `merchants add <manifest> <account…>`. At once; the admin may route adds through its own review (a multisig) instead.
-- **Switch off**: `merchants off <manifest> <account>`. The account stays a merchant for the entry's delay D (24 h by default), and each proof that reads it expires at the change − 1 meanwhile. `merchants on` switches it back. Once it lands the account is a user: it can no longer pay users or exit as a merchant. Requests stamped for it before then stay payable by their named payers until each stamp expires, 24 h to 25 h after its opening: under 25 h after the switch-off lands, at most the delay plus 25 h after `merchants off`. That bounds stamp-reliant payments only; a merchant pays any request by its own listing.
+- **Switch off**: `merchants off <manifest> <account>`. The account stays a merchant for the entry's delay D (24 h by default), and each proof that reads it expires at the change − 1 meanwhile, so a merchant exit proven before the switch-off lands cannot land after it. `merchants on` switches it back. Once it lands the account is a user: it can no longer pay users or exit as a merchant. Requests stamped for it before then stay payable by their named payers until each stamp expires, 24 h to 25 h after its opening: under 25 h after the switch-off lands, at most the delay plus 25 h after `merchants off`. That bounds stamp-reliant payments only; a merchant pays any request by its own listing.
 - **Cancel**: `merchants cancel <manifest> <account>` keeps the current value; the entry stays marked until the new change time. The guardian runs it with its own secret in the admin-secret variable: the token, not the CLI, decides who may cancel.
 - **Guardian**: none unless scheduled. One in office can cancel every switch-off until it is replaced, and replacing it takes the guardian slot's delay G (the delay setting, like D). So against a hostile guardian a removal lands G late if you replace it at once, and D + G late if a last-minute cancel is how you learn of it: 72 h from the first `merchants off` at the defaults.
-- **Delay**: `merchants delay <manifest> <s>` sets D and syncs the merchants the node lists, in as few txs as four calls each allow. It prints how many it synced: a merchant a lagging node left out keeps its old delay until a rerun reaches it. An increase applies at once; a decrease waits old − new (24 h → 1 h takes 23 h), and merchant txs are recognisable by their expiry meanwhile.
+- **Delay**: `merchants delay <manifest> <s>` sets D and syncs the merchants the node lists, in as few txs as four calls each allow. It prints how many it synced: a merchant a lagging node left out keeps its old delay until a rerun reaches it. An increase applies at once; a decrease waits old − new (24 h → 1 h takes 23 h). Meanwhile each read caps its tx at the old delay less the time since the decrease, so merchant txs are recognisable by their expiry from about an hour in.
 
 **The 1 h option.** D = 1 h lets a switch-off land within the hour instead of a day. Its costs: every tx that proves a merchant side expires within the hour, rounded down to 30 minutes, so those txs stand out from the 23 h every other tx gets, and a slow device must prove and land a merchant tx within that window. Keep 24 h unless a day of exposure to a compromised merchant is unacceptable.
 
@@ -82,7 +82,7 @@ It checks the L1 bytecode against a fresh build, every binding between portal, r
 2. `merchants off <manifest> <account>`.
 3. Wait D.
 4. `merchants list <manifest>`: go on only if the account reads `off`. If it reads `on`, a guardian cancelled the switch-off: keep the pause, schedule a replacement (`merchants guardian <manifest> <address>`, zero for none), and repeat from step 2 once it has taken over.
-5. `pause <manifest> off`.
+5. `pause <manifest> off`. A merchant exit proven before the switch-off landed expired before it, so none is left to land now.
 
 The pause is L2-only. Token transfers on Aztec continue, withdrawals already emitted stay redeemable on Ethereum (`TokenPortal.withdraw` has no pause), and L1 deposits stay open, their messages waiting for the unpause. So it stops a bad merchant's new cash-outs, not one already in flight or its payments on Aztec.
 

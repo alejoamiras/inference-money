@@ -2,7 +2,7 @@
 // signature, args...))`, rebuilt here byte for byte. Mirrored in packages/bridge-core/src/content-hash.ts and pinned
 // against Solidity and TypeScript by the keystone's vectors: a drift leaves every deposit's message unconsumable.
 //
-// Deposits name their depositor, the Ethereum address the funds came from, so a claim must present it. The withdraw
+// Deposits name their depositor, which need not be the address that paid, so a claim must present it. The withdraw
 // message keeps the canonical format.
 use aztec::protocol::{address::{AztecAddress, EthAddress}, hash::sha256_to_field, traits::ToField};
 
