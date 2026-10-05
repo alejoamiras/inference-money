@@ -1110,13 +1110,13 @@ pub contract Token {
 
     /// @notice Proves `first` or `second` a merchant, whichever the side hint picks
     /// @param first The side probed first: the recipient, or the side the call publishes
-    /// @param second The other side
     /// @param keep_first Whether a merchant `first` is always proven: the call publishes it, or opens a request for it
-    /// @return The side proven; NEITHER proves nothing, and the caller refuses
+    /// @return The side proven; NEITHER proves nothing, so callers accept it only for a transfer into the sender's own
+    ///         private balance
     #[internal("private")]
     fn _prove_merchant_side(first: AztecAddress, second: AztecAddress, keep_first: bool) -> u8 {
-        // Safety: the hint only picks which side is proven below; a wrong pick is unprovable, never a pass. Every value
-        // proves a side or refuses: FIRST the first, NEITHER nothing (the caller refuses), any other the second.
+        // Safety: the hint only picks which side is proven below; a wrong pick is unprovable, never a pass. FIRST
+        // proves the first, NEITHER nothing, any other value the second.
         let side = unsafe {
             merchant_side_hint(
                 merchant_list(self.context, self.storage),

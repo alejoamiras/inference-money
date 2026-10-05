@@ -4,11 +4,12 @@
 # `_prove_payment_side`'s FIRST branch, at that branch's own depth and in this order, it must
 #   bind `let stamp_nullifier = stamp(commitment, bucket)` and `let deadline = stamp_deadline(bucket)`,
 #   assert the siloed stamp exists as a SETTLED nullifier, and set the tx's expiry to `deadline`;
-# none of `stamp_nullifier`, `deadline` or `bucket` is rebound, the function is constrained, and the one private paying
-# function proves its side through it. Without the expiry cap, a payment proven against an old anchor lands after the
+# none of `stamp_nullifier`, `deadline` or `bucket` is rebound nor `commitment` shadowed, the function is constrained,
+# and the one private paying function proves its side through it, at its own function scope. Without the expiry cap, a payment proven against an old anchor lands after the
 # stamp expired; without `for_settled`, against a stamp that is still pending.
-# It also pins the side order of the two calls that publish one account: each passes that account first, kept, so the
-# hint proves it rather than the hidden one (TXE cannot see which entry a call read).
+# It also pins the side order of the two calls that publish one account: each proves a side once, at its own scope,
+# passing that account first, kept, so the hint proves it rather than the hidden one (TXE cannot see which entry a call
+# read).
 # `--self-test` mutates the real source one rule at a time and requires each mutant to fail for its own reason.
 set -euo pipefail
 export LC_ALL=C
@@ -40,9 +41,9 @@ offset_of() {
   echo "${at:--1}"
 }
 
-# bound_once <fn> <body> <name>: exactly one `let` binds the name, and nothing is mutable.
-bound_once() {
-  [ "$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]$3([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq 1 ] ||
+# bound <fn> <body> <name> <count>: exactly <count> `let`s bind the name (0 for a parameter).
+bound() {
+  [ "$(printf '%s' "$2" | grep -oE "(^|[^A-Za-z0-9_])let[^=;]*[^A-Za-z0-9_]$3([^A-Za-z0-9_]|$)" | wc -l | tr -d ' ')" -eq "$4" ] ||
     violation "$1 rebinds $3"
 }
 
@@ -55,8 +56,9 @@ check_stamp_branch() {
     violation "_prove_payment_side binds something mutable" || return 1
   fi
   for name in stamp_nullifier deadline bucket; do
-    bound_once _prove_payment_side "$body" "$name" || return 1
+    bound _prove_payment_side "$body" "$name" 1 || return 1
   done
+  bound _prove_payment_side "$body" commitment 0 || return 1
   first=$(block_after "$body" "$first")
   if printf '%s' "$first" | grep -q for_pending; then
     violation "_prove_payment_side accepts a pending stamp" || return 1
@@ -80,21 +82,31 @@ check_stamp_branch() {
 }
 
 check_file() {
-  local flat
+  local flat pay proof="let side${S}=${S}self\\.internal\\._prove_payment_side${S}\\(${S}from${S},${S}commitment${S}\\)${S};"
   [ -f "$1" ] || violation "no such file: $1" || return 1
   flat=$(strip_comments <"$1" | tr '\n' ' ' | tr -s ' ')
   if printf '%s' "$flat" | grep -qE "unconstrained${S}fn${S}_prove_payment_side"; then
     violation "_prove_payment_side is unconstrained" || return 1
   fi
   check_stamp_branch "$flat" || return 1
-  need transfer_private_to_commitment "$(fn_body "$flat" transfer_private_to_commitment)" \
-    "let side${S}=${S}self\\.internal\\._prove_payment_side${S}\\(${S}from${S},${S}commitment${S}\\)${S};" \
+  pay=$(fn_body "$flat" transfer_private_to_commitment)
+  need transfer_private_to_commitment "$pay" "$proof" \
     "does not prove its payment through _prove_payment_side(from, commitment)" || return 1
-  need transfer_private_to_public "$(fn_body "$flat" transfer_private_to_public)" \
-    "_prove_merchant_side${S}\\(${S}to${S},${S}from${S},${S}true${S}\\)" "does not keep its published recipient first" ||
-    return 1
-  need transfer_public_to_private "$(fn_body "$flat" transfer_public_to_private)" \
-    "_prove_merchant_side${S}\\(${S}from${S},${S}to${S},${S}true${S}\\)" "does not keep its published sender first"
+  [ "$(depth_at "$pay" "$proof")" -eq 1 ] ||
+    violation "transfer_private_to_commitment proves its payment inside a nested block" || return 1
+  keeps_published "$flat" transfer_private_to_public to from recipient || return 1
+  keeps_published "$flat" transfer_public_to_private from to sender
+}
+
+# keeps_published <flat> <fn> <published> <hidden> <role>: the function's one side proof passes its published account
+# first, kept, at the function's own scope.
+keeps_published() {
+  local body call="_prove_merchant_side${S}\\(${S}$3${S},${S}$4${S},${S}true${S}\\)"
+  body=$(fn_body "$1" "$2")
+  need "$2" "$body" "$call" "does not keep its published $5 first" || return 1
+  [ "$(printf '%s' "$body" | grep -oE "_prove_merchant_side${S}\\(" | wc -l | tr -d ' ')" -eq 1 ] ||
+    violation "$2 proves a side more than once" || return 1
+  [ "$(depth_at "$body" "$call")" -eq 1 ] || violation "$2 proves its side inside a nested block"
 }
 
 self_test() {
@@ -149,11 +161,22 @@ self_test() {
     "unconstrained fn _prove_payment_side("
   mutant unproven_payment "transfer_private_to_commitment does not prove its payment" \
     "$(lit "let side = self.internal._prove_payment_side(from, commitment);")" "let side = FIRST;"
+  mutant dead_payment "transfer_private_to_commitment proves its payment inside a nested block" \
+    "$(lit "let side = self.internal._prove_payment_side(from, commitment);")" \
+    "let side = { if false { let side = self.internal._prove_payment_side(from, commitment); } FIRST };"
+  mutant rebind_commitment "rebinds commitment" "$(lit "let stamp_nullifier = stamp(commitment, bucket);")" \
+    "let commitment = 0; let stamp_nullifier = stamp(commitment, bucket);"
   mutant hidden_recipient "transfer_public_to_private does not keep its published sender first" \
     "$(lit "_prove_merchant_side(from, to, true)")" "_prove_merchant_side(to, from, false)"
   # The first `(to, from, true)` in the file is transfer_private_to_public's.
   mutant hidden_sender "transfer_private_to_public does not keep its published recipient first" \
     "$(lit "_prove_merchant_side(to, from, true)")" "_prove_merchant_side(to, from, false)"
+  mutant dead_published "transfer_private_to_public proves a side more than once" \
+    "$(lit "let side = self.internal._prove_merchant_side(to, from, true);")" \
+    "if false { let _ = self.internal._prove_merchant_side(to, from, true); } let side = self.internal._prove_merchant_side(from, to, false);"
+  mutant nested_published "transfer_public_to_private proves its side inside a nested block" \
+    "$(lit "let side = self.internal._prove_merchant_side(from, to, true);")" \
+    "let side = if from == to { NEITHER } else { self.internal._prove_merchant_side(from, to, true) };"
 
   [ "$fails" = 0 ] || exit 1
   echo "✅ check-stamp-constraint self-test passed (real source upheld; $count single-rule mutants rejected for their own reasons)"

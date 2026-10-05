@@ -158,6 +158,10 @@ export function openedCommitment(effects: readonly OffchainEffect[], token: Azte
 type SendFee = { paymentMethod: FeePaymentMethod } | undefined
 
 export interface ListOptions {
+	/**
+	 * Synced just before the call ({@link syncMerchantList}): sides are judged at its block, so a list kept for hours can
+	 * prove a merchant whose read has since come to cap the tx early, naming it.
+	 */
 	list: MerchantList
 	/** Re-syncs the list; a call refused on a merchant rule is retried once on the fresh one. */
 	resync?: () => Promise<MerchantList>
@@ -224,7 +228,7 @@ interface Expected {
 	token: AztecAddress
 	commitment: Fr
 	siloedTag: Fr
-	/** A private payment through the stamp: refused unless it commits the standard expiry. */
+	/** A private payment into a stamped request: refused unless it commits the standard expiry. */
 	unmarked: boolean
 }
 
@@ -475,7 +479,8 @@ function paymentCall(wallet: Wallet, token: AztecAddress, p: PaymentIntent, side
 /**
  * Pays `amount` into a request with a wallet built by `gate.bindWallet`. Refused before anything is proven when the
  * request is completed on chain, paid or being paid from this client (see {@link PaymentGate}), has no live stamp and
- * a user pays it, or a private payment would prove a stamp no longer fresh (`stale`: open a new request). Returns
+ * a user pays it, or a private payment would prove a stamp no longer fresh (`stale`: open a new request); a private
+ * payment into a stamped request is refused as `stale` too if its proof commits a shortened expiry. Returns
  * once the payment reaches `opts.wait` (a checkpoint by default); its record turns `paid` when finalized
  * ({@link PaymentGate.status}).
  */
@@ -499,7 +504,8 @@ export async function payRequest(
 			if (throughStamp && found?.state === "live") await gate.refuseStale(key, owner)
 			const call = paymentCall(wallet, token, p, side, throughStamp ? found?.bucket : undefined)
 			const send = async () => (await call.send({ from: p.from, fee: opts.fee, wait: NO_WAIT })).txHash
-			return gate.sending(key, owner, token, p.commitment, send, throughStamp)
+			// A merchant payer's read can shorten between `found.at` and the proving anchor; a stamp it could have used would not name it.
+			return gate.sending(key, owner, token, p.commitment, send, p.kind === "private" && found !== undefined)
 		})
 		const receipt = await waitForTx(gate.node, txHash, { ...(opts.wait ?? L2_DONE), dontThrowOnRevert: true })
 		if (receipt.hasExecutionReverted()) {

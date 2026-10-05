@@ -408,13 +408,23 @@ describe("payRequest", () => {
 		expect(w.chain.payloads).toEqual([])
 	})
 
-	it("refuses at the gate a payment through the stamp whose proof came out marked, releasing the request", async () => {
+	it("refuses at the gate a private payment into a stamped request whose proof came out marked, a merchant's too", async () => {
 		const w = fakeChain()
 		const store = memoryPaymentStore()
 		const c = await stampedRequest(w)
 		const marked = await tab(store, w, { lifetime: STANDARD_TX_LIFETIME - 3_600n })
 		await expect(marked.pay(c)).rejects.toEqual(refusal("stale"))
-		expect([w.chain.included.length, await store.get(paymentKey(token, c))]).toEqual([0, undefined])
+		const bucket = stampBucket(w.chain.ts)
+		w.chain.ts = stampUnmarkedUntil(bucket)
+		const live = await stampedRequest(w, bucket)
+		await expect(marked.pay(live, merchant), "its read shortened after the list's").rejects.toEqual(refusal("stale"))
+		expect([w.chain.included.length, await store.get(paymentKey(token, c)), await store.get(paymentKey(token, live))]).toEqual([
+			0,
+			undefined,
+			undefined,
+		])
+		await marked.pay(Fr.random(), merchant)
+		expect(w.chain.included, "with no stamp to use instead, a merchant's marked payment goes").toHaveLength(1)
 	})
 })
 

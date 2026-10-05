@@ -185,7 +185,9 @@ unconstrained fn a_merchant_read_caps_expiry_at_the_entrys_horizon() {
 unconstrained fn public_to_private_proves_a_merchant_sender_not_the_hidden_recipient() {
     let w = utils::setup_merchant_world(false);
     let _ = switch_off(w, w.m1);
-    utils::anchor_at(w.env, w.env.last_block_timestamp() + 1);
+    // Two hours on, the sender's read no longer leaves the standard expiry, so only keeping it picks it.
+    utils::anchor_at(w.env, w.env.last_block_timestamp() + 2 * HOUR);
+    assert_eq(side(w, w.m1, w.m2, false), SECOND);
     assert_eq(side(w, w.m1, w.m2, true), FIRST);
     w.env.call_private(
         w.m1,
@@ -198,7 +200,8 @@ unconstrained fn public_to_private_proves_a_merchant_sender_not_the_hidden_recip
 unconstrained fn private_to_public_proves_a_merchant_recipient_not_the_hidden_sender() {
     let w = utils::setup_merchant_world(false);
     let _ = switch_off(w, w.m1);
-    utils::anchor_at(w.env, w.env.last_block_timestamp() + 1);
+    utils::anchor_at(w.env, w.env.last_block_timestamp() + 2 * HOUR);
+    assert_eq(side(w, w.m1, w.m2, false), SECOND);
     assert_eq(side(w, w.m1, w.m2, true), FIRST);
     w.env.call_private(
         w.m2,

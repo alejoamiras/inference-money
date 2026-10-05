@@ -66,10 +66,11 @@ export async function timeOpenAndPay(d: DemoWallet, m: BridgeManifest, token: Az
 		(r) => r.txHash,
 	)
 	const p = { from: alice.address, commitment, amount: AMOUNT, kind: "private" } as const
+	const payOpts = await listOptions(d, m, token)
 	const [pay] = await timed(
 		d,
 		"pay",
-		() => payRequest(d.gate, d.wallet, token, p, opts),
+		() => payRequest(d.gate, d.wallet, token, p, payOpts),
 		(h) => h,
 	)
 	return [open, pay]

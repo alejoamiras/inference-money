@@ -69,7 +69,7 @@ describe.skipIf(!INTEGRATION)("a merchant's private exit across its switch-off",
 
 		await warpTo(changeAt)
 		await sends.release()
-		expect(await held).toBeInstanceOf(Error)
+		expect(String(await held)).toContain("Invalid tx: Invalid expiration timestamp")
 		expect(record.refused).toBe(true)
 		expect(await harness().node.getTxEffect(TxHash.fromString(record.hash))).toBeUndefined()
 		expect((await l2Balances(shop)).private).toBe(2n * AMOUNT)
