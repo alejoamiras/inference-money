@@ -33,7 +33,8 @@ fail_on_revert = true
 
 [lint]
 # Tests cast revert data to selectors and mask fuzz deltas to 160 bits on purpose; src/ is gated with `-D warnings`.
-ignore = ["test/**"]
+# forge 1.7.1 matches nothing with a bare "test/**": the glob must name the files.
+ignore = ["test/**/*.sol"]
 
 [fmt]
 line_length = 120
