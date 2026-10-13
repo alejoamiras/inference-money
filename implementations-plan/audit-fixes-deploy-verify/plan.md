@@ -1,7 +1,7 @@
 ---
 plan: audit-fixes-deploy-verify
 tier: mid
-status: approved 2026-10-13 (director, for the owner); implementing
+status: completed 2026-10-13 (PR #48)
 base: ad77d10 (origin/dev)
 trunk: dev
 driver: claude-code
@@ -12,6 +12,20 @@ explainer: off
 eli5_mode: file
 budget: recon 1 agent; code-review off; Codex gpt-6.1-sol at high
 ---
+
+## Outcome
+
+- **Closed** 2026-10-13: completed, delivered in PR #48 (squash into `dev`).
+- **Shipped**:
+  - *Creation binding.* `deployEvm` signs each create in process, at the address the key and its pending nonce determine, for the configured chain only. The manifest records `l1.portalTx` and `l1.routerTx`, and `verify` checks each creation tx against the fresh build. Bridge builds pin the default Forge profile.
+  - *Delay policy.* The manifest records `l2.merchantDelay`. `verify` reads the setting, the guardian slot and every entry at one block and fails on a change in flight unless `--allow-pending` accepts it. `merchants delay` records the delay from a read-back of the chain.
+  - *Withdraw-only mode*, built on `worktree-audit-fixes-dv-rollup` and merged (`lessons/phase-3.md`). The identity gate pins the portal's stored registry, inbox, outbox and version and reports `depositsOpen`. `verify` and `smoke` warn. The page shows a notice, refuses deposits and re-checks before signing; an e2e spec covers it.
+- **Dispositions**:
+  - Two items of the original batch (keyed-run plumbing) moved to a separate batch before planning; nothing of theirs is here.
+  - A real registry switch in integration: rejected (ledger row 8). The page's behaviour is covered by the unit, component and e2e tests, the L1 behaviour by the portal's forge test.
+  - The Codex fix loop converged in three rounds (`lessons/phase-5.md`). Every finding was adopted.
+- **Open items**: #49 (the testnet manifest predates the new pins; the Sepolia signing path first runs at its redeploy). #40, unrelated, stays open.
+- This plan's `/goal` and `/loop` seeds are retired; it is a record, not a task list.
 
 # Deploy binds what it signed; verify tells the truth; the page survives a rollup switch
 
