@@ -369,7 +369,7 @@ pub contract Token {
 
         self.enqueue_self.decrease_public_balance_internal(from, amount);
 
-        // The caller shielding its own public balance into its own notes.
+        // Only `to` shielding for itself: a caller acting on `to`'s authwit could withhold the note.
         self.internal._increase_private_balance(to, amount, (from == to) & (to == self.msg_sender()));
     }
 
