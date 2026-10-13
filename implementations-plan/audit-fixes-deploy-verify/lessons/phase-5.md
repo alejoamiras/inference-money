@@ -14,3 +14,9 @@ Same session, resumed (one send was cancelled before an answer, then resent with
 2. **Accepted, comment**: deleted the `portal` fixture's comment in `actions.test.ts`; it narrated the fixture.
 
 Codex found sound: the merge's composition (options object, creation checks, delay policy; closed deposits only add a warning), the identity reads across blocks (only the canonical rollup can change), and the false-open / false-closed costs within the endpoint-trust boundary.
+
+## Round 3: the round-2 fix (`cd3aa7f`)
+Same session. Verdict: no new material finding (missing, mismatched and case-different hashes probed with an in-memory fake RPC). Loop converged in three rounds.
+
+## Sync with dev
+`git merge origin/dev` at `bb7c04e` (the branch holds the withdraw-only merge, so a rebase would have replayed its commits). Conflicts resolved by content: `LiveMode.tsx` keeps the deposits-closed notice and the archived-deposits list; `actions.test.ts` keeps both fixtures; `follow-ups.md` takes dev's rollup-upgrade line with this branch's binding fact and runbook link; `index.md` keeps this plan's line. Fast gates and `lint:actions` pass on the merge.
