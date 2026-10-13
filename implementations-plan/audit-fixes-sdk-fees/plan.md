@@ -130,7 +130,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 
 **Validation gate**: same commands as Phase 1. Pass: all exit 0; the refusal test passes. Layers: lint, typecheck, unit, component.
 
-### Phase 3: the send journal and exits
+### Phase 3: the send journal and exits ✓
 
 1. Add `SendJournal` in `bridge-core/src/sent.ts` and export it.
 2. Change `exitToL1` to take a journal, refuse an unbound wallet, and map a failed send as Architecture says.

@@ -22,7 +22,7 @@ describe.skipIf(!INTEGRATION)("a merchant's private exit across its switch-off",
 		exitToL1(
 			{ kind: "private", from: shop, recipientL1: l1.account, amount: AMOUNT, asMerchant: true },
 			harness().wallet,
-			harness().node,
+			harness().sends,
 			harness().manifest,
 			{ fee: payFor("private") },
 		)
