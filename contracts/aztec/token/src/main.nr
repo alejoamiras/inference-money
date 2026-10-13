@@ -722,15 +722,21 @@ pub contract Token {
     }
 
     /// @notice Schedules the delay setting on one entry; a no-op when it is already the entry's scheduled delay
+    /// @dev Anyone may sync an entry to a setting at or above its current delay, which undoes an entry singled out on a
+    ///      shorter delay; only the admin may start a decrease, so a guardian's cancel of one binds everyone else
     /// @param account The listed merchant
     #[external("public")]
     fn sync_merchant_delay(account: AztecAddress) {
-        self.internal._assert_merchant_admin();
         assert(self.storage.merchants.at(account).is_initialized(), "Not a registered merchant");
         let delay = self.storage.merchant_delay.read();
         let entry = self.storage.merchant_off.at(account);
         let (scheduled, _) = entry.get_scheduled_delay();
         if scheduled != delay {
+            assert(
+                (delay >= entry.get_current_delay())
+                    | (self.msg_sender() == self.storage.merchant_admin.read()),
+                "Only the merchant admin lowers a delay",
+            );
             entry.schedule_delay_change(delay);
             let (_, effective_at) = entry.get_scheduled_delay();
             self.emit(MerchantDelayScheduled { account, delay, effective_at });
