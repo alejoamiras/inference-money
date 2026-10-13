@@ -119,7 +119,7 @@ A deposit's USDC sits in the portal until someone presents its claim salt, and t
 - Pass: exit 0; `deposit.test.ts` and `abi.test.ts` green, including the new cases.
 - Layers: lint, typecheck, unit.
 
-### Phase 2: demo and deployer keep every draft and setup
+### Phase 2: demo and deployer keep every draft and setup ✓
 
 1. Add `PriorDraft`, `abandon` on `not-deposited`, and the second `persist` in `castDeposit`.
 2. Add `StateDir.rename` and `keepAbandonedDraft`.
