@@ -53,16 +53,18 @@ describe("createdAsBuilt", () => {
 	})
 
 	const OTHER: Hex = `0x${"cd".repeat(32)}`
-	it.each([
+	it.each<[string, Hex | undefined, Hex | undefined]>([
 		["tx", OTHER, HASH],
 		["receipt", HASH, OTHER],
+		["tx without a hash, beside a receipt", undefined, OTHER],
+		["receipt without a hash", HASH, undefined],
 	])("fails a %s the endpoint answers for another hash, though it describes a matching create", async (_, txHash, receiptHash) => {
 		const answering = {
 			getTransaction: async () => ({ ...TX, hash: txHash }),
 			getTransactionReceipt: async () => ({ ...RECEIPT, transactionHash: receiptHash }),
 		} as unknown as PublicClient
 		const c = await createdAsBuilt(answering, "portal", HASH, WANT)
-		expect([c.ok, c.detail]).toEqual([false, `the L1 endpoint answered tx ${OTHER} for ${HASH}`])
+		expect([c.ok, c.detail]).toEqual([false, `the L1 endpoint answered tx ${txHash} and receipt ${receiptHash} for ${HASH}`])
 	})
 })
 

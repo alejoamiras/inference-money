@@ -29,7 +29,6 @@ const claims = vi.hoisted(() => ({
 	consent: undefined as unknown,
 }))
 
-/** Whether the portal takes deposits now, and how many deposits reached the deposit flow. */
 const portal = vi.hoisted(() => ({ open: true, deposits: 0 }))
 
 // A deposit this page sent is still unconfirmed on Ethereum (a "broken" one cannot even be read back); a claim
