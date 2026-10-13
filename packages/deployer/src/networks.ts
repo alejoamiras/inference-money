@@ -40,7 +40,7 @@ export const TESTNET: NetworkPins = {
 	// Permissionless testnet faucet for the fee asset: the self-funded fee path mints here, then bridges.
 	feeAssetHandler: "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
 	// Canonical SponsoredFPC (salt 0); its address commits to the contract class.
-	sponsoredFpc: "0x06a9fa0208c78509921b0487a6b5cd5c2e93baf17de1a18d310f65a3cc1d924b",
+	sponsoredFpc: "0x2adfb70e860909f0db8268b3fec80bce52a94559963444f5c0341816b8412130",
 	// Aztecscan is the explorer Aztec's testnet guide names; its tx page is /tx-effects/<hash>.
 	explorer: { l1Tx: "https://sepolia.etherscan.io/tx/", l2Tx: "https://testnet.aztecscan.xyz/tx-effects/" },
 }
