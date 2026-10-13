@@ -12,6 +12,24 @@ trunk: dev
 budget: "recon: 1 Sonnet sweep; code-review: off; lanes: 2 (this session + one director-spawned helper)"
 ---
 
+## Outcome
+
+- **Date**: 2026-10-13. **Status**: delivered in PR #91 to `dev`; merging is the owner's call.
+- **Shipped**: every Aztec pin at rc.3 (`@aztec-foundation/*` and protocol_types at rc.6, aztec-standards rc.3) with
+  locks, Noir deps and artifacts; the refund commitment the sender's and never stamped, with its guard, mutants and TXE
+  tests; rc.6's unmarked cancel followed in the token docs, bridge-core, verify, operations and `[A20]`; the V3
+  addresses and class ids; testnet L1 pins from keyless reads; the Presto real-proof build guard and CI's bounded
+  Presto skip; the version rule and the bump procedure.
+- **Validation**: every Phase 2–4 gate green locally (integration 53 + 6 clock, e2e 9/9, fork 12/12, probe 19/19);
+  I1 to I7 settled (`lessons/phase-3.md`, `lessons/phase-4.md`); the Codex fix loop converged in two rounds.
+- **Dropped**: the integration refund spec (D10: a direct client never learns the commitment; `[A22]` and the TXE
+  refund tests cover it).
+- **Known limits**: real-proof paths (`test:e2e:presto`, `test:proving`, in-browser proving of a testnet bundle) wait
+  for a Presto release built on rc.3; the CI Presto job skips for exactly the approved pair until then.
+- **Open items** (to the director): withdraw-only mode (#48) assumes a rollup switch on the same node version; restore
+  the real-proof paths once Presto ships rc.3 (drop the `wallet.ts` cast and the CI env pair).
+- **Seeds retired**: the `/goal` seed at the end is a historical record; never run it.
+
 # Aztec toolchain 6.0.0-rc.1 → 6.0.0-rc.3
 
 Move every Aztec-tracking pin to rc.3 with everything it couples to, port the behaviour rc.3 changes into this repo's
@@ -294,7 +312,7 @@ lockfiles, `.github/**`, AGENTS.md, `docs/**`, `implementations-plan/**`.
 the rc.3 address, record it as an external blocker (PR body, #49) and require every other check to pass; the
 sponsor-balance line is informational. Layers: lint, typecheck, unit, component, live keyless read.
 
-### Phase 4 — Converge: merge, heavy gates, CI, docs
+### Phase 4 — Converge: merge, heavy gates, CI, docs ✓ (8cdd408..bdf3a54)
 1. `git merge` the helper's branch (never a rebase). Refresh the Token class id from Phase 2's artifact.
 2. EVM: `forge inspect` deployed bytecode of `TokenPortal` and `Permit2DepositRouter` against `dev`'s (I2).
 3. Install the rc.3 node: `bash packages/local-network/scripts/install-node.sh ~/.cache/inference-money/aztec-node-rc3-bump`.
