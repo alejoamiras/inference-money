@@ -47,3 +47,11 @@
 - `test:integration` (`RUN_ID=rc3-bump`, the rc.3 node): 53 specs and 6 clock specs, 0 failures, 2 536 s wall.
 - CI Presto compat step, run locally from six roots: the real pair skips (`run=false`, the warning); without its env
   it fails; a forced-equal pair runs; a missing package, a range pin and another pair fail.
+
+## Codex fix loop (gpt-6.1-sol, high)
+
+- Round 1: no material finding, two minor. Fixed: `docs/operations.md` "A mark the admin keeps" still described the
+  rc.1 mark (a schedule of the current value keeps an entry pending for D, and the guardian cannot end it); it now says
+  only a real switch-off marks, undone and scheduled again to persist (a repeated `off` is a no-op), and the guardian's
+  cancel unmarks. Kept: the comment over `request_effects()` in `test/rules_requests.nr`, which states what the
+  returned tuple holds; the signature does not.
