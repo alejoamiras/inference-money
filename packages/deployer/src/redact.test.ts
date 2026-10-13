@@ -25,7 +25,6 @@ afterEach(() => {
 	for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true })
 })
 
-/** A child that writes a store under `<root>/<its pid>`, as its wallet would, prints "stored", then runs `tail`. */
 function storeChild(tail: string): { root: string; script: string } {
 	const root = mkdtempSync(join(tmpdir(), "redact-test-"))
 	roots.push(root)
@@ -81,16 +80,17 @@ describe("output redaction", () => {
 		const out = sink()
 		const run = runRedacted(["-e", script], [], out.stream, sink().stream, process.env, root)
 		while (!out.text().includes("stored")) await new Promise((r) => setTimeout(r, 20))
-		// runRedacted's own handler takes it, as it takes the operator's Ctrl-C, and reaps the child instead of exiting.
-		process.kill(process.pid, "SIGTERM")
+		// The operator's Ctrl-C reaches only the parent, whose handler SIGTERMs the child's group.
+		process.emit("SIGINT", "SIGINT")
 		expect(await run).toBe(1)
 		expect(readdirSync(root)).toEqual([])
 	})
 
 	it("removes the wallet store of a child that exits with an error", async () => {
 		const { root, script } = storeChild("process.exit(1)")
-		expect(await runRedacted(["-e", script], [], sink().stream, sink().stream, process.env, root)).toBe(1)
-		expect(readdirSync(root)).toEqual([])
+		const out = sink()
+		expect(await runRedacted(["-e", script], [], out.stream, sink().stream, process.env, root)).toBe(1)
+		expect([out.text(), readdirSync(root)]).toEqual(["stored\n", []])
 	})
 
 	it("describes an error through its causes", () => {

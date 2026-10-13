@@ -43,13 +43,15 @@ function signalGroup(pgid: number, sig: NodeJS.Signals | 0): boolean {
 	}
 }
 
-/** Whether the group emptied within the grace period. */
 async function groupGone(pgid: number): Promise<boolean> {
 	for (const end = Date.now() + GRACE_MS; Date.now() < end; await sleep(100)) if (!signalGroup(pgid, 0)) return true
 	return false
 }
 
-/** SIGTERM, then SIGKILL for whatever outlives the grace period: done only when no member of the group is left. */
+/**
+ * SIGTERM, then SIGKILL for whatever outlives the grace period. Done once the group is empty, or a grace period after
+ * the SIGKILL: a member still dying then (blocked in uninterruptible I/O) runs no more user code.
+ */
 async function reapGroup(pgid: number): Promise<void> {
 	signalGroup(pgid, "SIGTERM")
 	if (await groupGone(pgid)) return
@@ -61,7 +63,7 @@ async function reapGroup(pgid: number): Promise<void> {
  * Runs `argv` under this runtime with stdout and stderr redacted line by line. Dependency loggers write to the fds
  * directly, so only a pipe catches everything; the child takes its secrets from `env`, never from argv. The child
  * leads its own process group, which is reaped on cancellation and after the child exits: a surviving descendant (a
- * prover, a build) would keep running, and could hold the pipes open. Once the group is gone, the child's wallet dir
+ * prover, a build) would keep running, and could hold the pipes open. Once the group is reaped, the child's wallet dir
  * under `walletRoot` is removed: its store holds the account secret the child rebuilt, and a child killed by a signal
  * never reaches its own cleanup. The child never loads a `.env` file: it would read the one its parent was started
  * without.
