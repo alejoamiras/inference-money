@@ -12,6 +12,25 @@ quality: production
 trunk: dev
 ---
 
+## Outcome
+
+**2026-10-13, completed.** Delivered in PR #41 to `dev`, with the close-out commits on the same PR.
+
+- **Shipped**:
+  - `reconcileDeposit` answers `not-deposited` only while Permit2 shows the permit's nonce unused at the finalized block past the deadline.
+  - A local key's send keeps its submission on a refusal-shaped error.
+  - `castDeposit` hands a stored prior draft to its owner to keep, and stores the new draft again with its tx hash.
+  - `demo setup` and the smoke keep replaced drafts as `abandoned-<nonce>.json` and archive `setup.json` as `setup-<tag>.json`.
+  - The showcase archives a deposit its L1 reader calls never sent and lists it with Check again; it marks final a claim the node calls finalized. It drops neither.
+  - Docs and assurance map A11 and A19 are updated.
+- **Tests**: unit (the nonce word, bit and block; the refusal gate; the keep-then-replace order; the archive transitions), integration (the nonce read on a real Permit2 once finality reaches a landed deposit), e2e A11 (archived, kept across a reload, re-checked).
+- **By decision, not open**:
+  - Final records get no row; only archived drafts get Check again (owner's call, through the director).
+  - The smoke still removes its own finished journal, and an undecodable record is still skipped. Both are outside this plan, and `architecture.md` and A11 say so.
+  - A JSON-RPC wallet's own refusal still frees its draft (Security).
+- **Open items**: #40 (on a local network, a demo account's withdraw can fail gas estimation once the publisher's tips reach 120 gwei; unrelated to this change).
+- **Seeds retired**: this plan's `/goal` and `/loop` seeds are retired. This is a record, never a task list.
+
 # audit-fixes-claims: a claim record is archived or marked final, never deleted
 
 A deposit's USDC sits in the portal until someone presents its claim salt, and the salt lives only in the client's record. This plan guarantees that no such record is deleted or overwritten on a reader's answer: the showcase, `demo setup` and the smoke archive a draft their L1 reader calls never sent, and mark final a claim their node calls finalized. It also makes `reconcileDeposit`'s "never sent" require the permit's Permit2 nonce to be unused at the finalized block.

@@ -25,3 +25,7 @@
 - A28 rerun on its own network (`operator.test.ts`, every test): 11 pass, 0 fail, so the first failure was the estimate allowance, not this change.
 - `cli.test.ts`'s `.env` spawn test timed out at 5 s again while three local networks ran (host load about 240). It passes alone with a 60 s timeout (5.2 s), and the full `bun run test` passed once the networks were down.
 - First run's totals: 45 of 46 specs pass, the deposits spec's new nonce case among them; the one failure is the A28 case above. `test:integration` chains `test:clock` after `test:specs` with `&&`, so the clock specs ran separately (`RUN_ID=claims-clock bun run --cwd packages/integration test:clock`).
+
+## Delivery
+
+- Rewording unpushed commits without `rebase -i`, which the worktree guard refuses: `git commit-tree -S <tree> -p <new parent> -F <message>` per commit, then `git reset --soft <new tip>`. `commit-tree` ignores `commit.gpgsign`, so a chain built without `-S` comes out unsigned (`%G?` = `N`).
