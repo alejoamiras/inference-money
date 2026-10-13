@@ -273,7 +273,7 @@ Built on its own branch (`worktree-audit-fixes-dv-rollup`, from the Phase 1 comm
 - Pass criteria: all exit 0. The e2e spec passes.
 - Layers: lint, typecheck, unit, component, local deploy and verify, e2e (one spec).
 
-### Phase 4: full heavy gates
+### Phase 4: full heavy gates ✓
 
 1. `RUN_ID=deploy-verify bun run test:integration`: its own network and deploy, every spec, then the clock specs.
 2. `bun run test:e2e`: every spec, including `withdraw-only.spec.ts`.
