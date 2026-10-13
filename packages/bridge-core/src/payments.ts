@@ -35,7 +35,16 @@ import { MerkleTreeId } from "@aztec-labs/stdlib/trees"
 import type { OffchainEffect, Tx } from "@aztec-labs/stdlib/tx"
 import { tokenArtifact } from "./artifacts"
 import { type FeeChoice, L2_DONE, type L2Wait } from "./claim"
-import { type MerchantList, merchantSide, paymentSide, Side, sideCapsule, withFreshList } from "./merchants"
+import {
+	MERCHANT_MAX_DELAY,
+	type MerchantList,
+	merchantSide,
+	merchantStatus,
+	paymentSide,
+	Side,
+	sideCapsule,
+	withFreshList,
+} from "./merchants"
 import { TOKEN_REFUSALS } from "./rules"
 import { bucketCapsule, liveBuckets, REQUEST_OPENED_EFFECT, type RequestStamp, requestStampAt, STANDARD_TX_LIFETIME, stamp } from "./stamp"
 
@@ -178,7 +187,7 @@ export interface ListOptions {
 }
 
 export interface RequestIntent {
-	/** The account sending the opening tx: the recipient itself, or a payer opening one for it. */
+	/** The account sending the opening tx: the recipient itself, or a merchant opening one for another account. */
 	from: AztecAddress
 	/** The account the payment reaches. */
 	to: AztecAddress
@@ -186,10 +195,17 @@ export interface RequestIntent {
 	completer: AztecAddress
 }
 
+const OPENER_REFUSAL = "Only a merchant opens a request for another account: ask the merchant to open it."
+
+/** A merchant at the list's block and after any change it has scheduled lands, which is never later than the delay's maximum. */
+const staysMerchant = (list: MerchantList, account: AztecAddress) =>
+	merchantStatus(list, account).merchant && merchantStatus(list, account, list.at + MERCHANT_MAX_DELAY).merchant
+
 /**
  * Opens a request and returns once it reaches `opts.wait` (a checkpoint by default), when a payer's PXE, anchored at
- * the proposed tip, can prove its stamp. Refused before proving unless the recipient or the creator is a merchant; a
- * merchant recipient's request is stamped.
+ * the proposed tip, can prove its stamp. Refused before proving unless the recipient or the creator is a merchant, and
+ * when anyone but a merchant opens one for another account; a merchant recipient's request is stamped. The opener's
+ * status is read from `opts.list`: one kept over an hour can miss a switch-off scheduled since.
  */
 export async function openRequest(
 	wallet: Wallet,
@@ -199,6 +215,9 @@ export async function openRequest(
 	opts: ListOptions,
 ): Promise<{ commitment: Fr; txHash: TxHash }> {
 	const sent = await withFreshList(opts.list, opts.resync, async (list) => {
+		// An opening for another account announces that account once per pair: a user opening for its merchant would
+		// publish whom it pays, and the token proves the merchant recipient's side whoever opens.
+		if (!r.from.equals(r.to) && !staysMerchant(list, r.from)) throw new Error(OPENER_REFUSAL)
 		const side = merchantSide(list, r.to, r.from, true)
 		if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.request)
 		const open = Contract.at(token, tokenArtifact, wallet).methods.initialize_transfer_commitment!(r.to, r.completer)

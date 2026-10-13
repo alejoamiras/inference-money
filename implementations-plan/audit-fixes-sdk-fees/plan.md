@@ -111,7 +111,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 
 ## Phases
 
-### Phase 1: one fee vocabulary, and the sponsor guard
+### Phase 1: one fee vocabulary, and the sponsor guard ✓
 
 1. Rename `"wallet-default"` to `"account-public"` in `FeeChoice` and `feeFor`. Rewrite the doc comment to say what the account publishes.
 2. Add `PaymentFee`, make `ListOptions.fee` required, and map it at the three send sites.
@@ -122,7 +122,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 
 **Validation gate**: `bun run lint && bun run typecheck && bun run test && bun run --cwd apps/showcase test:components`. Pass: all exit 0; the new payments, claim and verify tests run and pass. Layers: lint, typecheck, unit, component.
 
-### Phase 2: the opener rule
+### Phase 2: the opener rule ✓
 
 1. Add the opener check to `openRequest`; update its doc comment and `RequestIntent.from`'s.
 2. Add a unit test: a user opening for a merchant, and a merchant with a switch-off pending opening for a user, are both refused with nothing sent; a merchant whose switch-off was cancelled is not refused by this rule.

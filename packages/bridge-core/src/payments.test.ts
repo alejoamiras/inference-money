@@ -14,6 +14,7 @@ import {
 	type ListOptions,
 	memoryPaymentStore,
 	openedCommitment,
+	openRequest,
 	PaymentGate,
 	type PaymentIntent,
 	type PaymentStore,
@@ -552,6 +553,36 @@ describe("openedCommitment", () => {
 		expect(openedCommitment(effects, token).equals(c)).toBe(true)
 		expect(() => openedCommitment(effects.slice(0, 2), token)).toThrow(/opened 0/)
 		expect(() => openedCommitment([...effects, effects[2]!], token)).toThrow(/opened 2/)
+	})
+})
+
+describe("openRequest", () => {
+	it("lets only a merchant that stays one open a request for another account, refusing anyone else before any send", async () => {
+		const [leaving, stayed] = await Promise.all([AztecAddress.random(), AztecAddress.random()])
+		const listed = LIST.entries.get(merchant.toString())!
+		const list: MerchantList = {
+			...LIST,
+			entries: new Map([
+				...LIST.entries,
+				[leaving.toString(), { ...listed, scheduledOff: true, changeAt: LIST.at + MERCHANT_MIN_DELAY }],
+				// A cancelled switch-off leaves its timestamp pending with the merchant still on.
+				[stayed.toString(), { ...listed, changeAt: LIST.at + MERCHANT_MIN_DELAY }],
+			]),
+		}
+		const open = async (from: AztecAddress, to: AztecAddress) => {
+			const w = fakeWallet()
+			const opened = openRequest(w.wallet, {} as never, token, { from, to, completer: alice }, { list, fee: "account-public" })
+			return { message: String(await opened.catch((e: unknown) => e)), sent: w.sent.length }
+		}
+		for (const [from, to] of [
+			[alice, merchant],
+			[leaving, alice],
+		] as const) {
+			expect(await open(from, to)).toEqual({ message: expect.stringContaining("Only a merchant opens"), sent: 0 })
+		}
+		const pad = await open(stayed, alice)
+		expect(pad.sent, "a merchant's pad for a user is sent").toBe(1)
+		expect(pad.message).not.toContain("Only a merchant opens")
 	})
 })
 
