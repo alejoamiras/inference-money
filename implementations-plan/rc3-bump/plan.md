@@ -197,7 +197,7 @@ stays (harmless), its comment loses the "re-mark" reason. No TXE case pins a pre
 
 ## Phases
 
-### Phase 1 — Shared base: pins, locks, Noir deps, rebuilt artifacts
+### Phase 1 — Shared base: pins, locks, Noir deps, rebuilt artifacts ✓ (e0dd36b)
 1. Set `toolchain.json` per the change map.
 2. Move every npm pin per the change map. Leave `@alejoamiras/presto` alone.
 3. Add the precomputed exact names (root 42, each toolchain 60: the young closure of the new pins) to a temporary
@@ -233,7 +233,7 @@ stays (harmless), its comment loses the "re-mark" reason. No TXE case pins a pre
 Pass: every command exits 0, except the `git grep`, which must print nothing (exit 1). Layers: lint, supply chain,
 compile, unit.
 
-### Phase 2 — Noir lane (this session)
+### Phase 2 — Noir lane (this session) ✓ (b8d054d)
 1. Token header: `Forked from AztecProtocol/aztec-standards v6.0.0-rc.3 (f7bf63d5)`.
 2. Commitment owner per D3 (C, amended): `main.nr:273-277` initializes for `from` and returns, no
    `_push_request_stamp`; `main.nr:248-255` and `token/README.md:259-275` take upstream rc.3's doc text plus one line
@@ -269,7 +269,7 @@ compile, unit.
 and `--self-test`; `bun run --cwd contracts/aztec test` (ABI superset); `bun run --cwd contracts/aztec typecheck`;
 `bun run lint`. Pass: all exit 0; every TXE suite meets its manifest and floor. Layers: lint, typecheck, unit (TXE).
 
-### Phase 3 — TypeScript lane (helper, own worktree off Phase 1's commit)
+### Phase 3 — TypeScript lane (helper, own worktree off Phase 1's commit) ✓ (41d4768, merged in 8cdd408)
 Owned paths: `packages/**`, `apps/**`, except `packages/integration/**` beyond step 6. Never `contracts/**`,
 lockfiles, `.github/**`, AGENTS.md, `docs/**`, `implementations-plan/**`.
 1. `bun run typecheck`; fix each break with the smallest change; list each with its file for the PR body.
@@ -298,7 +298,7 @@ sponsor-balance line is informational. Layers: lint, typecheck, unit, component,
 1. `git merge` the helper's branch (never a rebase). Refresh the Token class id from Phase 2's artifact.
 2. EVM: `forge inspect` deployed bytecode of `TokenPortal` and `Permit2DepositRouter` against `dev`'s (I2).
 3. Install the rc.3 node: `bash packages/local-network/scripts/install-node.sh ~/.cache/inference-money/aztec-node-rc3-bump`.
-4. Integration: one spec for the refund route (distinct failure mode: the payer's PXE must discover a refund note it
+4. Dropped (D10). Was: integration: one spec for the refund route (distinct failure mode: the payer's PXE must discover a refund note it
    owns only through a self-delivered partial note completed in public, which TXE cannot show). A user pays a merchant
    x through `transfer_private_to_public_with_commitment`; the user, as completer, runs
    `transfer_public_to_commitment(merchant, c, r)` under the merchant's public authwit. Assert the user's wallet
@@ -338,6 +338,7 @@ spec, then a MILESTONE naming it); lessons.md ≤ 8,192 B. Layers: all except th
 | D7 | `follow-ups.md` migration | out of scope | parallel batches share the plan folder |
 | D8 | Presto CI job | self-skip for exactly the approved pair, fail closed otherwise (audits) | leave it failing (red required `showcase-status` on every `e2e`-labelled PR until presto ships); skip on any mismatch (hides a future downgrade) |
 | D9 | "A cancel marks" | follow rc.6 everywhere (TS `pending`, verify, prose, `[A20]`) | keep rc.1 prose (false docs; verify fails a cancel that no longer marks) |
+| D10 | Refund integration spec | dropped (director): a direct client never learns the refund commitment (no private return value from a sent tx; randomness drawn at proving), so only a pull-and-refund contract can use it; covered by `[A22]` one-payment (a self-delivered partial note completed in public, same `UintNote::partial` path) and the TXE refund tests | a test-only pull-and-refund contract (new crate, artifact and harness deploy for a mechanism already covered) |
 
 **Competing outline B (rejected): split mechanical and behavioural.** PR 1: pins, locks, artifacts and test literals
 with zero behaviour change (fork keeps the rc.1 owner, TS keeps the rc.1 horizon). PR 2: the ports, the guard, the
