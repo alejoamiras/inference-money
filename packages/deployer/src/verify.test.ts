@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test"
+import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import type { MerchantEntry } from "@inference-money/bridge-core"
 import { type Address, type Hex, type PublicClient, TransactionNotFoundError } from "viem"
+import { MANIFEST } from "../../bridge-core/src/test/fixtures"
 import type { Check } from "./preflight"
 import type { DelayReads, DelayState } from "./token-reads"
-import { type CreationWant, createdAsBuilt, creationCheck, delayPolicyChecks } from "./verify"
+import { type CreationWant, createdAsBuilt, creationCheck, delayPolicyChecks, verifyEnvironment } from "./verify"
 
 const DEPLOYER: Address = "0x00000000000000000000000000000000000000d0"
 const CREATED: Address = "0x00000000000000000000000000000000000000c0"
@@ -132,5 +134,18 @@ describe("delayPolicyChecks", () => {
 		expect(judged(reads(7200n, DECREASE), undefined, `merchant ${M} delay change pending`)).toMatchObject({ allowing: "fail" })
 		const r = reads(86_400n, { scheduledOff: true, changeAt: AT + 500n })
 		expect(judged(r, undefined, `merchant ${M} switch pending`)).toMatchObject({ strict: "fail", allowing: "warn" })
+	})
+})
+
+const publishedEverywhere = { getContract: async () => ({}) } as unknown as AztecNode
+const sponsorCheck = async (network: "local" | "testnet") => {
+	const m = { ...MANIFEST, network, l2: { ...MANIFEST.l2, sponsoredFpc: undefined } }
+	return (await verifyEnvironment(publishedEverywhere, m)).find((c) => c.name === "SponsoredFPC")
+}
+
+describe("verifyEnvironment", () => {
+	it("fails a manifest with no fee sponsor anywhere but a local network", async () => {
+		expect(await sponsorCheck("testnet")).toMatchObject({ ok: false, detail: expect.stringMatching(/fee payer/) })
+		expect(await sponsorCheck("local")).toMatchObject({ ok: true })
 	})
 })
