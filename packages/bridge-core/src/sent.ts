@@ -2,7 +2,7 @@ import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import type { TxHash } from "@aztec-labs/aztec.js/tx"
 import type { Tx } from "@aztec-labs/stdlib/tx"
 
-/** A tx as its node received it: the hash, and the time after which it can no longer land. */
+/** A tx as handed to its node: the hash, and the time after which it can no longer be included. */
 export interface HandedTx {
 	txHash: TxHash
 	expiresAt: bigint

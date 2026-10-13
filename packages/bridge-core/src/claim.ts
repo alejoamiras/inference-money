@@ -32,9 +32,10 @@ export type ClaimResult = "claimed" | "consumed-unknown"
 export type FeeChoice = "sponsored" | "account-public"
 
 export function feeFor(kind: "public" | "private", m: BridgeManifest, choice?: FeeChoice): { paymentMethod: FeePaymentMethod } | undefined {
-	return (choice ?? (kind === "private" ? "sponsored" : "account-public")) === "sponsored"
-		? { paymentMethod: sponsoredPayment(m) }
-		: undefined
+	const chosen = choice ?? (kind === "private" ? "sponsored" : "account-public")
+	if (chosen === "sponsored") return { paymentMethod: sponsoredPayment(m) }
+	if (chosen === "account-public") return undefined
+	throw new Error(`Unknown fee choice ${String(choice)}: name "sponsored" or "account-public".`)
 }
 
 /** The network's sponsor could not pay (exhausted, missing or refused); the ticket is untouched and can be retried. */

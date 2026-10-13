@@ -98,8 +98,8 @@ export class ExitUnconfirmedError extends Error {
 		readonly amount: bigint,
 		options?: ErrorOptions,
 		/**
-		 * Set when the send itself failed after the node received the tx: every tx it received that may be this exit,
-		 * each able to land until its own expiry. Exiting again is safe only once every one is gone.
+		 * Set when the send failed after the tx was handed to the node: every handed tx that may be this exit, each able
+		 * to be included until its own expiry. Exiting again is safe only once every one is gone.
 		 */
 		readonly sent?: readonly HandedTx[],
 	) {
@@ -113,13 +113,13 @@ export class ExitUnconfirmedError extends Error {
 	}
 }
 
-// The node's answer about a tx it already holds is its word alone: a fee rejection may come after it gossiped the tx.
+// The node's answer about a tx handed to it is its word alone: a fee rejection may come after it gossiped the tx.
 function handedOffText(sent: readonly HandedTx[], cause: unknown): string {
 	const latest = sent.reduce((at, s) => (s.expiresAt > at ? s.expiresAt : at), 0n)
 	const answer = sponsorFailure(cause, "withdrawal") ? "reported a fee rejection this client cannot verify" : "gave no confirmation"
 	const txs = sent.map((s) => s.txHash.toString()).join(" or ")
 	const until = new Date(Number(latest) * 1000).toISOString()
-	return `Exit ${txs} reached the node, which then ${answer}. It can still burn until ${until}: do not exit again; resume it from its hash, which settles it by then.`
+	return `Exit ${txs} was handed to the node, which then ${answer}. It can be included until ${until}: do not exit again; resume it from its hash until it lands or a finalized block passes that time.`
 }
 
 /**
@@ -178,9 +178,9 @@ async function isExit(e: ExitIntent, m: BridgeManifest, nonce: Fr): Promise<(tx:
  * Burns on L2 and emits the withdraw message, paid per {@link FeeChoice}, from a wallet built on `sends`
  * ({@link SendJournal.bindWallet}), which also serves the reads. The burn is authorized for the proxy (the bridge's only
  * path to the token) with a fresh nonce: an off-chain witness for a private exit, and an auth-registry entry batched
- * into the same tx for a public one. A sponsor that cannot pay before the node receives the tx is a
- * {@link SponsorUnavailableError} with nothing burned. Once the node has it, every failure is an
- * {@link ExitUnconfirmedError} carrying its hash: a failed send with every tx the node received that may be this exit
+ * into the same tx for a public one. A sponsor that cannot pay before the tx is handed to the node is a
+ * {@link SponsorUnavailableError} with nothing burned. Once it is handed over, every failure is an
+ * {@link ExitUnconfirmedError} carrying its hash: a failed send with every handed tx that may be this exit
  * (`sent`), and any failure after the send, the wait for `opts.wait` included. Only a checkpointed revert with no
  * withdraw message in its effect, which burned nothing so far, is an {@link ExitRevertedError}.
  */

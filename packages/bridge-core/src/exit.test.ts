@@ -115,7 +115,7 @@ describe("exitToL1", () => {
 		expect(sponsored.sent[0]).toMatchObject({ feePayer: M.l2.sponsoredFpc })
 	})
 
-	it("surfaces a sponsor that cannot pay before the node receives the tx as SponsorUnavailableError, with nothing burned", async () => {
+	it("surfaces a sponsor that cannot pay before the tx is handed to the node as SponsorUnavailableError, with nothing burned", async () => {
 		const w = boundWallet({
 			send: () => {
 				throw new Error("Not enough balance for fee payer to pay for transaction")
@@ -132,7 +132,7 @@ describe("exitToL1", () => {
 		)
 	})
 
-	describe("once the node has received the tx", () => {
+	describe("once the tx is handed to the node", () => {
 		const EARLY = 1_700_000_000n
 		const LATE = 1_800_000_000n
 		const bridge = AztecAddress.fromStringUnsafe(M.l2.bridge.address)
@@ -178,7 +178,7 @@ describe("exitToL1", () => {
 			expect(err.message).toContain(new Date(Number(LATE) * 1000).toISOString())
 		})
 
-		it("keeps every identical exit the node received, each with its own expiry", async () => {
+		it("keeps every identical exit handed to the node, each with its own expiry", async () => {
 			const s = await sending(
 				async (tx) => {
 					if (tx.data.expirationTimestamp === LATE) throw new Error("socket hang up")

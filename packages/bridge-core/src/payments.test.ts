@@ -601,6 +601,8 @@ describe("payment fees", () => {
 		expect(own.sent[0]).toMatchObject({ calls: ["transfer_private_to_private"], feePayer: undefined })
 		// @ts-expect-error a payment call always names who pays its fee
 		const unnamed: ListOptions = { list: LIST }
-		expect(unnamed.fee).toBeUndefined()
+		const untyped = fakeWallet()
+		await expect(transferPrivate(untyped.wallet, token, transfer, unnamed)).rejects.toThrow(/Name the fee payer/)
+		expect(untyped.sent).toHaveLength(0)
 	})
 })

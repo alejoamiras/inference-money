@@ -171,7 +171,12 @@ export function openedCommitment(effects: readonly OffchainEffect[], token: Azte
  */
 export type PaymentFee = { paymentMethod: FeePaymentMethod } | Extract<FeeChoice, "account-public">
 
-const sendFee = (fee: PaymentFee) => (fee === "account-public" ? undefined : fee)
+// An untyped caller can omit the fee, which the wallet would read as the account paying.
+function sendFee(fee: PaymentFee): { paymentMethod: FeePaymentMethod } | undefined {
+	if (fee === "account-public") return undefined
+	if (!fee?.paymentMethod) throw new Error('Name the fee payer: a sponsor\'s payment method, or "account-public".')
+	return fee
+}
 
 export interface ListOptions {
 	/**
@@ -214,6 +219,7 @@ export async function openRequest(
 	r: RequestIntent,
 	opts: ListOptions,
 ): Promise<{ commitment: Fr; txHash: TxHash }> {
+	const fee = sendFee(opts.fee)
 	const sent = await withFreshList(opts.list, opts.resync, async (list) => {
 		// An opening for another account announces that account once per pair: a user opening for its merchant would
 		// publish whom it pays, and the token proves the merchant recipient's side whoever opens.
@@ -221,7 +227,7 @@ export async function openRequest(
 		const side = merchantSide(list, r.to, r.from, true)
 		if (side === Side.Neither) throw new Error(TOKEN_REFUSALS.request)
 		const open = Contract.at(token, tokenArtifact, wallet).methods.initialize_transfer_commitment!(r.to, r.completer)
-		return open.with({ capsules: [sideCapsule(token, side)] }).send({ from: r.from, fee: sendFee(opts.fee), wait: NO_WAIT })
+		return open.with({ capsules: [sideCapsule(token, side)] }).send({ from: r.from, fee, wait: NO_WAIT })
 	})
 	const commitment = openedCommitment(sent.offchainEffects, token)
 	await waitForTx(node as AztecNode, sent.txHash, opts.wait ?? L2_DONE)
@@ -239,12 +245,13 @@ export async function transferPrivate(
 	t: { from: AztecAddress; to: AztecAddress; amount: bigint },
 	opts: ListOptions,
 ): Promise<TxHash> {
+	const fee = sendFee(opts.fee)
 	const toSelf = t.from.equals(t.to)
 	const sent = await withFreshList(opts.list, opts.resync, async (list) => {
 		const side = toSelf ? Side.Neither : merchantSide(list, t.to, t.from, false)
 		if (side === Side.Neither && !toSelf) throw new Error(TOKEN_REFUSALS.transfer)
 		const call = Contract.at(token, tokenArtifact, wallet).methods.transfer_private_to_private!(t.from, t.to, t.amount, 0)
-		return call.with({ capsules: [sideCapsule(token, side)] }).send({ from: t.from, fee: sendFee(opts.fee), wait: NO_WAIT })
+		return call.with({ capsules: [sideCapsule(token, side)] }).send({ from: t.from, fee, wait: NO_WAIT })
 	})
 	return sent.txHash
 }
@@ -518,6 +525,7 @@ export async function payRequest(
 	opts: ListOptions,
 ): Promise<TxHash> {
 	if (!gate.isBound(wallet)) throw new Error("payRequest needs a wallet built on its gate's node, by PaymentGate.bindWallet.")
+	const fee = sendFee(opts.fee)
 	const key = paymentKey(token, p.commitment)
 	const owner = await gate.reserve(key)
 	try {
@@ -529,7 +537,7 @@ export async function payRequest(
 			const throughStamp = p.kind === "private" && side === Side.First
 			if (throughStamp && found?.state === "live") await gate.refuseStale(key, owner)
 			const call = paymentCall(wallet, token, p, side, throughStamp ? found?.bucket : undefined)
-			const send = async () => (await call.send({ from: p.from, fee: sendFee(opts.fee), wait: NO_WAIT })).txHash
+			const send = async () => (await call.send({ from: p.from, fee, wait: NO_WAIT })).txHash
 			// A merchant payer's read can shorten between `found.at` and the proving anchor; a stamp it could have used would not name it.
 			return gate.sending(key, owner, token, p.commitment, send, p.kind === "private" && found !== undefined)
 		})
