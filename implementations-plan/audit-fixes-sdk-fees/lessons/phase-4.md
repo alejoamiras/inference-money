@@ -18,3 +18,4 @@
 - Operator `[A28]` rerun (on the rebase): failed again, this time at the acceptance run's L1 deposit, also an empty revert in gas estimation. Same signature as open issue #40 (the local L1 publisher's tips exhaust the demo account's gas allowance). Per the one-rerun rule, reported and not debugged.
 - Clock specs: the held merchant exit sent after its switch-off now fails as `ExitUnconfirmedError` (its cause is the node's `Invalid tx: Invalid expiration timestamp`), where the spec expected the raw refusal. This is the intended behavior: a refusal after hand-off is the node's word alone. The spec now asserts the error, its cause, and that `sent` holds exactly the held tx's hash; `integration.md`'s merchant-exit bullet says the same.
 - Clock rerun with the updated spec: 6 pass, 0 fail (346 s).
+- E2E `try-happy.spec.ts` on the rebase: 1 passed (1.7 min), first run; the page's withdraw exits through the journaled wallet and pays out on Ethereum.

@@ -64,7 +64,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 - On a throw from `sendExit`: the watch saw matching txs → `ExitUnconfirmedError(sent[0].txHash, …, { cause }, sent)` carrying every match with its own expiry; none → today's mapping (`sponsorFailure` when sponsored, else the raw error). So a sponsor-less manifest still gives `SponsorUnavailableError` before any hand-off. Several matches (only the private race above) are all kept: their fates and expiries are independent, so the exit may still burn until every one is gone, and dropping one would let a recovery rule declare the exit gone while it can still land.
 - `ExitUnconfirmedError` gains `readonly sent?: readonly HandedTx[]`: set when the send itself failed, every tx the node received that may be this exit. Its message says the tx reached the node, that a fee rejection after that is the node's word the client cannot verify (when the cause carries fee text), the latest expiry among `sent`, and that a retry is safe only once every listed tx is gone. Without `sent`, today's text stands.
 - Binding is cooperative, as with `PaymentGate`: `bindWallet` records what its factory returns, so it catches a wallet built without the journal, not a factory that ignores the node. The doc comment says so.
-- Recovery trusts the node that reads it: `finalFate` and `locateWithdrawal` take that node's word. The docs say to resume against a node you trust (your own); the journal closes the forged send error, not a forged chain view.
+- Recovery trusts the node that reads it: `finalFate` and `locateWithdrawal` take that node's word. The docs say to resume against a node you trust (your own); the journal covers a wrong send error, not a wrong chain view.
 - The three wallets built on a `PaymentGate` get the journal under the gate: `new PaymentGate(sends.node, …)`, wallet bound to both (`gate.bindWallet((gated) => sends.bindWallet(() => open(gated)))`). `Session`, `DemoWallet` and `Harness` expose `sends`. The showcase keeps its durable `onNextSend` record; the journal adds the error mapping.
 
 **File map**: `bridge-core/src/{claim,payments,exit,sent,index}.ts` and tests (`claim.test.ts`, `payments.test.ts`, `exit.test.ts`); `deployer/src/{verify,session,smoke}.ts` + new `verify.test.ts`; `apps/showcase/src/{demo/wallet,live/actions}.ts` (+ any test fake of `DemoWallet`); `packages/integration/test/{harness,exits.test,exit-rules.test,actors}.ts`, `packages/integration/clock/merchant-exit-expiry.test.ts`; `docs/{integration,operations,assurance-map}.md`.
@@ -75,7 +75,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 - A window of every hash handed off during the call (the first draft): an unrelated send through the same wallet in that window would be taken for the exit, and two overlapping exits would get an untyped error. Rejected after the plan audit for content matching, which uses two stdlib accessors (`getNonEmptyL2ToL1Msgs`, `getPublicCallRequestsWithCalldata`) that `PaymentGate` already relies on in kind.
 - Match a private exit by its burn authwit's nullifier (unique per nonce): exact even for identical exits, but recomputes aztec-nr's authwit nullifier derivation and its domain separator in TypeScript (neither is exported by the pinned SDK). The message match differs only in a race that names another tx paying the same recipient the same amount.
 - Enforce the opener's freshness against the chain clock (refuse when the latest block is over 30 min past `list.at`): one more node read on every opening for another account, and a freshness rule only this one check would have; every other side choice already rests on `ListOptions.list` being read just before the call.
-- Trust an `Invalid tx:` refusal as nothing burned (keeps the honest drained-sponsor retry): a node can forge that text, which is the case this fix closes. Rejected by the director (Asks).
+- Trust an `Invalid tx:` refusal as nothing burned (keeps the honest drained-sponsor retry): that text is the node's word alone, the case this fix covers. Rejected by the director (Asks).
 
 ## Security & Adversarial Considerations
 
@@ -83,7 +83,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 - **Fee payer**: no silent public payer on payments; the public choice is explicit and documented. While the testnet sponsor is drained, private flows stall; no public fallback is added.
 - **Double burn**: once the exit's tx reached the node, no error says "retry". A node that refuses honestly (drained sponsor) now also yields `ExitUnconfirmedError`; the integrator waits for the tx's fate instead of retrying. Residual trust: the recovery reads (`finalFate`, `locateWithdrawal`) believe the node they ask; the docs say to use your own.
 - **Opener leak**: the SDK no longer creates the one opening that announces a merchant (a user opening for it), including through an opener whose switch-off is pending. The token still allows it to upstream-ABI callers; the docs say so.
-- **Out of scope, reported**: the showcase's retry on a duplicate nullifier treats an `Invalid tx:` refusal of the exit's copy as gone (`apps/showcase/src/live/actions.ts:360-385`), which a forging node could exploit the same way. Raised with the director; not changed here.
+- **Out of scope, reported**: the showcase's retry on a duplicate nullifier treats an `Invalid tx:` refusal of a sent copy as gone on the node's word (`apps/showcase/src/live/actions.ts`, `fateOf`). Exits no longer reach it (a send failing after hand-off is `ExitUnconfirmedError`); other one-send actions still do. Raised with the director; not changed here.
 - **Supply chain / crypto / least privilege**: no new dependency, no crypto, no key handling, no CI permission change.
 - **Residual**: the first note between two accounts still announces the recipient once per pair (refunds, pads, first direct sends). Docs state it; a token-side change is out of scope.
 
@@ -140,7 +140,7 @@ export class SendJournal<N extends Pick<AztecNode, "sendTx"> = AztecNode> {
 
 **Validation gate**: same commands as Phase 1. Pass: all exit 0; the new exit tests pass. Layers: lint, typecheck, unit, component.
 
-### Phase 4: integration
+### Phase 4: integration ✓
 
 1. Run `RUN_ID=sdk-fees bun run test:integration`.
 2. Run `RUN_ID=sdk-fees bun run test:e2e -- try-happy.spec.ts`: the page exits through its wallet, now built under the journal. A spec that fails only on a timeout gets one rerun; if it fails again, send a `MILESTONE` naming it.
