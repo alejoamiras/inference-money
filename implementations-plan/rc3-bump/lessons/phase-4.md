@@ -55,3 +55,8 @@
   only a real switch-off marks, undone and scheduled again to persist (a repeated `off` is a no-op), and the guardian's
   cancel unmarks. Kept: the comment over `request_effects()` in `test/rules_requests.nr`, which states what the
   returned tuple holds; the signature does not.
+- Round 2: no material finding; the operations fix confirmed against the token and rc.6 (a read anchors at a committed
+  block, so no read sees between a one-tx `on` and `off`); the `request_effects()` comment kept by agreement. One minor,
+  fixed: `docs/integration.md` said only a contract refunding "in the same tx" can use a refund commitment, but a
+  calling contract may keep it and refund later; and "unlike upstream" implied upstream stamps.
+- Gates after the fixes: `test:e2e` 9/9 (4.9 min of specs, 558 s wall, its own run id).
