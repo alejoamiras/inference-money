@@ -242,9 +242,9 @@ Three changes in the deployer, bridge-core and the showcase. The owner decided e
 - Pass criteria: each exit code as stated. The manifest records `merchantDelay` 3600, then 86400, then 7200, then 86400.
 - Layers: lint, typecheck, unit, local deploy and verify.
 
-### Phase 3: withdraw-only mode after a rollup switch
+### Phase 3: withdraw-only mode after a rollup switch ✓
 
-Built on its own branch (`worktree-audit-fixes-dv-rollup`, from the Phase 1 commit) and merged here; its log is `lessons/phase-3.md`.
+Built on its own branch (`worktree-audit-fixes-dv-rollup`, from the Phase 1 commit) and merged here; its log and gate are in `lessons/phase-3.md`.
 
 1. Add the ABI `rollup` view, `depositsOpen(l1, m)`, and the `{ depositsOpen }` result of `assertNetworkIdentity`.
 2. `network.test.ts`:
