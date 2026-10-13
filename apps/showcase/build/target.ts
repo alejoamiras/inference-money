@@ -51,6 +51,31 @@ function readManifestFile(path: string): BridgeManifest {
 	return parseManifest(JSON.parse(raw))
 }
 
+/** Presto's SDK: its `exports` hide its package.json from a resolver, so it is read by path. */
+const PRESTO_PACKAGE = "apps/showcase/node_modules/@alejoamiras/presto/package.json"
+
+/** The toolchain's node and SDK versions, and the `@aztec-labs/stdlib` Presto's SDK pins; throws when one is missing. */
+export function prestoPins(repoRoot: string): { aztecNode: string; aztecJs: string; prestoStdlib: string } {
+	const { aztecNode, aztecJs } = JSON.parse(readFileSync(resolve(repoRoot, "toolchain.json"), "utf8"))
+	const prestoStdlib = JSON.parse(readFileSync(resolve(repoRoot, PRESTO_PACKAGE), "utf8")).dependencies?.["@aztec-labs/stdlib"]
+	if (![aztecNode, aztecJs, prestoStdlib].every((v) => typeof v === "string")) {
+		throw new Error(`toolchain.json needs aztecNode and aztecJs, and ${PRESTO_PACKAGE} a @aztec-labs/stdlib dependency.`)
+	}
+	return { aztecNode, aztecJs, prestoStdlib }
+}
+
+/**
+ * Kernel inputs from another stdlib fail on the node, and only once a visitor proves. A manifest on another node
+ * version is exempt: the page refuses its network at the identity check, before any proof.
+ */
+function assertPrestoProves(m: BridgeManifest, repoRoot: string): void {
+	const { aztecNode, aztecJs, prestoStdlib } = prestoPins(repoRoot)
+	if (m.l2.nodeVersion !== aztecNode || prestoStdlib === aztecJs) return
+	throw new Error(
+		`Presto's SDK pins @aztec-labs/stdlib ${prestoStdlib}, not the toolchain's ${aztecJs}: no real-proof build until it moves.`,
+	)
+}
+
 /** Testnet always proves for real; a local build fakes proofs unless SHOWCASE_PROOFS=real (the proving harness). */
 function proofsFor(env: Env, m: BridgeManifest): Proofs {
 	const p = env.SHOWCASE_PROOFS ?? (m.network === "testnet" ? "real" : "fake")
@@ -108,11 +133,13 @@ export function resolveTarget(env: Env, repoRoot: string): BuildTarget {
 	if (pinned && manifest.network !== "testnet") throw new Error(`${TESTNET_MANIFEST} is a ${manifest.network} manifest`)
 	const demo = readDemoFile({ path, m: manifest })
 	if (!demo) throw new Error(`${path} has no published demo: run \`bun run bridge demo setup ${path}\` first.`)
+	const proofs = proofsFor(env, manifest)
+	if (proofs === "real") assertPrestoProves(manifest, repoRoot)
 	return {
 		manifest,
 		usersTag: demo.usersTag,
 		l1RpcUrl: l1RpcFor(path, manifest, env),
-		proofs: proofsFor(env, manifest),
+		proofs,
 		presto: prestoFor(env, manifest),
 		tour: readTour(path, manifest, repoRoot),
 	}
