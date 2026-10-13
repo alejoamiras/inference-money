@@ -133,7 +133,7 @@ A deposit's USDC sits in the portal until someone presents its claim salt, and t
 - Pass: exit 0; `flows-mocked.test.ts`, `demo.test.ts`, `run-state.test.ts` green.
 - Layers: lint, typecheck, unit.
 
-### Phase 3: the showcase keeps, skips and shows
+### Phase 3: the showcase keeps, skips and shows ✓
 
 1. Declare `archived` and `final` in the tickets schema.
 2. Archive in `fromDraft`, mark final in `stillClaimed`, skip both in `claimableEntry`.
