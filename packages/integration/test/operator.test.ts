@@ -41,7 +41,7 @@ import { REPO_ROOT } from "@inference-money/local-network"
 import { encodeAbiParameters, type Hex, keccak256, pad } from "viem"
 import { l2Actor } from "./actors"
 import { harness, INTEGRATION } from "./harness"
-import { asAdmin, blockTimestamp, sponsored } from "./token"
+import { asAdmin, blockTimestamp, listMerchant, sponsored } from "./token"
 
 const CLI = join(REPO_ROOT, "packages", "deployer", "src", "cli.ts")
 
@@ -64,10 +64,10 @@ const built = () => {
 	return evm
 }
 
-/** The names of the checks `verify` fails for `m` against the chain as it is now. */
+/** The names of the checks `verify` fails for `m` against the chain as it is now; other specs leave merchant changes in flight. */
 async function failing(m: BridgeManifest = harness().manifest): Promise<string[]> {
 	const { l1, node } = harness()
-	const checks = await verifyDeployment(m, built(), l1.publicClient, node)
+	const checks = await verifyDeployment(m, built(), l1.publicClient, node, "complete", { allowPending: true })
 	return checks.filter((c) => !c.ok).map((c) => c.name)
 }
 
@@ -110,7 +110,8 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 		const tour = join(dir, "tour.json")
 		await ok("smoke", manifestPath, "--record", tour)
 		await ok("smoke", manifestPath)
-		await ok("verify", manifestPath, "--tour", tour)
+		// Other specs leave merchant changes in flight on this shared deployment.
+		await ok("verify", manifestPath, "--tour", tour, "--allow-pending")
 		const steps = parseTour(JSON.parse(readFileSync(tour, "utf8"))).steps
 		expect(steps.filter((s) => s.verdict === "refused").map((s) => s.rule)).toEqual(["transfer", "exitDestination"])
 		expect(steps.find((s) => s.id === "withdraw")?.l1?.txHash).toMatch(/^0x[0-9a-f]{64}$/)
@@ -225,8 +226,9 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			const { receipt } = await tokenAt().methods.set_merchant_delay!(MERCHANT_MIN_DELAY).send(asAdmin())
 			try {
 				const drifted = await failing()
-				expect(drifted.length).toBeGreaterThan(0)
-				expect(drifted.filter((name) => !/^merchant 0x[0-9a-f]{64} delay == setting$/.test(name))).toEqual([])
+				expect(drifted.length).toBeGreaterThan(1)
+				const unsynced = /^merchant 0x[0-9a-f]{64} delay == setting$/
+				expect(drifted.filter((name) => !unsynced.test(name))).toEqual(["merchant delay setting == manifest"])
 				const token = AztecAddress.fromStringUnsafe(harness().manifest.l2.token.address)
 				const slot = await guardianDelay(harness().node, token, receipt.blockNumber!, await blockTimestamp(receipt))
 				expect(await emitted("token", "MerchantDelaySet", { txHash: receipt.txHash })).toEqual([
@@ -236,6 +238,17 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 				await tokenAt().methods.set_merchant_delay!(MERCHANT_MAX_DELAY).send(asAdmin())
 			}
 			expect(await failing()).toEqual([])
+		})
+
+		it("a merchant's switch-off in flight: strict verify fails it, --allow-pending warns", async () => {
+			const merchant = await l2Actor()
+			await listMerchant(merchant)
+			await tokenAt().methods.schedule_merchant_off!(merchant, true).send(asAdmin())
+			const line = (verdict: string) => `${verdict} merchant ${merchant} switch pending: switches off at `
+			const strict = await bridge("verify", harness().manifestPath)
+			expect([strict.code, strict.out.includes(line("FAIL"))], strict.out).toEqual([1, true])
+			const allowing = await bridge("verify", harness().manifestPath, "--allow-pending")
+			expect([allowing.code, allowing.out.includes(line("warn"))], allowing.out).toEqual([0, true])
 		})
 
 		// A whole, well-formed run, so the deployment's identity is the only thing wrong with it.

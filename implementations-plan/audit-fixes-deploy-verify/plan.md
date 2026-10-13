@@ -213,7 +213,7 @@ Three changes in the deployer, bridge-core and the showcase. The owner decided e
 - Pass criteria: every command exits 0. The local manifest carries `portalTx` and `routerTx`. `verify:local` prints `ok` for both creation checks and no `FAIL`.
 - Layers: lint, typecheck, unit, local deploy and verify.
 
-### Phase 2: the delay policy
+### Phase 2: the delay policy ✓
 
 1. Add `l2.merchantDelay` to the schema, with a manifest test for its bounds.
 2. Move the delay set into `deployBridge` and record the value. Delete the sets in `local.ts` and `deployTestnet`, and pass the option.
@@ -243,6 +243,8 @@ Three changes in the deployer, bridge-core and the showcase. The owner decided e
 - Layers: lint, typecheck, unit, local deploy and verify.
 
 ### Phase 3: withdraw-only mode after a rollup switch
+
+Built on its own branch (`worktree-audit-fixes-dv-rollup`, from the Phase 1 commit) and merged here; its log is `lessons/phase-3.md`.
 
 1. Add the ABI `rollup` view, `depositsOpen(l1, m)`, and the `{ depositsOpen }` result of `assertNetworkIdentity`.
 2. `network.test.ts`:

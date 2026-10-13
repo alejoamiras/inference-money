@@ -58,6 +58,8 @@ export const bridgeManifestSchema = z
 			admin: field.optional(),
 			/** The admin is a disposable key standing in until the owner's admin takes over. */
 			interimAdmin: z.literal(true).optional(),
+			/** The token's switch-off delay in seconds (its MERCHANT_MIN_DELAY..MAX_DELAY); `verify` reports a manifest without it unpinned. */
+			merchantDelay: z.number().int().min(3600).max(86_400).optional(),
 			proxy: l2InstanceSchema,
 			token: l2InstanceSchema,
 			bridge: l2InstanceSchema,
