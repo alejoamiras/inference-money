@@ -26,6 +26,7 @@ import {
 	MERCHANTS,
 	type Merchant,
 	newUsersTag,
+	type PriorDraft,
 	resetAmount,
 	sendPrivate,
 	sponsoredFee,
@@ -42,9 +43,11 @@ import { anvilFaucet, fundDemoL1, signerFaucet } from "./demo-l1"
 import { topUpSponsor } from "./fee-juice"
 import { l1Signer } from "./l1"
 import { TESTNET } from "./networks"
-import { type StateDir, withStateDir } from "./run-state"
+import { probeNetwork } from "./preflight"
+import { keepAbandonedDraft, type StateDir, withStateDir } from "./run-state"
 import { l1PrivateKeyFrom } from "./secrets"
 import { adminAccount, type ManifestRef, type Session, withSession } from "./session"
+import { assertAllPass } from "./verify"
 
 export { demoFilePath, readDemoFile }
 
@@ -71,10 +74,14 @@ export interface SetupPlan {
 	tickets: Partial<Record<Seed, string>>
 }
 
+/** Nothing here deletes a deposit secret: a draft or a finished plan moves where no resume reads it. */
 export interface PlanStore {
 	read(): SetupPlan | undefined
 	write(p: SetupPlan): void
-	clear(): void
+	/** Keeps a draft the L1 reader called never sent (`PriorDraft.abandon`'s contract). */
+	abandon(d: DepositDraft): void
+	/** Moves the finished plan out of the resume's way, its tickets with it. */
+	archive(tag: string): void
 }
 
 export interface SetupOps {
@@ -84,7 +91,7 @@ export interface SetupOps {
 	bound(seed: BindSeed): Promise<boolean>
 	/** Lists the demo merchants, or throws the instruction to list them. */
 	list(): Promise<void>
-	deposit(seed: Seed, tag: string, prior: DepositDraft | undefined, persist: (d: DepositDraft) => void): Promise<ClaimTicket>
+	deposit(seed: Seed, tag: string, prior: PriorDraft | undefined, persist: (d: DepositDraft) => void): Promise<ClaimTicket>
 	claim(t: ClaimTicket): Promise<void>
 	final: ReclaimSteps
 }
@@ -92,12 +99,12 @@ export interface SetupOps {
 async function seedTicket(plan: SetupPlan, seed: Seed, store: PlanStore, ops: SetupOps): Promise<ClaimTicket> {
 	const stored = plan.tickets[seed]
 	if (stored) return decodeClaimTicket(stored)
-	const prior = plan.drafts[seed]
+	const draft = plan.drafts[seed] === undefined ? undefined : decodeDepositDraft(plan.drafts[seed])
 	const persist = (d: DepositDraft) => {
 		plan.drafts[seed] = encodeTicket("draft", d)
 		store.write(plan)
 	}
-	const t = await ops.deposit(seed, plan.tag, prior === undefined ? undefined : decodeDepositDraft(prior), persist)
+	const t = await ops.deposit(seed, plan.tag, draft && { draft, abandon: () => store.abandon(draft) }, persist)
 	plan.tickets[seed] = encodeTicket("claim", t)
 	delete plan.drafts[seed]
 	store.write(plan)
@@ -114,8 +121,9 @@ async function seedAll(plan: SetupPlan, seeds: readonly Seed[], store: PlanStore
 /**
  * Binds each merchant to its treasury, lists the merchants once those bindings are final and read back (a listed
  * merchant's first private claim would bind it to whoever deposited), then binds both users and seeds the float. It
- * publishes the users' tag and drops the deposit secrets only once every claim is finalized: anyone holding the tag
- * could take a pruned binding, and a pruned claim needs its secret again.
+ * publishes the users' tag only once every claim is finalized, since anyone holding the tag could take a pruned
+ * binding, and then archives the plan, secrets included: "finalized" is the node's word, and a claim it wrongly
+ * vouched for needs its secret again.
  */
 export async function runSetup(store: PlanStore, ops: SetupOps, publish: (tag: string) => void): Promise<void> {
 	const plan = store.read() ?? { tag: newUsersTag(), drafts: {}, tickets: {} }
@@ -133,7 +141,7 @@ export async function runSetup(store: PlanStore, ops: SetupOps, publish: (tag: s
 	await ops.list()
 	await seedAll(plan, USER_SEEDS, store, ops)
 	publish(plan.tag)
-	store.clear()
+	store.archive(plan.tag)
 }
 
 const SEED_PLANS: Record<Seed, (p: Record<string, Player>) => DepositPlan> = {
@@ -207,7 +215,8 @@ function stateStore(dir: StateDir): PlanStore {
 	return {
 		read: () => dir.read<SetupPlan>("setup.json"),
 		write: (p) => dir.write("setup.json", p),
-		clear: () => dir.remove("setup.json"),
+		abandon: (d) => keepAbandonedDraft(dir, d),
+		archive: (tag) => dir.rename("setup.json", `setup-${tag}.json`),
 	}
 }
 
@@ -286,6 +295,7 @@ export function demoFund(ref: ManifestRef, log: Log): Promise<void> {
 		}
 		// The cast's keys are public: ETH sent to them on any chain with value is anyone's.
 		if (s.m.l1.chainId !== TESTNET.l1ChainId) throw new Error(`demo fund runs on Sepolia only, not chain ${s.m.l1.chainId}`)
+		assertAllPass(await probeNetwork(TESTNET, rpc), log)
 		const key = l1PrivateKeyFrom()
 		await fundDemoL1(rpc, s.m, signerFaucet(l1Signer(rpc, s.m.l1.chainId, privateKeyToAccount(key)), s.m), log)
 		const { galactica } = await enlist(s, ["galactica"] as const)
@@ -296,7 +306,7 @@ export function demoFund(ref: ManifestRef, log: Log): Promise<void> {
 			from: galactica.address,
 			sponsor: (await sponsorInstance()).address,
 			fee: sponsoredFee(s.m),
-			bridge: { l1RpcUrl: rpc, l1PrivateKey: key, l1ChainId: s.m.l1.chainId },
+			bridge: { pins: TESTNET, l1RpcUrl: rpc, l1PrivateKey: key },
 			log,
 		})
 	})
