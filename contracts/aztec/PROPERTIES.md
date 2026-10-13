@@ -258,10 +258,10 @@
 
 - [~] **GL-22** — Only the merchant admin changes the list: `add_merchant`, `schedule_merchant_off`,
   `set_merchant_delay` and `schedule_merchant_guardian` refuse a user, a merchant, a stranger, a proposed admin that has
-  not accepted, and the guardian in office. `sync_merchant_delay` is open to anyone up to the delay in force; only the
-  admin starts a decrease, so a guardian's cancel holds against everyone else. `cancel_merchant_change` is for the admin or a
-  non-zero guardian already in office, and a removed guardian loses it once its removal lands. If it's the guardian, it
-  can only cancel. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — archived plan: "The guardian can do nothing
+  not accepted, and the guardian in office. Anyone may `sync_merchant_delay` an entry to a setting at or above its delay
+  in force; only the admin starts a decrease, so a guardian's cancel holds against everyone else.
+  `cancel_merchant_change` is for the admin or a non-zero guardian already in office, and a removed guardian loses it
+  once its removal lands. Beyond what anyone may do, the guardian can only cancel. (Category: STATE_TRANSITION; Guarantee: SHOULD-HOLD — archived plan: "The guardian can do nothing
   else"; docs/operations.md: "Schedules the guardian (cancel-only)"; A20; Priority: MEDIUM; Scope: always-on; Sources:
   SPEC-30, ADV-28, ST-14, ST-08, ADV-31)
   Coverage: PARTIAL by token/src/test/merchants.nr: add_merchant_is_admin_only, switch_off_is_admin_only,
