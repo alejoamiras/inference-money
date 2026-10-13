@@ -96,7 +96,7 @@ A deposit's USDC sits in the portal until someone presents its claim salt, and t
 
 **Inferences**
 
-1. A deposit that mined sets its nonce bit at a block no later than the first finalized block past the deadline (Permit2 checks `block.timestamp <= deadline`; timestamps only grow). Attack: a reorg below finality is out of the model.
+1. A deposit that mined sets its nonce bit at a block no later than the first finalized block past the deadline (Permit2 checks `block.timestamp <= deadline`; timestamps only grow). A reorg below finality is out of the model.
 2. `readContract` at `finalized.number` is served by ordinary (non-archive) RPCs: finality trails the tip by about 64 blocks on Sepolia, usually inside a provider's recent-state window (not a guarantee). If not, the read fails and the answer is `pending` (a wedge, not a loss). A set bit proves the nonce was consumed or invalidated by its owner, not specifically a deposit; `pending` stays the conservative answer either way.
 3. The e2e can produce a real never-sent draft by holding the deposit's `eth_sendRawTransaction`, reloading under it and aborting it (the A13 pattern), then rewriting the finalized header's timestamp, which models a wrong reader (not real deadline expiry) without moving the network's clock. The spec checks the held request targets the router and that no deposit landed.
 
@@ -146,7 +146,7 @@ A deposit's USDC sits in the portal until someone presents its claim salt, and t
 - Pass: exit 0; the named tests green.
 - Layers: lint, typecheck, unit, component.
 
-### Phase 4: docs, integration and e2e
+### Phase 4: docs, integration and e2e ✓
 
 1. Docs: `docs/integration.md:60`, `docs/architecture.md:40`, `docs/operations.md:101`, `docs/assurance-map.md` A11. Each says finality is the node's word and records are archived, not deleted. `operations.md` names the kept files (`setup-<tag>.json`, `abandoned-<nonce>.json`) and how to recover a salt from them.
 2. Integration: in `packages/integration/test/deposits.test.ts`, wait until the real finalized block reaches the landed deposit's block, then read it through a reader that withholds its logs and its receipt and reports that block's timestamp past the deadline. Assert the real `nonceBitmap` bit is set at that block (read directly), that the reader's `readContract` resolved during reconciliation, and that the verdict is `pending`.
