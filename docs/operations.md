@@ -96,6 +96,16 @@ The pause is L2-only. Token transfers on Aztec continue, withdrawals already emi
 
 A switch-off demotes the account to a user; it does not freeze it. It keeps its balance and still exits as a user, privately, to its funding address. A merchant listed only after binding its own treasury (see Merchants) therefore cashes out only there, whoever holds its key. One that never bound can still bind with its first private claim, so after the unpause whoever holds its key, the owner or a thief, races to bind it first.
 
+## Rollup upgrade
+
+`TokenPortal.initialize` binds the registry's canonical rollup and its inbox and outbox for good. Once Aztec makes another rollup canonical, every deposit reverts (`RollupNotCanonical`), while `withdraw` keeps paying the exits the bound rollup has proven. Everything else on L2 (balances, unclaimed deposits, exits not yet proven) needs the bound rollup to keep producing and proving blocks, which it stops doing once its attesters move to the new one. The plan, which Galactica runs on mainnet:
+
+1. Before the switch, open an exit window: users claim and exit while the bound rollup still proves.
+2. Redeploy the bridge on the new rollup.
+3. Keep a node on the old rollup running until the last payout: a payout's membership witness comes from a node that serves the bound rollup. A hosted node follows the new rollup, so the old deployment's showcase serves exits only once its manifest's `l2.nodeUrl` names the old-rollup node and the bundle is rebuilt (one network per bundle).
+
+After a switch, the showcase opens with a notice that deposits are closed, refuses the deposit action, and checks again before a deposit signs anything; claims, payments, transfers, exits and payouts still run. `verify` still passes identity, which pins the portal's stored registry, inbox, outbox and version and the node's, and warns that deposits revert. A node that followed the new rollup reports another version and outbox, so it fails there. `smoke` logs the same warning and goes on: a fresh run exits 1 at its first step, the deposit, and a run journaled past its deposit continues. A fresh acceptance run needs a deposit, so it cannot pass after a switch.
+
 ## Demo
 
 The demo cast's keys are public by design: they derive from the deployment (`packages/demo`), and the showcase ships them. alice and bob are users, galactica and supplier merchants; A_demo and B_demo are alice's and bob's Ethereum accounts, and each merchant has its own as its treasury. They hold demo funds only, never an admin or minting role, and are merchant-listed only on local and testnet.
