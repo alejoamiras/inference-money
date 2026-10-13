@@ -131,7 +131,6 @@ function Payouts({ payouts }: { payouts: readonly Payout[] }) {
 	)
 }
 
-/** The page-wide notices above the composer: deposits closed after a rollup switch, and Presto's ribbon. */
 function Notices({ wallet, presto }: { wallet: WalletStatus; presto?: LivePresto }) {
 	const closed = depositsClosed(wallet)
 	const ribbon = presto && PrestoRibbon

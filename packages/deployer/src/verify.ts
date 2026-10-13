@@ -53,7 +53,7 @@ async function attempt(name: string, fn: () => Promise<Check[]>): Promise<Check[
 }
 
 export const ROLLUP_MOVED =
-	"the registry's canonical rollup moved: deposits revert (RollupNotCanonical); exits pay while the bound rollup proves"
+	"the registry's canonical rollup moved: deposits revert (RollupNotCanonical); exits pay once the bound rollup proves them"
 
 async function codeMatches(
 	l1: PublicClient,
