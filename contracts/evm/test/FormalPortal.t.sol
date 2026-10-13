@@ -31,8 +31,8 @@ import {PlainERC20} from "./mocks/TestTokens.sol";
 ///   check_deposit_rejectsZeroAmount        — no zero deposit reaches the Inbox, publicly or through the router
 ///   check_deposit_rejectsStaleRollup       — once the registry's canonical rollup moves, no deposit reaches the
 ///                                             bound rollup's Inbox
-///   check_depositPublic_rejectsBadRefund   — no public deposit names zero, the portal or the router as its refund
-///                                             address
+///   check_depositPublic_rejectsBadRefund   — no public deposit names zero, the portal, the router, the token, the
+///                                             Inbox or the Outbox as its refund address
 ///
 /// Every proof asserts the exact revert selector: a bare `catch` would accept a fixture failing for its own reasons,
 /// and assumes valid values for every guard that runs before the one it targets. Failures are signalled with assertions
@@ -309,12 +309,19 @@ contract FormalPortalTest is ProofCanary {
     }
 
     /// `p` is bound to registry A (so to `inboxA`) and may pull any amount from this contract. `which` picks zero, the
-    /// portal or the router; every guard before the refund address is satisfied.
+    /// portal, the router, the token, the Inbox or the Outbox; every guard before the refund address is satisfied.
     function proveRejectsBadRefund(TokenPortal p, uint8 which, bytes32 to, uint256 amount, bytes32 secretHash) public {
         vm.assume(amount != 0 && amount <= type(uint128).max);
         vm.assume(uint256(to) <= Constants.MAX_FIELD_VALUE);
         // A conditional, not an array: halmos cannot index memory by a symbolic offset.
-        address depositor = which % 3 == 0 ? address(0) : which % 3 == 1 ? address(p) : p.router();
+        uint8 pick = which % 6;
+        address depositor = pick == 0
+            ? address(0)
+            : pick == 1
+                ? address(p)
+                : pick == 2
+                    ? p.router()
+                    : pick == 3 ? address(p.underlying()) : pick == 4 ? address(p.inbox()) : address(p.outbox());
         uint256 sent = inboxA.sent();
         uint256 reserve = p.underlying().balanceOf(address(p));
         try p.depositToAztecPublic(depositor, to, amount, secretHash) {
@@ -358,6 +365,9 @@ contract FormalPortalTest is ProofCanary {
 
     function _assumeValidRefund(TokenPortal p, address depositor) internal view {
         vm.assume(depositor != address(0) && depositor != address(p) && depositor != p.router());
+        vm.assume(
+            depositor != address(p.underlying()) && depositor != address(p.inbox()) && depositor != address(p.outbox())
+        );
     }
 
     function _assertBoundToA(TokenPortal p) internal view {
@@ -491,7 +501,7 @@ contract FormalPortalTest is ProofCanary {
         assertEq(inboxA.sent(), sent + 1);
     }
 
-    /// Any refund address but the three refused ones lands, the depositor's own or a third party's.
+    /// Any refund address but the six refused ones lands, the depositor's own or a third party's.
     function test_canary_anyOtherRefundAddressDeposits() public {
         uint256 sent = inboxA.sent();
         funded.depositToAztecPublic(makeAddr("refund"), bytes32(uint256(1)), 1e6, bytes32(0));

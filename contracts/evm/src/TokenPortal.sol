@@ -4,10 +4,10 @@
 // (aztec-packages l1-contracts/test/portals/TokenPortal.sol), with these changes:
 //   - Deposit messages name their depositor: `mint_to_public(bytes32,uint256,address)` and
 //     `mint_to_private(uint256,address)`. A public deposit names the refund address its caller passes (never zero,
-//     this portal or the router). A direct private deposit names the key holder whose EIP-712 `FundingAuthorization`
-//     (bound to this portal, the submitting `msg.sender`, the amount, the secret hash and a deadline) it carries,
-//     usable once. The bound router's `...For` deposits name the Permit2 signer it pulled from. Every deposit pulls
-//     from `msg.sender`. `withdraw`'s message is the canonical one.
+//     this portal, the router, the token, the Inbox or the Outbox). A direct private deposit names the key holder
+//     whose EIP-712 `FundingAuthorization` (bound to this portal, the submitting `msg.sender`, the amount, the secret
+//     hash and a deadline) it carries, usable once. The bound router's `...For` deposits name the Permit2 signer it
+//     pulled from. Every deposit pulls from `msg.sender`. `withdraw`'s message is the canonical one.
 //   - Deposits refuse a zero amount, and refuse once the registry's canonical rollup is no longer the bound one.
 //   - `initialize` is deployer-only and init-once, and binds the router, which must name this portal and token. The
 //     L2 bridge address is derived from this contract's address, so the binding cannot move into the constructor.
@@ -59,7 +59,8 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
     error ZeroAmount();
     /// @notice The registry's canonical rollup moved on; a deposit to the old one's Inbox might never be consumed.
     error RollupNotCanonical();
-    /// @notice A public refund address of zero, this portal or the router: a returned deposit could never leave it.
+    /// @notice A public refund address of zero, this portal, the router, the underlying token, the Inbox or the Outbox:
+    /// a returned deposit could never leave it.
     error InvalidDepositor();
     error AuthorizationExpired(uint256 deadline);
     error AuthorizationUsed();
@@ -331,9 +332,13 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
     }
 
     /// @dev A withdraw to the portal never debits it, so it always reverts; the router is ownerless and must settle
-    /// to its starting balance on every deposit, so nothing could ever move a refund out of it.
+    /// to its starting balance on every deposit, and USDC, the Inbox and the Outbox have no way to send USDC they hold,
+    /// so nothing could ever move a refund out of them. Permit2 is refused by the SDK: the portal does not store it.
     function _requireDepositor(address _depositor) internal view virtual {
-        if (_depositor == address(0) || _depositor == address(this) || _depositor == router) {
+        if (
+            _depositor == address(0) || _depositor == address(this) || _depositor == router
+                || _depositor == address(underlying) || _depositor == address(inbox) || _depositor == address(outbox)
+        ) {
             revert InvalidDepositor();
         }
     }
