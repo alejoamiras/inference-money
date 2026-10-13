@@ -294,7 +294,7 @@ lockfiles, `.github/**`, AGENTS.md, `docs/**`, `implementations-plan/**`.
 the rc.3 address, record it as an external blocker (PR body, #49) and require every other check to pass; the
 sponsor-balance line is informational. Layers: lint, typecheck, unit, component, live keyless read.
 
-### Phase 4 — Converge: merge, heavy gates, CI, docs
+### Phase 4 — Converge: merge, heavy gates, CI, docs ✓ (8cdd408..bdf3a54)
 1. `git merge` the helper's branch (never a rebase). Refresh the Token class id from Phase 2's artifact.
 2. EVM: `forge inspect` deployed bytecode of `TokenPortal` and `Permit2DepositRouter` against `dev`'s (I2).
 3. Install the rc.3 node: `bash packages/local-network/scripts/install-node.sh ~/.cache/inference-money/aztec-node-rc3-bump`.
