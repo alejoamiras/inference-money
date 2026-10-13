@@ -113,13 +113,13 @@ and `inbox` are read later anyway); measured, and the snapshot regenerated if th
 
 ## Phases (one arc)
 
-1. **#52.** Edit `main.nr`, add the test and its `txe-manifest.txt` line, `compile.sh`, re-pin the class id.
+1. ✓ **#52.** Edit `main.nr`, add the test and its `txe-manifest.txt` line, `compile.sh`, re-pin the class id.
    Commit the rebuilt artifacts first: `compile.sh --check` compares a fresh build against HEAD.
    **Gate**: `bun run test:noir`; `bash contracts/aztec/scripts/compile.sh --check`; `check-stamp-constraint.sh` and
    `check-sole-consumer.sh`, each plain and `--self-test`; `bun run --cwd contracts/aztec test` (the ABI-superset test,
    with its preload); `bun run --cwd packages/bridge-core test`. Pass: all exit 0; the new test fails on the unfixed
    source.
-2. **#57.** Contracts, bridge-core, fuzz handler, docs. **Gate**: `bun run test:evm`, `test:evm:formal` (halmos
+2. ✓ **#57.** Contracts, bridge-core, fuzz handler, docs. **Gate**: `bun run test:evm`, `test:evm:formal` (halmos
    0.3.3 on PATH), `test:evm:gas`, `test:evm:slither`; `bun run --cwd packages/bridge-core test`;
    `bun run test:evm:fuzz -- 300`. Pass: exit 0; the badRefund canary still trips.
 3. **#59.** Portal, fixtures, deployer, docs. **Gate**: phase 2's EVM commands; `bun run typecheck`;
@@ -181,7 +181,7 @@ Resolved, not adopted as work: "verify the claim sender against the protocol" �
 galactica for the sponsor (Fact 8). Rejected: none. Resumed check of the revised plan: **approve** (all six
 conditions met, no new defect).
 
-## Seeds (draft)
+## Seeds
 
 `/goal All phases ✓ in implementations-plan/pre-redeploy/plan.md, each gate reported passing in the transcript with
 LESSONS_FILE printed; the codex loop converged (a resumed pass with no material findings quoted); one PR to dev
