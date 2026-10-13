@@ -52,6 +52,9 @@ async function attempt(name: string, fn: () => Promise<Check[]>): Promise<Check[
 	}
 }
 
+export const ROLLUP_MOVED =
+	"the registry's canonical rollup moved: deposits revert (RollupNotCanonical); exits pay while the bound rollup proves"
+
 async function codeMatches(
 	l1: PublicClient,
 	name: string,
@@ -320,8 +323,9 @@ export async function verifyDeployment(
 	guardian: string = ZERO,
 ): Promise<Check[]> {
 	const identity = await attempt("network identity", async () => {
-		await assertNetworkIdentity(node, l1, m)
-		return [check("network identity (node + registry → rollup)", true, `rollup version ${m.l2.rollupVersion}`)]
+		const { depositsOpen } = await assertNetworkIdentity(node, l1, m)
+		const ok = check("network identity (node + the portal's rollup)", true, `rollup version ${m.l2.rollupVersion}`)
+		return depositsOpen ? [ok] : [ok, warn("deposits", ROLLUP_MOVED)]
 	})
 	const deployers = new Set([m.l2.proxy.deployer, m.l2.token.deployer, m.l2.bridge.deployer])
 	return [
