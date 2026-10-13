@@ -422,7 +422,7 @@ describe("reconcileDeposit", () => {
 		expect(s.sends).toBe(1)
 	})
 
-	it("a deposit a reader hides (no receipt, no logs, finalized past the deadline) stays pending while its nonce is spent", async () => {
+	it("an empty scan past the deadline is pending while Permit2 shows the permit's nonce spent at the finalized block", async () => {
 		const { s, l1 } = chain()
 		const d = await draft()
 		d.typedData.message.nonce = (5n << 8n) | 255n
