@@ -73,8 +73,10 @@ describe("Presto's stdlib", () => {
 	it("refuses a real-proof build for the toolchain's node until Presto pins the toolchain's stdlib", () => {
 		const real = { BRIDGE_MANIFEST: current, SHOWCASE_PROOFS: "real", ...ANVIL }
 		expect(() => resolveTarget(real, root)).toThrow(/pins @aztec-labs\/stdlib 6\.0\.0-rc\.1, not the toolchain's 6\.0\.0-rc\.3/)
-		prestoPinning(undefined)
-		expect(() => resolveTarget(real, root)).toThrow(/a @aztec-labs\/stdlib dependency/)
+		for (const malformed of [undefined, "", "^6.0.0-rc.3"]) {
+			prestoPinning(malformed)
+			expect(() => resolveTarget(real, root)).toThrow(/an exact @aztec-labs\/stdlib/)
+		}
 		prestoPinning("6.0.0-rc.3")
 		expect(resolveTarget(real, root).proofs).toBe("real")
 		prestoPinning("6.0.0-rc.1")
