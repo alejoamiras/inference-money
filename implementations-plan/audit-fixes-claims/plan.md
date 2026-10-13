@@ -104,7 +104,7 @@ A deposit's USDC sits in the portal until someone presents its claim salt, and t
 
 ## Phases
 
-### Phase 1: bridge-core verdict and send
+### Phase 1: bridge-core verdict and send ✓
 
 1. Add `PERMIT2_NONCE_ABI` and its pin.
 2. Read the nonce bit in `locateDeposit` before `not-deposited`.

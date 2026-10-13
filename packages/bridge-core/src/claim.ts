@@ -222,10 +222,10 @@ export interface WaitClaimFinalizedOptions {
 }
 
 /**
- * Waits until this ticket's claim is in a finalized block, the first point at which its secret may be forgotten: an
- * epoch that misses its proof window is pruned, and an L1 reorg can remove a proof that landed near its deadline.
- * "dropped" once the nullifier is not even proposed any more, so the caller claims again; a failed read counts as not
- * final yet.
+ * Waits until this ticket's claim is in a finalized block: before that, an epoch that misses its proof window is
+ * pruned, and an L1 reorg can remove a proof that landed near its deadline. "dropped" once the nullifier is not even
+ * proposed any more, so the caller claims again; a failed read counts as not final yet. "finalized" is the node's
+ * unproven word: mark the ticket final and keep it, never delete the only copy of its secret on this answer.
  */
 export async function waitClaimFinalized(
 	t: ClaimTicket,
