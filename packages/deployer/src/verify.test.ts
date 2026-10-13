@@ -51,6 +51,19 @@ describe("createdAsBuilt", () => {
 		const c = await createdAsBuilt(pruned, "portal", HASH, WANT)
 		expect([c.ok, c.detail]).toEqual([false, expect.stringContaining("--l1-rpc")])
 	})
+
+	const OTHER: Hex = `0x${"cd".repeat(32)}`
+	it.each([
+		["tx", OTHER, HASH],
+		["receipt", HASH, OTHER],
+	])("fails a %s the endpoint answers for another hash, though it describes a matching create", async (_, txHash, receiptHash) => {
+		const answering = {
+			getTransaction: async () => ({ ...TX, hash: txHash }),
+			getTransactionReceipt: async () => ({ ...RECEIPT, transactionHash: receiptHash }),
+		} as unknown as PublicClient
+		const c = await createdAsBuilt(answering, "portal", HASH, WANT)
+		expect([c.ok, c.detail]).toEqual([false, `the L1 endpoint answered tx ${OTHER} for ${HASH}`])
+	})
 })
 
 describe("delayPolicyChecks", () => {
@@ -70,7 +83,6 @@ describe("delayPolicyChecks", () => {
 		list: { block: 9, at: AT, entries: new Map([[M, { ...SETTLED, ...entry }]]) },
 	})
 	const verdict = (c: Check | undefined) => c && (c.ok ? (c.warn ? "warn" : "ok") : "fail")
-	/** Each named check's verdict, strict then under `--allow-pending`, and its detail under the flag. */
 	const judged = (r: DelayReads, pinned: number | undefined, name: string) => {
 		const [strict, allowing] = [false, true].map((allow) => delayPolicyChecks(r, pinned, allow).find((c) => c.name === name))
 		return { strict: verdict(strict), allowing: verdict(allowing), detail: allowing?.detail }

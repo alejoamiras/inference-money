@@ -102,6 +102,8 @@ export async function createdAsBuilt(
 	if (!hash) return warn(label, "the manifest records none: the constructor that ran is unverified")
 	try {
 		const [tx, receipt] = await Promise.all([l1.getTransaction({ hash }), l1.getTransactionReceipt({ hash })])
+		const answered = [tx.hash, receipt.transactionHash].find((h) => !same(h, hash))
+		if (answered) return check(label, false, `the L1 endpoint answered tx ${answered} for ${hash}`)
 		return creationCheck(label, tx, receipt, want)
 	} catch (e) {
 		if (!(e instanceof TransactionNotFoundError || e instanceof TransactionReceiptNotFoundError)) throw e

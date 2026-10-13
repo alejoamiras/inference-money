@@ -120,7 +120,6 @@ export async function setMerchantDelay(s: Session, admin: AztecAddress, delay: b
 	return { txs, synced: syncs.length }
 }
 
-/** What `merchants delay` finds on chain after its sends. */
 export interface DelayReadBack {
 	setting: bigint
 	/** Listed merchants whose entry is not scheduled to the requested delay. */

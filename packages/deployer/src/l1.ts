@@ -78,6 +78,8 @@ export async function deployEvm(l1: L1Signer, name: string, a: EvmArtifact, args
 	const address = getContractAddress({ from: account.address, nonce: BigInt(nonce) })
 	const data = encodeDeployData({ abi: a.abi, bytecode: a.bytecode, args })
 	const request = await walletClient.prepareTransactionRequest({ account, chain, data, nonce })
+	// viem keeps the chain id an RPC's eth_fillTransaction answers; signed for another chain, the tx is replayable there.
+	if (request.chainId !== chain.id) throw new Error(`${name} deploy: the RPC prepared it for chain ${request.chainId}, not ${chain.id}`)
 	const signed = await account.signTransaction(request as TransactionSerializable, { serializer: chain.serializers?.transaction })
 	const tx = keccak256(signed)
 	const echoed = await walletClient.sendRawTransaction({ serializedTransaction: signed })

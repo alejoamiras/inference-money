@@ -21,7 +21,7 @@ const ARTIFACT: EvmArtifact = { abi: [], bytecode: "0x6080604052", deployedBytec
 const OTHER: Hex = `0x${"ee".repeat(32)}`
 
 /** An L1 endpoint that answers like anvil, except where `lie` says otherwise. */
-function fakeL1(lie: { echo?: Hex; receiptTx?: Hex; created?: Address } = {}) {
+function fakeL1(lie: { echo?: Hex; receiptTx?: Hex; created?: Address; fillChainId?: number } = {}) {
 	const calls: string[] = []
 	const sent: Hex[] = []
 	const created = getContractAddress({ from: account.address, nonce: BigInt(NONCE) })
@@ -33,6 +33,12 @@ function fakeL1(lie: { echo?: Hex; receiptTx?: Hex; created?: Address } = {}) {
 		eth_maxPriorityFeePerGas: () => toHex(1),
 		eth_gasPrice: () => toHex(2),
 		eth_getBlockByNumber: () => ({ number: toHex(2), hash: OTHER, baseFeePerGas: toHex(1), timestamp: "0x1", transactions: [] }),
+		eth_fillTransaction: ([tx]) => {
+			if (lie.fillChainId === undefined) throw new Error("eth_fillTransaction is not available")
+			const { data } = tx as { data: Hex }
+			const filled = { type: "0x2", chainId: toHex(lie.fillChainId), nonce: toHex(NONCE), gas: toHex(500_000), input: data }
+			return { raw: "0x", tx: { ...filled, maxFeePerGas: "0x2", maxPriorityFeePerGas: "0x1", value: "0x0", to: null, hash: OTHER } }
+		},
 		eth_sendRawTransaction: ([raw]) => {
 			sent.push(raw as Hex)
 			return lie.echo ?? keccak256(raw as Hex)
@@ -86,6 +92,12 @@ describe("deployEvm", () => {
 		const { l1, calls } = fakeL1({ echo: OTHER })
 		await expect(deployEvm(l1, "Thing", ARTIFACT)).rejects.toThrow("the RPC answered tx")
 		expect(calls).not.toContain("eth_getTransactionReceipt")
+	})
+
+	it("refuses a tx the RPC prepared for another chain, before signing it", async () => {
+		const { l1, sent } = fakeL1({ fillChainId: 1 })
+		await expect(deployEvm(l1, "Thing", ARTIFACT)).rejects.toThrow("prepared it for chain 1, not 31337")
+		expect(sent).toEqual([])
 	})
 
 	it("refuses a receipt for another tx at the same nonce", async () => {
