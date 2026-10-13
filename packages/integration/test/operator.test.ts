@@ -139,7 +139,13 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			const signer = l1Signer(l1.rpcUrl, l1.chain.id, localL1Account())
 			const copy = await deployEvm(signer, "TokenPortal", { ...built().portal, bytecode: `${built().portal.bytecode}00` })
 			const router = await deployRouter(signer, built(), m.l1.permit2, copy.address, m.l1.usdc)
-			const binding = { registry: m.l1.registry, usdc: m.l1.usdc, l2Bridge: m.l2.bridge.address, router: router.address }
+			const binding = {
+				registry: m.l1.registry,
+				usdc: m.l1.usdc,
+				l2Bridge: m.l2.bridge.address,
+				router: router.address,
+				rollupVersion: BigInt(m.l2.rollupVersion),
+			}
 			await initializePortal(signer, built(), copy.address, binding)
 			const reserve = (await l1.publicClient.getStorageAt({ address: m.l1.usdc, slot: usdcSlot(m.l1.portal) })) ?? pad("0x0")
 			await l1.test.setStorageAt({ address: m.l1.usdc, index: usdcSlot(copy.address), value: reserve })

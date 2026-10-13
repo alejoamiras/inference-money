@@ -9,8 +9,9 @@
 //     hash and a deadline) it carries, usable once. The bound router's `...For` deposits name the Permit2 signer it
 //     pulled from. Every deposit pulls from `msg.sender`. `withdraw`'s message is the canonical one.
 //   - Deposits refuse a zero amount, and refuse once the registry's canonical rollup is no longer the bound one.
-//   - `initialize` is deployer-only and init-once, and binds the router, which must name this portal and token. The
-//     L2 bridge address is derived from this contract's address, so the binding cannot move into the constructor.
+//   - `initialize` is deployer-only and init-once, and binds the router, which must name this portal and token, and
+//     the canonical rollup only if its version is the one the caller expects. The L2 bridge address is derived from
+//     this contract's address, so the binding cannot move into the constructor.
 //   - Deposits cap `amount` at u128 (the L2 amount type), public deposits require `_to` to be a field element (an
 //     Aztec address), and every deposit must raise the portal's balance by exactly `amount`.
 //   - `withdraw` must lower the portal's balance by exactly `amount`.
@@ -59,6 +60,9 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
     error ZeroAmount();
     /// @notice The registry's canonical rollup moved on; a deposit to the old one's Inbox might never be consumed.
     error RollupNotCanonical();
+    /// @notice The canonical rollup is not the version the L2 side was deployed on, so its messages could never reach
+    /// the bridge.
+    error RollupVersionMismatch(uint256 expected, uint256 actual);
     /// @notice A public refund address of zero, this portal, the router, the underlying token, the Inbox or the Outbox:
     /// a returned deposit could never leave it.
     error InvalidDepositor();
@@ -118,8 +122,16 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
      * @param _underlying - The underlying token address
      * @param _l2Bridge - The L2 bridge address
      * @param _router - The deposit router, which must already name this portal and `_underlying`
+     * @param _expectedRollupVersion - The version of the rollup the L2 bridge lives on; the registry's canonical rollup
+     * must have it
      */
-    function initialize(address _registry, address _underlying, bytes32 _l2Bridge, address _router) external {
+    function initialize(
+        address _registry,
+        address _underlying,
+        bytes32 _l2Bridge,
+        address _router,
+        uint256 _expectedRollupVersion
+    ) external {
         _requireInitializable();
         if (IDepositRouter(_router).PORTAL() != address(this) || IDepositRouter(_router).TOKEN() != _underlying) {
             revert RouterMismatch();
@@ -134,6 +146,7 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
         outbox = rollup.getOutbox();
         inbox = rollup.getInbox();
         rollupVersion = rollup.getVersion();
+        _requireRollupVersion(_expectedRollupVersion);
 
         emit PortalInitialized(
             _registry, _underlying, _l2Bridge, _router, address(rollup), address(inbox), address(outbox), rollupVersion
@@ -311,6 +324,11 @@ contract TokenPortal is ITokenPortal, ReentrancyGuardTransient, EIP712 {
         if (msg.sender != initializer) revert NotInitializer();
         // `registry` is zero only before the first initialize, so a live portal can never be repointed.
         if (address(registry) != address(0)) revert AlreadyInitialized();
+    }
+
+    /// @dev Reverting undoes the bindings `initialize` wrote before it.
+    function _requireRollupVersion(uint256 _expected) internal view virtual {
+        if (rollupVersion != _expected) revert RollupVersionMismatch(_expected, rollupVersion);
     }
 
     /// @dev Runs before any hashing or pull, so a stranger's `...For` call learns nothing and moves nothing.

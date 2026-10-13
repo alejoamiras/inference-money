@@ -108,7 +108,7 @@ A switch-off demotes the account to a user; it stops its merchant-side proofs, n
 
 ## Rollup upgrade
 
-`TokenPortal.initialize` binds the registry's canonical rollup and its inbox and outbox for good. Once Aztec makes another rollup canonical, every deposit reverts (`RollupNotCanonical`), while `withdraw` keeps paying the exits the bound rollup has proven. Everything else on L2 (balances, unclaimed deposits, exits not yet proven) needs the bound rollup to keep producing and proving blocks, which it stops doing once its attesters move to the new one. The plan, which Galactica runs on mainnet:
+`TokenPortal.initialize` binds the registry's canonical rollup and its inbox and outbox for good, and reverts (`RollupVersionMismatch`) unless that rollup has the version the deploy read from its node, where it put the L2 side. Once Aztec makes another rollup canonical, every deposit reverts (`RollupNotCanonical`), while `withdraw` keeps paying the exits the bound rollup has proven. Everything else on L2 (balances, unclaimed deposits, exits not yet proven) needs the bound rollup to keep producing and proving blocks, which it stops doing once its attesters move to the new one. The plan, which Galactica runs on mainnet:
 
 1. Before the switch, open an exit window: users claim and exit while the bound rollup still proves.
 2. Redeploy the bridge on the new rollup.

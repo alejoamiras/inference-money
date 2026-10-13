@@ -122,7 +122,7 @@ and `inbox` are read later anyway); measured, and the snapshot regenerated if th
 2. ✓ **#57.** Contracts, bridge-core, fuzz handler, docs. **Gate**: `bun run test:evm`, `test:evm:formal` (halmos
    0.3.3 on PATH), `test:evm:gas`, `test:evm:slither`; `bun run --cwd packages/bridge-core test`;
    `bun run test:evm:fuzz -- 300`. Pass: exit 0; the badRefund canary still trips.
-3. **#59.** Portal, fixtures, deployer, docs. **Gate**: phase 2's EVM commands; `bun run typecheck`;
+3. ✓ **#59.** Portal, fixtures, deployer, docs. **Gate**: phase 2's EVM commands; `bun run typecheck`;
    `bun run --cwd packages/deployer test`. Pass: exit 0; the new forge test fails on the unfixed portal; the version
    canary trips on its mutant.
 4. **Salt.** demo, deployer, showcase, docs. **Gate**: `bun run lint`, `bun run typecheck`, `bun run test`,
