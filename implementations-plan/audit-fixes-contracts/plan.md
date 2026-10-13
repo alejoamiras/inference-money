@@ -185,7 +185,7 @@ See the decision ledger. The audits moved the design from the brief's predicates
    - `it("[A31] a wallet holding only the account's secret finds every note, with no registerSender")`: the second wallet reads 7, 5, 5 and 3 USDC after the claim, payment, send and exit, and the depositor as the funding address.
    - Then, between accounts: the merchant unshields 2 and shields 1 to itself; a fresh account pulls 1 of the merchant's public balance to itself by authwit; the merchant pulls 1 of U's private balance to itself by authwit.
    - `it("[A31] a shield to oneself announces nothing; a note pulled by authwit to its caller announces the caller's handshake")`: the merchant's tag still holds only the payment after its self-shield; the puller's tag holds exactly the public pull; the merchant's tag adds exactly the private pull; U's tag stays empty (the pulled account's change is a self-delivery).
-   - Every step waits for its tx's receipt to carry a block (`landed()`) before any log query.
+   - Every tag query follows its step's `landed()` (the receipt carries a block) and a balance read that sees the step's note: the second wallet's for U's own steps, the harness wallet's between accounts (the second wallet does not scan the merchant, under whom U's change from the pull is tagged).
 2. Add the A31 row to `docs/assurance-map.md`.
 3. In `docs/integration.md` "What each action makes public": what is still announced (the first note one account sends another, once per pair: a payment to a merchant, a merchant's payout, a pull by authwit); the nullifier-count difference in the "Hidden" bullet; the residuals (shared-key accounts, contract recipients callable by anyone; recovery of a note whose tx another account sent, by authwit or `sendMessagesAs`).
 
