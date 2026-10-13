@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { NO_WAIT } from "@aztec-labs/aztec.js/contracts"
+import { SponsoredFeePaymentMethod } from "@aztec-labs/aztec.js/fee"
 import { Fr } from "@aztec-labs/aztec.js/fields"
 import type { AztecNode } from "@aztec-labs/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec-labs/aztec.js/tx"
@@ -10,6 +11,7 @@ import type { ExecutionPayload, Tx } from "@aztec-labs/stdlib/tx"
 import { L2_PROPOSED } from "./claim"
 import { MERCHANT_MAX_DELAY, MERCHANT_MIN_DELAY, type MerchantList } from "./merchants"
 import {
+	type ListOptions,
 	memoryPaymentStore,
 	openedCommitment,
 	PaymentGate,
@@ -21,6 +23,7 @@ import {
 	RESERVATION_TTL_MS,
 	requestStamp,
 	siloedCompletionTag,
+	transferPrivate,
 } from "./payments"
 import { TOKEN_REFUSALS } from "./rules"
 import {
@@ -33,6 +36,7 @@ import {
 	stampDeadline,
 	stampUnmarkedUntil,
 } from "./stamp"
+import { fakeWallet } from "./test/fake-wallet"
 import { MANIFEST } from "./test/fixtures"
 
 const token = await AztecAddress.random()
@@ -161,7 +165,7 @@ async function tab(store: PaymentStore, w: World, hooks?: Hooks, now?: () => num
 	const gate = new PaymentGate(w.node, store, now)
 	const wallet = await gate.bindWallet(async (node) => fakePayer(node, w, hooks))
 	const pay = (c: Fr, from = alice, kind: PaymentIntent["kind"] = "private") =>
-		payRequest(gate, wallet, token, { from, commitment: c, amount: 5n, kind }, { list: LIST })
+		payRequest(gate, wallet, token, { from, commitment: c, amount: 5n, kind }, { list: LIST, fee: "account-public" })
 	return { gate, wallet, pay }
 }
 
@@ -195,7 +199,13 @@ describe("payRequest", () => {
 		const gate = new PaymentGate(w.node, memoryPaymentStore())
 		const wallet = await gate.bindWallet(async (node) => fakePayer(node, w))
 		const pay = () =>
-			payRequest(gate, wallet, token, { from: alice, commitment: c, amount: 5n, kind: "private" }, { list: LIST, wait: L2_PROPOSED })
+			payRequest(
+				gate,
+				wallet,
+				token,
+				{ from: alice, commitment: c, amount: 5n, kind: "private" },
+				{ list: LIST, fee: "account-public", wait: L2_PROPOSED },
+			)
 		await pay()
 		await expect(pay()).rejects.toEqual(refusal("in-flight"))
 		expect(w.chain.included).toHaveLength(1)
@@ -208,7 +218,13 @@ describe("payRequest", () => {
 		const gate = new PaymentGate(w.node, store)
 		const unbound = fakePayer(w.node, w)
 		await expect(
-			payRequest(gate, unbound, token, { from: alice, commitment: c, amount: 5n, kind: "private" }, { list: LIST }),
+			payRequest(
+				gate,
+				unbound,
+				token,
+				{ from: alice, commitment: c, amount: 5n, kind: "private" },
+				{ list: LIST, fee: "account-public" },
+			),
 		).rejects.toThrow(/bindWallet/)
 		expect(await store.get(paymentKey(token, c))).toBeUndefined()
 	})
@@ -404,7 +420,7 @@ describe("payRequest", () => {
 		const switchingOff = { ...settled, scheduledOff: true, changeAt: w.chain.ts + MERCHANT_MIN_DELAY }
 		const list = { ...LIST, entries: new Map([[merchant.toString(), switchingOff]]) }
 		const intent = { from: merchant, commitment: c, amount: 5n, kind: "private" as const }
-		await expect(payRequest(t.gate, t.wallet, token, intent, { list })).rejects.toEqual(refusal("stale"))
+		await expect(payRequest(t.gate, t.wallet, token, intent, { list, fee: "account-public" })).rejects.toEqual(refusal("stale"))
 		expect(w.chain.payloads).toEqual([])
 	})
 
@@ -536,5 +552,24 @@ describe("openedCommitment", () => {
 		expect(openedCommitment(effects, token).equals(c)).toBe(true)
 		expect(() => openedCommitment(effects.slice(0, 2), token)).toThrow(/opened 0/)
 		expect(() => openedCommitment([...effects, effects[2]!], token)).toThrow(/opened 2/)
+	})
+})
+
+describe("payment fees", () => {
+	it("pays through the method named, and leaves the payer to the account only on account-public", async () => {
+		const sponsor = { paymentMethod: new SponsoredFeePaymentMethod(AztecAddress.fromStringUnsafe(MANIFEST.l2.sponsoredFpc as string)) }
+		const transfer = { from: alice, to: merchant, amount: 5n }
+		const sponsored = fakeWallet()
+		await transferPrivate(sponsored.wallet, token, transfer, { list: LIST, fee: sponsor })
+		expect(sponsored.sent[0]).toMatchObject({
+			calls: ["sponsor_unconditionally", "transfer_private_to_private"],
+			feePayer: MANIFEST.l2.sponsoredFpc,
+		})
+		const own = fakeWallet()
+		await transferPrivate(own.wallet, token, transfer, { list: LIST, fee: "account-public" })
+		expect(own.sent[0]).toMatchObject({ calls: ["transfer_private_to_private"], feePayer: undefined })
+		// @ts-expect-error a payment call always names who pays its fee
+		const unnamed: ListOptions = { list: LIST }
+		expect(unnamed.fee).toBeUndefined()
 	})
 })
