@@ -1,7 +1,7 @@
 ---
 plan: audit-fixes-contracts
 tier: mid
-status: awaiting approval
+status: delivered 2026-10-13 (PR #47)
 base: ad77d10 (dev)
 trunk: dev
 driver: claude-code
@@ -12,6 +12,15 @@ codex_model: sol
 explainer: off
 budget: recon 1 agent; code-review off; Codex gpt-6.1-sol at high
 ---
+
+## Outcome
+
+- **Date**: 2026-10-13. **Status**: delivered in PR #47 to `dev`; merging is the owner's call, and `dev`→`main` waits for the testnet redeploy (the token's class id changes).
+- **Shipped**: `self_delivery()` for change, a send to oneself (`from == to`), a self-shield (`from == to == msg_sender`) and bridge mints; every other recipient note stays constrained. `sync_merchant_delay` open to anyone at or above the entry's delay in force, a decrease admin-only (`Only the merchant admin lowers a delay`, in `TOKEN_REFUSALS`). Four TXE re-sync tests, the `[A31]` discovery spec, docs (`integration.md`, A20, A31, GL-22, SP-23).
+- **Validation**: `test:noir` token 185, bridge 85, keystone 20; `compile.sh --check`; integration specs 49/49 and clock 6/6 before the rebase, the discovery spec 3/3 after it; e2e 8/8; `build:testnet`; the unit gate after the rebase onto `dev` `8701a42`. The Codex fix loop converged in two rounds (`lessons/phase-3.md`).
+- **Rejected or narrowed**: `.with_sender(recipient)` (rejected: the PXE refuses a tag sender outside the tx's scopes, which breaks minter-proven mints); TXE delivery tests (dropped: TXE does not record handshakes, so the integration spec carries them); the brief's caller-identity predicates (replaced by ownership proofs, D3–D5); a fully open re-sync (rejected: it could undo a guardian's cancel, D6); `docs/operations.md` (left to its own batch).
+- **Open items**: #46 (nullifier padding for self-deliveries).
+- **Seeds retired**: the `/goal` and `/loop` seeds at the end are a historical record; never run them.
 
 # Self-deliveries that announce nothing, and an open delay re-sync
 
@@ -105,7 +114,7 @@ See the decision ledger. The audits moved the design from the brief's predicates
   - Recovery follows the tag sender: a wallet finds a self-delivered note only from a tx one of its own accounts sent. A tx sent from another account A that spends U's notes (U in `additionalScopes`), or one under `sendMessagesAs`, tags U's change under (A, U); a wallet restored from U alone does not scan A.
   - The minter invariant holds once the tx is included: the proxy checks its caller through an enqueued public call (`token_minter_proxy/src/main.nr:84,91`), so a non-bridge caller can prove an unconstrained mint, but the tx then reverts.
 - **Pulls stay constrained.** A contract that pulls another account's tokens to itself by authwit gets its note by constrained delivery: the payer proves that tx and cannot withhold the note while the contract credits it.
-- **Tx shape.** A constrained delivery emits a sequence nullifier; a self-delivery does not. A send to oneself, a payment and a pull now differ in nullifier count. Counts reveal no address. Padding with a constrained, domain-separated nullifier would restore the old counts; it is an open item. A raw prover-chosen pad would be unsafe: it could equal a request's `paid(c)` nullifier and mark the request paid.
+- **Tx shape.** A constrained delivery emits a sequence nullifier; a self-delivery does not. A tx that moves only its sender's own notes now emits fewer nullifiers than one that delivers a note to another account. Counts reveal no address. Padding with a constrained, domain-separated nullifier would restore the old counts; it is an open item. A raw prover-chosen pad would be unsafe: it could equal a request's `paid(c)` nullifier and mark the request paid.
 - **Open re-sync.** A stranger's sync schedules only the admin's setting, only upward or to the current delay, never touches the switch value, and is a no-op when the setting is already scheduled. It cannot restart a decrease or undo a guardian's cancel. Events fire only on a real change.
 - **Least privilege / supply chain / crypto.** No new dependency, key or CI permission. Cryptography stays aztec-nr's (pinned v6.0.0-rc.1).
 - **Contract specifics.** No reentrancy surface. Front-running an admin's sync only does the same scheduling. No new nullifier kind.
