@@ -1,7 +1,7 @@
 ---
 plan: audit-fixes-sdk-fees
 tier: light
-status: approved 2026-10-13 (director, three conditions)
+status: delivered 2026-10-13 (PR #45)
 base: ad77d10
 trunk: dev
 driver: claude-code
@@ -13,12 +13,21 @@ eli5_mode: file
 budget: recon 1 agent; code-review off; Codex at high
 ---
 
+## Outcome
+
+- **Date**: 2026-10-13. **Status**: delivered in PR #45 to `dev`; merging is the owner's call.
+- **Shipped**: `ListOptions.fee` required and `"account-public"` the one public spelling, with a missing or unknown fee refused at runtime before any send; `verify` fails a sponsor-less manifest off a local network; `openRequest` refuses an opener that is not a merchant through `MERCHANT_MAX_DELAY` opening for another account; `SendJournal` and `exitToL1`'s hand-off rule (`ExitUnconfirmedError.sent`), wired into the integration harness, the deployer session and the showcase.
+- **Validation**: the unit gate green after the rebase onto `dev`; integration 46/47, with `[A28]` failing on #40 (the local L1 gas cap) in both runs; clock 6/6, the held exit refused after hand-off now expected as `ExitUnconfirmedError`; e2e `try-happy` passed; the Codex fix loop converged in three rounds (`lessons/phase-4.md`).
+- **Rejected or narrowed**: matching a private exit by its authwit nullifier (rejected in plan audit round 2: the content match suffices); enforcing list freshness in `openRequest` (narrowed to a documented bound, round 2); treating an `Invalid tx:` refusal as nothing burned (rejected by the director, Ask 1); changing the showcase's conflict retry (out of scope by the director's condition 2, filed as #43).
+- **Open items**: #43, #44.
+- **Seeds retired**: the `/goal` and `/loop` seeds at the end are a historical record; never run them.
+
 # bridge-core: who pays, who opens, and an exit's hash
 
 Four SDK fixes in one PR to `dev`:
 1. Every payment call names its fee payer. The public option is spelled `"account-public"` for payments, claims, exits and returns alike.
 2. `verify` fails a manifest without a fee sponsor off a local network.
-3. `openRequest` refuses a user that opens a request for another account.
+3. `openRequest` refuses anyone but a merchant opening a request for another account.
 4. `exitToL1` keeps the hash of every exit tx it handed to the node, so an exit whose send failed after that is never reported as safe to retry.
 
 ## Outcome & Quality Bar
