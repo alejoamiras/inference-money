@@ -178,7 +178,8 @@ architecture.md:9 — Codex cited :5); F3 resume, finality and rotation assertio
 before `compile.sh --check`, preload via `bun run --cwd contracts/aztec test`; F6 the full showcase chain and a
 `resolveTarget` assertion; Fact 7 (188 tests); the state-write wording; the gas trace (`outbox` is the new cold read).
 Resolved, not adopted as work: "verify the claim sender against the protocol" — the current code already claims from
-galactica for the sponsor (Fact 8). Rejected: none.
+galactica for the sponsor (Fact 8). Rejected: none. Resumed check of the revised plan: **approve** (all six
+conditions met, no new defect).
 
 ## Seeds (draft)
 
