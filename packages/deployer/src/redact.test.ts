@@ -1,4 +1,7 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Writable } from "node:stream"
 import { describeError, redact, runRedacted } from "./redact"
 import { secretNeedles } from "./secrets"
@@ -15,6 +18,20 @@ const sink = () => {
 		},
 	})
 	return { stream, text: () => text }
+}
+
+const roots: string[] = []
+afterEach(() => {
+	for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true })
+})
+
+/** A child that writes a store under `<root>/<its pid>`, as its wallet would, prints "stored", then runs `tail`. */
+function storeChild(tail: string): { root: string; script: string } {
+	const root = mkdtempSync(join(tmpdir(), "redact-test-"))
+	roots.push(root)
+	const dir = `require("node:path").join(${JSON.stringify(root)}, String(process.pid))`
+	const script = `const fs = require("node:fs"); const d = ${dir}; fs.mkdirSync(d); fs.writeFileSync(d + "/store.mdb", "sk"); console.log("stored"); ${tail}`
+	return { root, script }
 }
 
 describe("output redaction", () => {
@@ -58,6 +75,23 @@ describe("output redaction", () => {
 		await new Promise((r) => setTimeout(r, 200))
 		expect(() => process.kill(survivor, 0)).toThrow()
 	}, 15_000)
+
+	it("removes the wallet store of a child a signal killed mid-run", async () => {
+		const { root, script } = storeChild("setInterval(() => {}, 1000)")
+		const out = sink()
+		const run = runRedacted(["-e", script], [], out.stream, sink().stream, process.env, root)
+		while (!out.text().includes("stored")) await new Promise((r) => setTimeout(r, 20))
+		// runRedacted's own handler takes it, as it takes the operator's Ctrl-C, and reaps the child instead of exiting.
+		process.kill(process.pid, "SIGTERM")
+		expect(await run).toBe(1)
+		expect(readdirSync(root)).toEqual([])
+	})
+
+	it("removes the wallet store of a child that exits with an error", async () => {
+		const { root, script } = storeChild("process.exit(1)")
+		expect(await runRedacted(["-e", script], [], sink().stream, sink().stream, process.env, root)).toBe(1)
+		expect(readdirSync(root)).toEqual([])
+	})
 
 	it("describes an error through its causes", () => {
 		const e = new Error("outer", { cause: new TypeError("inner") })
