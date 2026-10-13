@@ -70,6 +70,8 @@ export async function deployBridge(c: DeployContext): Promise<BridgeManifest> {
 			outbox: getAddress(l1c.outboxAddress.toString()),
 			deployBlock: Number(router.block),
 			deployer: c.l1.account.address,
+			portalTx: portal.tx,
+			routerTx: router.tx,
 		},
 		l2: {
 			nodeVersion: info.nodeVersion,

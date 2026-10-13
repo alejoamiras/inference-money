@@ -41,10 +41,13 @@ export const bridgeManifestSchema = z
 			registry: evmAddress,
 			inbox: evmAddress,
 			outbox: evmAddress,
-			/** The first block a deposit log scan needs to read. */
+			/** The first block a deposit log scan needs to read: the router's creation block. */
 			deployBlock: uint,
 			/** The portal's initializer: its only power ended at `initialize`. */
 			deployer: evmAddress,
+			/** The creation txs `verify` checks the constructors against; absent from manifests that predate them. */
+			portalTx: field.optional(),
+			routerTx: field.optional(),
 		}),
 		l2: z.strictObject({
 			nodeVersion: z.string().min(1),

@@ -23,8 +23,13 @@ import {
 	accountFor,
 	bridgeOf,
 	buildBridgeContracts,
+	deployEvm,
+	deployRouter,
 	guardianDelay,
+	initializePortal,
 	LOCAL_ADMIN_SECRET,
+	l1Signer,
+	localL1Account,
 	openBridgeWallet,
 	proposeAdmin,
 	readBundle,
@@ -54,14 +59,22 @@ async function ok(...args: string[]): Promise<string> {
 }
 
 let evm: ReturnType<typeof buildBridgeContracts> | undefined
+const built = () => {
+	evm ??= buildBridgeContracts(harness().runId, false, process.env)
+	return evm
+}
 
 /** The names of the checks `verify` fails for `m` against the chain as it is now. */
 async function failing(m: BridgeManifest = harness().manifest): Promise<string[]> {
-	const { runId, l1, node } = harness()
-	evm ??= buildBridgeContracts(runId, false, process.env)
-	const checks = await verifyDeployment(m, evm, l1.publicClient, node)
+	const { l1, node } = harness()
+	const checks = await verifyDeployment(m, built(), l1.publicClient, node)
 	return checks.filter((c) => !c.ok).map((c) => c.name)
 }
+
+const CREATED = (name: string) => `${name} creation tx == fresh forge build, sent by the L1 deployer`
+
+/** MockUsdc is OpenZeppelin's ERC20: balances are the mapping at slot 0. */
+const usdcSlot = (holder: Hex) => keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [holder, 0n]))
 
 const bridgeAt = () => bridgeOf(harness().wallet, harness().manifest)
 const tokenAt = () => tokenOf(harness().wallet, harness().manifest)
@@ -109,6 +122,30 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 			expect(await failing()).toEqual([])
 			expect(await failing({ ...m, l1: { ...m.l1, deployer: `0x${"ab".repeat(20)}` } })).toEqual([
 				"portal.initializer == L1 deployer",
+				CREATED("portal"),
+				CREATED("router"),
+			])
+		})
+
+		it("a manifest naming another tx as the portal's creation", async () => {
+			const m = harness().manifest
+			expect(await failing({ ...m, l1: { ...m.l1, portalTx: m.l1.routerTx } })).toEqual([CREATED("portal")])
+		})
+
+		// Same key, same runtime and getters, wired and backed like the real one: only how it was created differs.
+		it("a portal created with init code other than the fresh build's", async () => {
+			const { manifest: m, l1 } = harness()
+			const signer = l1Signer(l1.rpcUrl, l1.chain.id, localL1Account())
+			const copy = await deployEvm(signer, "TokenPortal", { ...built().portal, bytecode: `${built().portal.bytecode}00` })
+			const router = await deployRouter(signer, built(), m.l1.permit2, copy.address, m.l1.usdc)
+			const binding = { registry: m.l1.registry, usdc: m.l1.usdc, l2Bridge: m.l2.bridge.address, router: router.address }
+			await initializePortal(signer, built(), copy.address, binding)
+			const reserve = (await l1.publicClient.getStorageAt({ address: m.l1.usdc, slot: usdcSlot(m.l1.portal) })) ?? pad("0x0")
+			await l1.test.setStorageAt({ address: m.l1.usdc, index: usdcSlot(copy.address), value: reserve })
+			const l1Fields = { portal: copy.address, portalTx: copy.tx, router: router.address, routerTx: router.tx }
+			expect(await failing({ ...m, l1: { ...m.l1, ...l1Fields, deployBlock: Number(router.block) } })).toEqual([
+				CREATED("portal"),
+				"bridge config.portal",
 			])
 		})
 
@@ -120,8 +157,7 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 
 		it("a portal holding less USDC than the L2 supply", async () => {
 			const { manifest: m, l1 } = harness()
-			// MockUsdc is OpenZeppelin's ERC20: balances are the mapping at slot 0.
-			const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [m.l1.portal, 0n]))
+			const slot = usdcSlot(m.l1.portal)
 			const held = (await l1.publicClient.getStorageAt({ address: m.l1.usdc, slot })) ?? pad("0x0")
 			await l1.test.setStorageAt({ address: m.l1.usdc, index: slot, value: pad("0x0") })
 			try {

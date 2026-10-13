@@ -18,7 +18,20 @@ import {
 	tokenMinterProxyArtifact,
 } from "@inference-money/bridge-core"
 import { aztecAddressOf, castMember, MERCHANTS } from "@inference-money/demo"
-import { type Abi, type Address, erc20Abi, type Hex, hashTypedData, type PublicClient, pad } from "viem"
+import {
+	type Abi,
+	type Address,
+	encodeDeployData,
+	erc20Abi,
+	type Hex,
+	hashTypedData,
+	type PublicClient,
+	pad,
+	type Transaction,
+	TransactionNotFoundError,
+	type TransactionReceipt,
+	TransactionReceiptNotFoundError,
+} from "viem"
 
 import { type BridgeEvmArtifacts, maskImmutables } from "./evm"
 import type { Check } from "./preflight"
@@ -50,6 +63,50 @@ async function codeMatches(
 	return check(`${name} runtime bytecode == fresh forge build (immutables masked)`, ok, `${(code.length - 2) / 2} bytes`)
 }
 
+/** What a creation record must show: a plain create by the deployer, of the fresh build's init code, at this address. */
+export interface CreationWant {
+	deployer: Address
+	input: Hex
+	address: Address
+	/** The block it must be mined in, where the manifest records one. */
+	block?: bigint
+}
+
+/** Runtime code cannot show what a constructor did elsewhere (an ERC20 approval, say); its creation tx can. */
+export function creationCheck(
+	label: string,
+	tx: Pick<Transaction, "hash" | "to" | "from" | "input">,
+	receipt: Pick<TransactionReceipt, "status" | "contractAddress" | "blockNumber">,
+	want: CreationWant,
+): Check {
+	const wrong = [
+		tx.to !== null && `a call to ${tx.to}, not a creation`,
+		!same(tx.from, want.deployer) && `sent by ${tx.from}`,
+		!same(tx.input, want.input) && "init code differs from the fresh build",
+		receipt.status !== "success" && "reverted",
+		!same(receipt.contractAddress, want.address) && `created ${receipt.contractAddress}`,
+		want.block !== undefined && receipt.blockNumber !== want.block && `mined in ${receipt.blockNumber}, not ${want.block}`,
+	].filter((w) => typeof w === "string")
+	return check(label, wrong.length === 0, wrong.join("; ") || tx.hash)
+}
+
+export async function createdAsBuilt(
+	l1: Pick<PublicClient, "getTransaction" | "getTransactionReceipt">,
+	name: string,
+	hash: Hex | undefined,
+	want: CreationWant,
+): Promise<Check> {
+	const label = `${name} creation tx == fresh forge build, sent by the L1 deployer`
+	if (!hash) return warn(label, "the manifest records none: the constructor that ran is unverified")
+	try {
+		const [tx, receipt] = await Promise.all([l1.getTransaction({ hash }), l1.getTransactionReceipt({ hash })])
+		return creationCheck(label, tx, receipt, want)
+	} catch (e) {
+		if (!(e instanceof TransactionNotFoundError || e instanceof TransactionReceiptNotFoundError)) throw e
+		return check(label, false, `this L1 endpoint has no tx ${hash}: use one that serves old txs (--l1-rpc)`)
+	}
+}
+
 async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeManifest): Promise<Check[]> {
 	const { portal, router } = evm
 	const read = (address: Address, abi: Abi, functionName: string) => l1.readContract({ address, abi, functionName }) as Promise<unknown>
@@ -76,6 +133,17 @@ async function verifyL1(l1: PublicClient, evm: BridgeEvmArtifacts, m: BridgeMani
 		pin("router.TOKEN", token, m.l1.usdc),
 		check("Permit2 has code", !!permit2Code && permit2Code.length > 2, `${((permit2Code?.length ?? 2) - 2) / 2} bytes`),
 		await fundingAuthorizationMatches(l1, m),
+		await createdAsBuilt(l1, "portal", m.l1.portalTx, {
+			deployer: m.l1.deployer,
+			input: encodeDeployData({ abi: portal.abi, bytecode: portal.bytecode }),
+			address: m.l1.portal,
+		}),
+		await createdAsBuilt(l1, "router", m.l1.routerTx, {
+			deployer: m.l1.deployer,
+			input: encodeDeployData({ abi: router.abi, bytecode: router.bytecode, args: [m.l1.permit2, m.l1.portal, m.l1.usdc] }),
+			address: m.l1.router,
+			block: BigInt(m.l1.deployBlock),
+		}),
 	]
 }
 

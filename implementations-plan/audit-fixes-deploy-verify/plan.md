@@ -1,7 +1,7 @@
 ---
 plan: audit-fixes-deploy-verify
 tier: mid
-status: awaiting approval
+status: approved 2026-10-13 (director, for the owner); implementing
 base: ad77d10 (origin/dev)
 trunk: dev
 driver: claude-code
@@ -183,9 +183,16 @@ Three changes in the deployer, bridge-core and the showcase. The owner decided e
 - Resolved: `deployTestnet` ownership (director: approved, option a).
 - Resolved: the delay policy (director's panel). Standalone verify is strict for entries. `--allow-pending` waives only entry delay changes whose target equals the manifest, and entry switch changes, each printed with its time. The guardian slot's pending delay is exempt and printed. Neither deploy pipeline passes a flag. `merchants delay` rewrites the pin once its set lands.
 
+## Approval
+
+**Approved 2026-10-13** by the director for the owner (plan `6750ac4`), with three conditions:
+1. Ledger row 8 stands: no real registry switch in integration.
+2. The locally signed create is proven on anvil only. The PR body says the Sepolia path first runs at the next testnet redeploy. `deployEvm`'s fee and gas fields stay exactly what `deployContract` would send: prepare, sign, send raw, nothing set by hand.
+3. Phase 4 runs integration and the full e2e one after the other, never in parallel. Under this host's load, a spec that fails only on a timeout gets one rerun, then a `MILESTONE` message naming it, not a loop.
+
 ## Implementation phases
 
-### Phase 1: the deploy binds its creation txs and verify checks them
+### Phase 1: the deploy binds its creation txs and verify checks them ✓
 
 1. Change `deployEvm`: derive, sign locally, compare the broadcast answer and the receipt, return `tx`. Add `l1.test.ts` with a fake RPC: the honest path returns the derived address and calls `sendRawTransaction` with the locally signed bytes. A broadcast answer naming another hash, a receipt with another hash and a receipt with another address each throw before the function returns.
 2. Add `portalTx` and `routerTx` to the manifest schema, with manifest tests: absent is accepted, malformed is refused.
@@ -357,7 +364,7 @@ Single arc: Phases 1–4 on branch `worktree-audit-fixes-deploy-verify`, one PR 
 
 ## Seeds
 
-Draft until approval. This worker runs under the director's protocol, not a `/loop`, so the `/goal` seed is the one to use.
+Final (post-approval). This worker runs under the director's protocol, not a `/loop`, so the `/goal` seed is the one to use.
 
 **Recommended: `/goal`**
 

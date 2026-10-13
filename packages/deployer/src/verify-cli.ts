@@ -45,7 +45,7 @@ export async function verifyManifest(ref: ManifestRef, flags: VerifyFlags): Prom
 		}
 		throw e
 	}
-	const warnings = checks.filter((c) => c.warn).length
-	flags.log(`verify: every check passed${warnings ? `, ${warnings} warning(s)` : ""}`)
+	const warnings = checks.filter((c) => c.warn).map((c) => c.name)
+	flags.log(`verify: every check passed${warnings.length ? `, with ${warnings.length} warning(s): ${warnings.join("; ")}` : ""}`)
 	return 0
 }

@@ -14,6 +14,12 @@ describe("manifest schema", () => {
 		expect(() => parseManifest({ ...MANIFEST, l1 })).toThrow(/l1\.router/)
 	})
 
+	it("takes the creation txs when present, and refuses a malformed one", () => {
+		const recorded = { ...MANIFEST, l1: { ...MANIFEST.l1, portalTx: f(0x71), routerTx: f(0x72) } }
+		expect(parseManifest(structuredClone(recorded))).toEqual(recorded)
+		expect(() => parseManifest({ ...MANIFEST, l1: { ...MANIFEST.l1, portalTx: "0x12" } })).toThrow(/l1\.portalTx/)
+	})
+
 	it("refuses another protocol version, and an interim admin without an admin", () => {
 		expect(() => parseManifest({ ...MANIFEST, protocolVersion: 1 })).toThrow(/protocolVersion/)
 		const { admin: _, ...l2 } = MANIFEST.l2
