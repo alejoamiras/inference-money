@@ -31,10 +31,7 @@ const stagesFor = (d: Pick<Draft, "action">): readonly Stage[] => (d.action === 
 
 const coinLabel = (d: ValidDraft): string => (d.amount === undefined ? d.action : usdc2(d.amount))
 
-/**
- * What the chains showed: the feed's live rows, the balances, the payouts still to come and the deposits kept for a
- * second look, checked between runs.
- */
+/** What the chains showed, refreshed after each run, with outstanding payouts polled between runs. */
 function useChains(engine: LiveEngine | undefined, running: RefObject<boolean>) {
 	const [rows, setRows] = useState<FeedRow[]>([])
 	const [balances, setBalances] = useState<Partial<Record<Holder, bigint>>>()

@@ -250,7 +250,7 @@ async function claimFinality(t: ClaimTicket, node: NullifierNode, m: BridgeManif
 /**
  * Mints the deposit on L2 from `from`: a private claim only from its recipient, a public one from anyone (the mint
  * goes to the merchant the message names), paid per {@link FeeChoice}. Both outcomes hold only at `opts.wait`'s tip, a
- * checkpoint by default: keep the secret until {@link waitClaimFinalized} says "finalized". "consumed-unknown" needs
+ * checkpoint by default: keep the secret, also past {@link waitClaimFinalized}'s "finalized". "consumed-unknown" needs
  * this ticket's nullifier on L2 at that tip: a nullifier error can come from any part of the tx. A first private claim
  * needs `allowBind` ({@link ClaimConsent}).
  */
