@@ -7,3 +7,9 @@
 
 ## Codex fix loop (gpt-6.1-sol, high)
 - Round 1 (session `01a13621`): approve with fixes, four Low, all adopted. A proven exit pays whether or not the bound rollup keeps proving; only creating and proving new exits needs it (architecture, integration, the verify warning). An unbound account can still bind through a private deposit made before the switch (architecture, follow-ups). Only a fresh acceptance run cannot pass after a switch; a journaled one continues (operations). Two narrating doc comments deleted.
+- Round 2 (same session, over `f95f66e` and the net diff): approve, no new material findings. Loop converged.
+
+## Gate (passed)
+- `bun run lint`, `bun run typecheck`, `bun run --cwd apps/showcase test:components`: exit 0. `bun run test`: every workspace exits 0 but deployer, whose `cli.test.ts` "never loads a .env from the working directory" times out at its 5 s limit under host load (5.7 s, rerun 5.6 s, load average 200–370); it passes alone with `--timeout 60000`, and nothing in this diff enters its import graph.
+- `RUN_ID=dv-rollup bun run net:up` → `deploy:local` → `verify:local`: exit 0; `ok network identity (node + the portal's rollup)` and no deposits warning in both verifies. `net:down`: exit 0, no registry row left.
+- `bun run test:e2e -- withdraw-only.spec.ts`: 1 passed (1.0 min); the run reaped its network.
