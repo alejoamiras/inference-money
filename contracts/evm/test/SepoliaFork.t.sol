@@ -14,16 +14,8 @@ import {TokenPortal} from "../src/TokenPortal.sol";
 import {ISignatureTransfer} from "../src/interfaces/ISignatureTransfer.sol";
 import {ITokenPortal} from "../src/interfaces/ITokenPortal.sol";
 import {RouterWithoutSignerCheck} from "./mocks/Mutants.sol";
-import {Permit2Digest} from "./mocks/Permit2Digest.sol";
+import {IPermit2Errors, Permit2Digest} from "./mocks/Permit2Digest.sol";
 import {Honest1271Delegate, Inert, PermissiveWallet, RevertingDelegate, WrongMagicDelegate} from "./mocks/Wallets.sol";
-
-/// Permit2's own errors (Uniswap/permit2 SignatureTransfer + SignatureVerification).
-interface IPermit2Errors {
-    error InvalidContractSignature();
-    error InvalidNonce();
-    error InvalidSigner();
-    error SignatureExpired(uint256 signatureDeadline);
-}
 
 /// Forks Sepolia and drives the REAL Permit2, Circle USDC, Aztec testnet registry and Inbox through a freshly
 /// deployed portal + router. Skips only when SEPOLIA_RPC_URL is unset; `bun run test:evm:fork` refuses to run

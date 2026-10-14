@@ -40,7 +40,7 @@ Issue #89 lists seven classes of L1 regression that ship with CI green today. Th
 
 - **CI privilege**: only the fork workflow's `report` job writes (issues); it checks out nothing and interpolates only fixed refs and the run URL through `env`, never `${{ }}` inside a script. The Medusa job and the fork legs are `contents: read` and hold no secret.
 - **Untrusted RPC**: PublicNode can fail the suite (one deduplicated issue thread) or feed it false state (a false pass); the nightly is advisory and adds coverage, it gates nothing.
-- **Supply chain**: the etched runtime is the deployer's vendored, keccak-pinned code, never fetched; no new dependency; actions stay SHA-pinned.
+- **Supply chain**: the deployed runtime is the deployer's vendored, keccak-pinned code, never fetched; no new dependency; actions stay SHA-pinned.
 - **Committed text** describes changes and properties, never an attack narrative.
 
 ## Assumptions
@@ -70,7 +70,7 @@ Tool path for local gates (the host's default `forge` is 1.4.1; the pin is 1.7.1
 ### Phase 1: real Permit2, nonces, SP-03, SP-23, GL-22
 
 1. Add `permit2-runtime.ts`, its test and the generated `Permit2Runtime.sol`; move `IPermit2Errors`.
-2. Add `etch` to `IHevm`. Etch Permit2 in `Base.setup` and check its keccak.
+2. Add `etch` to `IHevm`. Etch Permit2 in `Base.setup` and check its keccak. *As built:* deployed with `CREATE` behind a 12-byte init stub instead, with no `etch`: Medusa 1.5.1 hit a stack underflow inside the etched runtime that forge ran cleanly (`lessons/phase-1.md`).
 3. Add the spec digest, `_freshNonce` and `_nonceUsed`. Sign the spec digest.
 4. Rewrite SP-03 and GL-22. Add SP-23 and `permit2DepositRouter_digest`. Update `FoundryTester` calls.
 

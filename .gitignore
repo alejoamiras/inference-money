@@ -28,6 +28,7 @@ contracts/evm/fizz_data/last-campaign.log
 contracts/evm/out-fuzz/
 contracts/evm/cache-fuzz/
 contracts/evm/crytic-export/
+contracts/evm/.medusa-artifact-hash
 contracts/evm/x-ray/
 .solidity-auditor/
 .aztec-auditor/

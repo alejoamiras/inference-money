@@ -47,7 +47,10 @@ into `out-fuzz/`, away from the default profile's `out/`.
 
 - Real `TokenPortal` and `Permit2DepositRouter`, deployed and initialized in the project's own order
   (`test/mocks/RouterFixture.sol`); Aztec's real `Outbox` behind the project's `FakeRollup` (`mocks/RealOutboxStack.sol`);
-  the project's `CapturingInbox`, `MockPermit2` (no signature check) and `FakeRegistry`.
+  the project's `CapturingInbox` and `FakeRegistry`.
+- The real Permit2: its runtime deployed byte for byte at a fresh address (`test/mocks/Permit2Runtime.sol`, rendered
+  from the deployer's keccak-pinned copy by `scripts/permit2-runtime.ts`); Medusa mis-executes etched code. Router legs sign the digest the harness derives from
+  Permit2's spec (`Base._specPermitDigest`), each with a nonce its signer has not spent (`_freshNonce`).
 - `mocks/ModalUsdc.sol`: the project's `MockUsdc` plus switchable fee-on-transfer, sender surcharge, blacklist and one
   re-entrant transfer hook.
 - `handlers/AztecL2Handler.sol`: the Aztec side reduced to accounting (claim, return, exit, epoch proofs into the real
