@@ -65,7 +65,7 @@ Presto's SDK 6.0.0-rc.1 pins `@aztec-labs/stdlib` 6.0.0-rc.1, the toolchain is 6
 
 ## Phases
 
-### Phase 1: pin Presto 6.0.0-rc.3 (after it is published)
+### Phase 1: pin Presto 6.0.0-rc.3 (after it is published) ✓
 Warning: never commit `minimumReleaseAgeExcludes`. Run nothing from the new lock before step 5 passes.
 1. Poll `npm view @alejoamiras/presto@6.0.0-rc.3 version` every 10 minutes, at most 4 hours, then report BLOCKED.
 2. Run the dependency check (Security). Stop on any difference.
@@ -76,12 +76,12 @@ Warning: never commit `minimumReleaseAgeExcludes`. Run nothing from the new lock
 
 **Validation gate**: steps 2, 4 and 5 match; the frozen install exits 0 and `git diff --exit-code bunfig.toml` exits 0; `grep -c '@aztec-foundation/bb.js@6.0.0-rc.1\|@aztec-labs/stdlib@6.0.0-rc.1' bun.lock` prints 0; `bun run typecheck && bun run test && bun run --cwd apps/showcase test:components` exit 0. Layers: supply chain, typecheck, unit, component.
 
-### Phase 2: drop the prover cast
+### Phase 2: drop the prover cast ✓
 1. Pass `proofs?.prover` to `proverOrOptions` directly. Delete the reason comment and the unused `PrivateKernelProver` import.
 
 **Validation gate**: `bun run typecheck && bun run lint`, exit 0. Layers: typecheck, lint.
 
-### Phase 3: remove the CI self-skip (prepared in the working tree before the package exists, committed after phase 2)
+### Phase 3: remove the CI self-skip (prepared in the working tree before the package exists, committed after phase 2) ✓
 1. Delete `apps/showcase/e2e/run/presto-compat.ts`.
 2. In `_e2e.yml`'s `presto` job, delete the `compat` step and the `steps.compat.outputs.run` conditions. Keep `if: failure()` on the upload.
 3. Remove `export` from `prestoPins`.
@@ -89,7 +89,7 @@ Warning: never commit `minimumReleaseAgeExcludes`. Run nothing from the new lock
 
 **Validation gate**: `bun run lint && bun run typecheck && bun run test && bun run --cwd apps/showcase test:components && bun run lint:actions`, each exit 0; `git grep -n 'PRESTO_SKIP\|presto-compat' -- ':!implementations-plan'` exits 1. Layers: lint, typecheck, unit, component.
 
-### Phase 4: real-proof gates (`AZTEC_NODE_HOME=~/.cache/inference-money/aztec-node-presto-restore`; each script names its own run)
+### Phase 4: real-proof gates (`AZTEC_NODE_HOME=~/.cache/inference-money/aztec-node-presto-restore`; each script names its own run) ✓
 Warning: a passing run deletes `presto-server.log`. Copy it while the run is live.
 1. `bun run --cwd apps/showcase build:testnet`.
 2. Start a watcher in the scratchpad. It reads the run id from this run's own output, then `tail -F`s that run's `presto-server.log` into the scratchpad.
