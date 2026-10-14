@@ -62,6 +62,17 @@ describe("keyed-run secrets", () => {
 		expect(containsSecret(`tx 0x${"ab".repeat(31)}ff`, needles)).toBe(false)
 	})
 
+	it("drops public endpoint parts from the needles and keeps every other URL credential", () => {
+		const url = "https://rpc.example/ethereum-sepolia/Ak_x9Yz7Qw3Er5Ty?key=abcdefghijklmnop"
+		const needles = secretNeedles({ SEPOLIA_RPC_URL: url })
+		expect(needles).not.toContain("ethereum-sepolia")
+		expect(needles).toContain("/ethereum-sepolia/ak_x9yz7qw3er5ty?key=abcdefghijklmnop")
+		expect(needles).toContain("ak_x9yz7qw3er5ty")
+		expect(needles).toContain("abcdefghijklmnop")
+		expect(containsSecret(`defaultL1RpcUrl: "${TESTNET.defaultL1RpcUrl}"`, needles)).toBe(false)
+		expect(containsSecret(`rpc ${url}\n`, needles)).toBe(true)
+	})
+
 	it("scrubs credential-bearing variables from a child env, keeping the rest", () => {
 		const env = scrubbedEnv({ PATH: "/bin", HOME: "/h", TESTNET_L1_PRIVATE_KEY: KEY, SEPOLIA_RPC_URL: "https://k", MNEMONIC: "m" })
 		expect(env).toEqual({ PATH: "/bin", HOME: "/h" })
