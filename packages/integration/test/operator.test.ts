@@ -102,10 +102,14 @@ describe.skipIf(!INTEGRATION)("operator CLI", () => {
 	})
 	afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
-	it("[A28] demo setup publishes the users' tag; the acceptance run settles twice and records a tour verify accepts", async () => {
+	it("[A28] demo setup publishes the users' tag and the merchants' salt; the acceptance run settles twice and records a tour verify accepts", async () => {
 		const { manifest: m, manifestPath } = harness()
 		await ok("demo", "setup", manifestPath)
-		expect(readDemoFile({ path: manifestPath, m })?.usersTag).toMatch(/^[0-9a-f]{32}$/)
+		expect(readDemoFile({ path: manifestPath, m })).toMatchObject({
+			version: 2,
+			usersTag: expect.stringMatching(/^[0-9a-f]{32}$/),
+			merchantsSalt: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+		})
 
 		const tour = join(dir, "tour.json")
 		await ok("smoke", manifestPath, "--record", tour)

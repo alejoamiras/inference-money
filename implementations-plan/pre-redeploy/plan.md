@@ -125,7 +125,7 @@ and `inbox` are read later anyway); measured, and the snapshot regenerated if th
 3. ✓ **#59.** Portal, fixtures, deployer, docs. **Gate**: phase 2's EVM commands; `bun run typecheck`;
    `bun run --cwd packages/deployer test`. Pass: exit 0; the new forge test fails on the unfixed portal; the version
    canary trips on its mutant.
-4. **Salt.** demo, deployer, showcase, docs. **Gate**: `bun run lint`, `bun run typecheck`, `bun run test`,
+4. ✓ **Salt.** demo, deployer, showcase, docs. **Gate**: `bun run lint`, `bun run typecheck`, `bun run test`,
    `bun run --cwd apps/showcase test:components`, `BRIDGE_TARGET=testnet bun run --cwd apps/showcase build:testnet`.
    Pass: exit 0; tests prove the salt moves a merchant's address and the tag does not; a resumed setup keeps its
    salt; nothing publishes while a claim is unfinalized; `--rotate` keeps the salt and the merchant addresses;
