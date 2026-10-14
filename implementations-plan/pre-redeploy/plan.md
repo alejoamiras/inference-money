@@ -12,6 +12,25 @@ trunk: dev
 budget: "recon: 1 Sonnet sweep; code-review: off; lanes: none"
 ---
 
+## Outcome
+
+- **Date**: 2026-10-14. **Status**: delivered in PR #94 to `dev`; merging is the owner's call.
+- **Shipped**: #52, a send to oneself proves no merchant side (TXE test, Token class id); #57, refund and exit sinks
+  refused (the portal: USDC, the Inbox, the Outbox and the registry; bridge-core: Permit2, the Inbox, the Outbox, the
+  registry and USDC; the refund proof over seven addresses); #59, `initialize` checks the expected rollup version
+  (halmos proof, mutant, canary, forge test, the deployer passing the node's version); the demo merchants' salt (demo
+  file v2, `--rotate` keeps the salt and refuses v1, the sponsor claimer, verify over both casts).
+- **Validation**: every phase gate green locally (integration 53 + 6 clock, e2e 9/9, test:evm 132, halmos exactly 16,
+  Medusa 73, TXE 190/85/20); negative controls for #52, #59 and the registry rule; the Codex fix loop converged in two
+  rounds (`lessons/phase-5.md`).
+- **Plan-text corrections**: on a non-demo network, verify refuses the unsalted cast and a published salted one,
+  rather than passing when no demo is published (stricter; the director accepted it). The registry joined both
+  refusal lists (Codex round 1, medium).
+- **Known limits**: the portal's bound rollup cannot release USDC either, but the manifest does not record it, so
+  neither list refuses it. A raw bridge call can still name every exit sink but zero and the portal.
+- **Open items**: #95, drop version-1 demo-file support once the testnet demo is republished as version 2.
+- **Seeds retired**: the `/goal` seed at the end is a historical record; never run it.
+
 # Pre-redeploy: #52, #57, #59 and the demo merchants' salt
 
 Four changes that the next testnet redeploy freezes into the token, the portal and the demo cast. One PR to `dev`,
@@ -132,7 +151,7 @@ and `inbox` are read later anyway); measured, and the snapshot regenerated if th
    salt; nothing publishes while a claim is unfinalized; `--rotate` keeps the salt and the merchant addresses;
    `--rotate` of a v1 demo is refused; `publish` writes both; a v1 and a v2 file each derive their pinned addresses;
    `resolveTarget` carries a v2 file's salt into the build target.
-5. **Heavy gates.** `bun run lint:actions`; `RUN_ID=pre-redeploy AZTEC_NODE_HOME=<rc.3 node> bun run
+5. ✓ **Heavy gates.** `bun run lint:actions`; `RUN_ID=pre-redeploy AZTEC_NODE_HOME=<rc.3 node> bun run
    test:integration`; `RUN_ID=pre-redeploy … bun run test:e2e`. Pass: exit 0 (a timeout-only failure gets one rerun,
    then a MILESTONE naming it; the director decides whether it blocks).
 
