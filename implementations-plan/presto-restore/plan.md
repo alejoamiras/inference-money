@@ -10,6 +10,16 @@ trunk: dev
 issue: 92
 ---
 
+## Outcome
+
+- **Date / status**: 2026-10-14, completed (delivered in PR #98 to `dev`; the merge is the owner's call).
+- **Shipped** (#98): `@alejoamiras/presto` pinned to 6.0.0-rc.3 (one new lock entry, signature and SLSA provenance verified, integrity bound to `bun.lock`); the prover cast gone; CI's Presto job runs on every `e2e` run with no version-pair exception, `presto-compat.ts` deleted (D1); `prestoServer` stays 1.1.3 (D2), proven by bb `v6.0.0-rc.6` proving natively in `test:e2e:presto`.
+- **Gates**: lint, typecheck, unit, components, `lint:actions`, `build:testnet` 7/7, `test:e2e:presto` 4/4, `test:proving` (live proving), `test:e2e` 9/9. Two local Presto runs failed on the host's spent anonymous GitHub quota first, not the code (lessons/phase-4.md).
+- **Dispositions**: the build guard is unchanged beyond losing an export, as the brief required. Testnet in-browser proving waits for the keyed redeploy (manifest on node rc.1), which is outside this plan. The temporary age-gate exclude named 15 already-locked Aztec packages besides Presto (lessons/phase-1.md), never committed. `lessons.md` ends at 8.5 KiB: it was 8.1 KiB before, and pruning other plans' entries needs evidence this run did not gather.
+- **Known limits**: #96.
+- **Open items**: #97.
+- **Seeds**: none were issued; nothing here is a live instruction.
+
 # Restore real proofs through Presto 6.0.0-rc.3
 
 Presto's SDK 6.0.0-rc.1 pins `@aztec-labs/stdlib` 6.0.0-rc.1, the toolchain is 6.0.0-rc.3, so every real-proof path is parked behind three temporary measures (#92). Presto 6.0.0-rc.3 pins rc.3. This plan moves the pin and removes the measures.
@@ -139,4 +149,4 @@ While implementing: comments say only what the code cannot; log attempts in `les
 
 ## Seeds
 
-Retired with the close-out. Executed by this session under the director's protocol; no `/goal` or `/loop` seed is issued (ELI5 skipped).
+Retired. This session executed the plan under the director's protocol; no `/goal` or `/loop` seed was issued (ELI5 skipped).
