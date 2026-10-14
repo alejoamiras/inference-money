@@ -26,5 +26,21 @@
 4. comment, adopted: `runSetup`'s doc keeps only its constraints.
 - Gates after the fixes: test:evm 132/132; halmos exactly 16 (`check_depositPublic_rejectsBadRefund` 14 paths); gas
   within tolerance; Slither 0; Medusa 300 s, 73 passed; bridge-core exit tests 29/29; Biome clean.
+- Negative control for the registry rule: with it deleted, halmos does not report a counterexample but errors (a Z3
+  sort mismatch on its sha256 model once the deposit path reaches the message hash), which the gate still counts as a
+  failure. Concretely, `proveRejectsBadRefund(funded, 6, …)` fails on `BAD_REFUND_DEPOSITED` without the rule and
+  holds with it. Run halmos only after `forge build --ast --force`, as the gate does: a cached build skips the AST.
+
+## Codex round 2 (resumed)
+
+- "MATERIAL: no", with no findings. The loop converged in two rounds.
+
+## Final gates (on 6632d72)
+
+- `test:integration` 53/53 specs (1 989 s) and 6/6 clock specs (284 s), exit 0, network down.
+- `test:e2e` 9/9 (5.6 min), exit 0, network reaped. `agent.sh` names its own run (`showcase-e2e-<pid>-<time>`) over
+  an inherited `RUN_ID`. Its "Existing nullifier" page error is the resilience spec's deliberate conflict.
+- `compile.sh --check` exit 0; origin/dev unmoved since 0d4460e; lint, typecheck (8/8), `bun run test` (cold cache:
+  bridge-core 202, demo 15, deployer 90, showcase 99 passed and 5 skipped) and `build:testnet` (7/7) exit 0.
 
 LESSONS_FILE=implementations-plan/pre-redeploy/lessons/phase-5.md
