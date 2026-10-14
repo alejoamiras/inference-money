@@ -202,20 +202,21 @@ abstract contract TokenPortalHandler is Properties {
         _noopEnd(consumed);
     }
 
-    /// A public deposit naming zero, the portal, the router, USDC, the Inbox or the Outbox as its refund address: no
-    /// return could ever leave them.
+    /// A public deposit naming zero, the portal, the router, USDC, the Inbox, the Outbox or the registry as its refund
+    /// address: no return could ever leave them.
     function tokenPortal_depositToAztecPublic_badRefund(uint8 _which, uint256 _amount, uint256 _accountSeed) public {
         _amount = clampBetween(_amount, 1, MAX_REALISTIC_AMOUNT);
         _ensureFunds(actor, _amount);
-        address[6] memory sinks = [
+        address[7] memory sinks = [
             address(0),
             address(portal),
             address(router),
             address(usdc),
             address(portal.inbox()),
-            address(portal.outbox())
+            address(portal.outbox()),
+            address(portal.registry())
         ];
-        address refund = sinks[_which % 6];
+        address refund = sinks[_which % 7];
         bytes32 to = toL2Account(_accountSeed);
         uint256 consumed = _noopBegin();
         vm.prank(actor);

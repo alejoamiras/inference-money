@@ -45,7 +45,6 @@ contract CapturingOutbox {
     }
 }
 
-// The version every `FakeRollup` starts at.
 uint256 constant FAKE_ROLLUP_VERSION = 4242;
 
 contract FakeRollup {

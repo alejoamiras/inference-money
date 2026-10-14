@@ -133,11 +133,10 @@ async function seedAll(plan: SetupPlan, seeds: readonly Seed[], store: PlanStore
 }
 
 /**
- * Binds each merchant to its treasury, lists the merchants once those bindings are final and read back (a listed
- * merchant's first private claim would bind it to whoever deposited), then binds both users and seeds the float. It
- * publishes the users' tag and the merchants' salt only once every claim is finalized, since anyone holding them could
- * take a pruned binding, and then archives the plan, secrets included: "finalized" is the node's word, and a claim it
- * wrongly vouched for needs its secret again. A new plan draws its salt unless `kept` hands over a published one.
+ * Lists the merchants only once their treasury bindings are final and read back (a listed merchant's first private
+ * claim would bind it to whoever deposited), and publishes the tag and salt only once every claim is final, since
+ * anyone holding them could take a pruned binding. The archived plan keeps its secrets: "finalized" is the node's
+ * word, and a claim it wrongly vouched for needs its secret again. `kept` hands a new plan a published salt.
  */
 export async function runSetup(store: PlanStore, ops: SetupOps, publish: (keys: SetupKeys) => void, kept?: string): Promise<void> {
 	const plan = store.read() ?? { tag: newUsersTag(), merchantsSalt: kept ?? newMerchantsSalt(), drafts: {}, tickets: {} }

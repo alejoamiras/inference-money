@@ -336,19 +336,22 @@ contract FormalPortalTest is ProofCanary {
     }
 
     /// `p` is bound to registry A (so to `inboxA`) and may pull any amount from this contract. `which` picks zero, the
-    /// portal, the router, the token, the Inbox or the Outbox; every guard before the refund address is satisfied.
+    /// portal, the router, the token, the Inbox, the Outbox or the registry; every guard before the refund address is
+    /// satisfied.
     function proveRejectsBadRefund(TokenPortal p, uint8 which, bytes32 to, uint256 amount, bytes32 secretHash) public {
         vm.assume(amount != 0 && amount <= type(uint128).max);
         vm.assume(uint256(to) <= Constants.MAX_FIELD_VALUE);
         // A conditional, not an array: halmos cannot index memory by a symbolic offset.
-        uint8 pick = which % 6;
+        uint8 pick = which % 7;
         address depositor = pick == 0
             ? address(0)
             : pick == 1
                 ? address(p)
                 : pick == 2
                     ? p.router()
-                    : pick == 3 ? address(p.underlying()) : pick == 4 ? address(p.inbox()) : address(p.outbox());
+                    : pick == 3
+                        ? address(p.underlying())
+                        : pick == 4 ? address(p.inbox()) : pick == 5 ? address(p.outbox()) : address(p.registry());
         uint256 sent = inboxA.sent();
         uint256 reserve = p.underlying().balanceOf(address(p));
         try p.depositToAztecPublic(depositor, to, amount, secretHash) {
@@ -395,6 +398,7 @@ contract FormalPortalTest is ProofCanary {
         vm.assume(
             depositor != address(p.underlying()) && depositor != address(p.inbox()) && depositor != address(p.outbox())
         );
+        vm.assume(depositor != address(p.registry()));
     }
 
     function _assertBoundToA(TokenPortal p) internal view {
@@ -548,7 +552,7 @@ contract FormalPortalTest is ProofCanary {
         assertEq(inboxA.sent(), sent + 1);
     }
 
-    /// Any refund address but the six refused ones lands, the depositor's own or a third party's.
+    /// Any refund address but the seven refused ones lands, the depositor's own or a third party's.
     function test_canary_anyOtherRefundAddressDeposits() public {
         uint256 sent = inboxA.sent();
         funded.depositToAztecPublic(makeAddr("refund"), bytes32(uint256(1)), 1e6, bytes32(0));

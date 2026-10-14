@@ -13,7 +13,7 @@ Every Aztec account is either a **merchant** (on the token's list, curated by th
 | Send privately | Only to a merchant, or into its own private balance. | To anyone. |
 | Open a payment request | Only with a merchant as the recipient. | With any recipient. |
 | Pay a request | Only one opened for a merchant (stamped), until its stamp expires a day later. | Any request. |
-| Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address but zero and the portal; bridge-core alone also refuses the router, Permit2, the Inbox, the Outbox and the USDC contract, which cannot release it. |
+| Withdraw to Ethereum | Only privately, and only to its funding address. | Publicly or privately, to any address but zero and the portal; bridge-core alone also refuses the router, Permit2, the Inbox, the Outbox, the registry and the USDC contract, which cannot release it. |
 
 A stamp carries the hour its opening anchored in and expires 24 h to 25 h after that anchor (`stampDeadline`), and a switch-off does not end it sooner: a switched-off merchant is a user from then on, but a request stamped for it before the switch-off landed stays payable by the payer it names until the stamp expires, so under 25 h after the switch-off. A merchant payer can pay any request without a stamp, so no stamp's expiry binds it. A switch-off demotes, it does not freeze: the ex-merchant keeps its balance under a user's rules, so it can no longer pay users back privately: it refunds them from its public balance, or on Ethereum from its funding address.
 
@@ -97,7 +97,7 @@ It cannot check a secret hash. A private deposit is claimed or returned only wit
 - **The depositor derives its own claim salt** (`prepareDeposit`), and the secret hash it signs commits to it. Whoever holds the salt claims, binding that account to the depositor. Claim the message your own deposit sent, by its leaf index and depositor, never by secret hash: anyone can copy a published secret hash into a deposit of their own, and claiming that copy binds the account to them.
 - **A return pays the depositor**, never the submitter.
 
-`depositToAztecPublic(depositor, to, amount, secretHash)` names `depositor` as the refund address a return pays; it is unsigned, and zero, the portal, the router, the USDC contract, the Inbox and the Outbox are refused (`InvalidDepositor`). So on this path `DepositToAztecPublic.depositor` is whatever the caller named, not proof of who paid.
+`depositToAztecPublic(depositor, to, amount, secretHash)` names `depositor` as the refund address a return pays; it is unsigned, and zero, the portal, the router, the USDC contract, the Inbox, the Outbox and the registry are refused (`InvalidDepositor`). So on this path `DepositToAztecPublic.depositor` is whatever the caller named, not proof of who paid.
 
 **Smart-contract wallets** have no SDK private deposit: the router recovers its caller's key, which a contract does not have. They use the signed path above, with an owner EOA as the depositor. That one owner then holds the deposit outside the wallet's threshold: it derives the claim salt, a return pays it, and the funded account's exits go only to it. Their public deposits through the router are unchanged.
 

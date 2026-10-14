@@ -66,6 +66,7 @@ describe("exitToL1", () => {
 		["Permit2", M.l1.permit2],
 		["Inbox", M.l1.inbox],
 		["Outbox", M.l1.outbox],
+		["registry", M.l1.registry],
 		["USDC", M.l1.usdc],
 	])("refuses a %s recipient before any wallet call", async (_, recipientL1) => {
 		const w = boundWallet()

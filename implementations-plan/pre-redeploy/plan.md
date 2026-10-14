@@ -81,9 +81,10 @@ halmos proof whose canary trips on its one-rule mutant. (3) Committed text state
 
 ## Security & Adversarial Considerations
 
-- **Threat model.** #52: a wallet or capsule that makes a merge read a merchant entry, capping its expiry so the
-  merge stands out. #57: a mistaken recipient burns funds no one can release. #59: a governance switch between the L2
-  deploy and `initialize` binds a rollup with no bridge. Salt: anyone binds a demo merchant before `demo setup`.
+- **Threat model**, as the property each change secures. #52: a merge of one's own notes reads no merchant entry, so
+  its expiry is a plain tx's. #57: no path this repository controls pays USDC to an address that cannot release it.
+  #59: a portal binds only the rollup version its L2 side was deployed on. Salt: no demo merchant key is derivable
+  before `demo setup` publishes it.
 - **Least privilege.** No new keyed variable; `demo fund` keeps its single L1 key. The claimer key is public by design
   and controls nothing but its own empty account.
 - **Crypto.** `randomSecret` (platform CSPRNG; the CLI refuses `SEED`); sha256 derivation as today.
