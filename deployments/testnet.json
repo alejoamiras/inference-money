@@ -19,7 +19,7 @@
 	"l2": {
 		"nodeVersion": "6.0.0-rc.3",
 		"rollupVersion": 3409706519,
-		"nodeUrl": "https://lb.drpc.live/aztec-testnet/Ak_eT5HA2kbyqamqGTF702daoH37vEsR8YYxjmVXwXgc",
+		"nodeUrl": "https://lb.drpc.live/aztec-testnet/Ak0qdxVWbkqUmLb-dN5IplyTiGDyyJwR8Yfybj3Fs6u0",
 		"sponsoredFpc": "0x2adfb70e860909f0db8268b3fec80bce52a94559963444f5c0341816b8412130",
 		"admin": "0x17ff77f710f7f3a1795919a89a6eae38a6e18ac9da211a3c68e09804efd99490",
 		"merchantDelay": 86400,

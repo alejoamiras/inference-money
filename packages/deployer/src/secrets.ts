@@ -59,7 +59,7 @@ export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proces
 	return Object.fromEntries(Object.entries(env).filter(([k]) => !SECRET_NAME.test(k)))
 }
 
-/** A URL part inside a committed public endpoint (`ethereum-sepolia`) is public text: it matches the source pinning it. */
+/** A URL part inside a committed public endpoint (`aztec-testnet`) is public text: it matches the source pinning it. */
 const inPublicEndpoint = (part: string): boolean =>
 	[TESTNET.defaultL1RpcUrl, TESTNET.nodeUrl].some((e) => e.toLowerCase().includes(part.toLowerCase()))
 
