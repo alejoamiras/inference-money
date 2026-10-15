@@ -86,7 +86,7 @@ Verdict: **conditional approve** (qualify #60's blocklist effects; explain the p
 
 ## Phases
 
-### Phase 1: docs, comments and the two text changes
+### Phase 1: docs, comments and the two text changes ✓
 
 Steps: make each change in the table; add the two tests; delete the Permit2 line in `follow-ups.md`.
 
