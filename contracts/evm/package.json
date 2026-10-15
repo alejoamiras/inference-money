@@ -11,11 +11,11 @@
 		"test:evm:formal": "bun scripts/check-remappings.ts && bash scripts/halmos-gate.sh --self-test && bash scripts/halmos-gate.sh",
 		"test:evm:fuzz": "bun scripts/check-remappings.ts && bash scripts/fuzz.sh",
 		"test:evm:gas": "bun scripts/check-remappings.ts && forge snapshot --match-test test_gas_ --no-match-contract Fork --check --tolerance 2",
-		"test:evm:slither": "bun scripts/check-remappings.ts && bash scripts/slither.sh",
+		"test:evm:slither": "bun scripts/check-remappings.ts && bash scripts/slither.sh --self-test && bash scripts/slither.sh",
 		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"devDependencies": {
-		"@aztec-foundation/l1-artifacts": "6.0.0-rc.1",
+		"@aztec-foundation/l1-artifacts": "6.0.0-rc.6",
 		"@openzeppelin/contracts": "5.6.1",
 		"@types/bun": "1.4.2",
 		"forge-std": "github:foundry-rs/forge-std#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b",

@@ -3,11 +3,11 @@ import { join } from "node:path"
 import { AztecAddress } from "@aztec-labs/aztec.js/addresses"
 import { FeeJuicePaymentMethodWithClaim } from "@aztec-labs/aztec.js/fee"
 import type { createAztecNodeClient } from "@aztec-labs/aztec.js/node"
-import { type BridgeManifest, L2_DONE, sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
+import { type BridgeManifest, readBack, sponsoredFpcArtifact, sponsorInstance } from "@inference-money/bridge-core"
 import { REPO_ROOT } from "@inference-money/local-network"
 import type { Hex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import { proposeAdmin, tokenOf } from "./admin"
+import { proposeAdmin } from "./admin"
 import { deployBridge } from "./deploy"
 import type { L2Fees } from "./deploy-l2"
 import { type BridgeEvmArtifacts, buildBridgeContracts, forgeRunDir } from "./evm"
@@ -66,9 +66,9 @@ function selfFundedFees(
 		accountDeploy: async (account: AztecAddress) => {
 			const claim = await bridgeFeeJuice({
 				node,
+				pins: TESTNET,
 				l1RpcUrl: l1.l1RpcUrl,
 				l1PrivateKey: l1.l1PrivateKey,
-				l1ChainId: TESTNET.l1ChainId,
 				to: account,
 				log,
 			})
@@ -106,16 +106,15 @@ export async function deployTestnet(opts: DeployOptions): Promise<BridgeManifest
 			registry: TESTNET.registry,
 			deployerSecret,
 			fees: selfFundedFees(keys, node, log),
+			merchantDelay: opts.merchantDelay,
 			sponsoredFpc: TESTNET.sponsoredFpc,
 			log,
 		})
 		const deployer = await accountFor(wallet, deployerSecret)
-		if (opts.merchantDelay !== undefined) {
-			await tokenOf(wallet, m).methods.set_merchant_delay!(opts.merchantDelay).send({ from: deployer, wait: L2_DONE })
-		}
 		await proposeAdmin(wallet, m, deployer, admin)
 		log(`handover proposed to ${admin}: accept it with \`bridge admin accept\``)
-		assertAllPass(await verifyDeployment(m, evm, keys.l1.publicClient, node, { pendingTo: admin.toString() }), log)
+		const verify = () => verifyDeployment(m, evm, keys.l1.publicClient, node, { pendingTo: admin.toString() })
+		assertAllPass(await readBack(verify, (checks) => checks.every((c) => c.ok)), log)
 		return m
 	})
 	writeManifest(TESTNET_MANIFEST, manifest)
