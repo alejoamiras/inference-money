@@ -27,3 +27,10 @@ Round 1, session `01a13fbc`. Verdict: request changes, with two coverage gaps an
 | 2 | `adv_depositLiveness` required the 1 % surcharge margin in Normal mode too, skipping funded deposits at the supply cap | real (a coverage loss, no false pass) | the margin applies only under `SenderSurcharge` |
 | 3 | A `#` inside a file name cut the source at the first `#`, so `EIP712.sol#Shadow.sol` matched the allow-list | real, but needs a crafted file name under `node_modules` | the line range is parsed as the last `#N[-M]`; an IR failure line that does not parse fails the gate; two fixtures |
 | 4 | A handler comment restated its call; the fork comment claimed more than eight blocks guarantee | fair | comment deleted; the fork comment now says "well past that lag" |
+
+Round 2 (resumed): round-1 #2 and #4 confirmed closed, #3 closed for its reproducer; two escapes remained, both in `slither.sh`:
+
+| # | Finding | Verdict | Fix |
+|---|---|---|---|
+| 1 | The declaration grep missed `/* c */ contract X`, two declarations on a line and a name on the next line | real (layouts forge fmt does not produce today, but a grep is the wrong source) | names come from the build's own `build-info` (`output.contracts` keyed by `src/` sources) through `jq`; the self-test checks the discovery against a fixture build-info |
+| 2 | Lines were counted, not markers, so a line holding the marker twice parsed as its last occurrence | real only with a crafted `src/` file name, but a one-word fix | markers counted with `grep -o … \| wc -l`; fixture added |

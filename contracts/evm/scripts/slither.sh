@@ -17,7 +17,7 @@ ALLOWED_IR_FAILURES=(
 
 # ir_gate <slither status> <stderr file> <src contract names...>: names every IR failure in a src/ contract (an
 # inherited body is logged under the inheriting contract and the dependency's file) or a src/ source that is not
-# allow-listed, and fails on any, on an IR failure line it cannot parse, on an allow-listed one Slither did not
+# allow-listed, and fails on any, on an IR failure marker it cannot parse, on an allow-listed one Slither did not
 # report, or on a non-zero Slither exit.
 ir_gate() {
 	local status=$1 log=$2 bad=0 fn src entry seen="" stripped parsed
@@ -28,7 +28,7 @@ ir_gate() {
 	parsed=$(sed -nE \
 		-e 's/.*Impossible to generate IR for top level function ([^ ]+) \((.+)#[0-9]+(-[0-9]+)?\).*/\1 \2/p' \
 		-e 's/.*Impossible to generate IR for ([^ ]+) \((.+)#[0-9]+(-[0-9]+)?\).*/\1 \2/p' <<<"$stripped")
-	if (($(grep -c 'Impossible to generate IR for' <<<"$stripped" || true) != $(grep -c . <<<"$parsed" || true))); then
+	if (($(grep -o 'Impossible to generate IR for' <<<"$stripped" | wc -l || true) != $(grep -c . <<<"$parsed" || true))); then
 		echo "slither: an IR failure line did not parse" >&2
 		bad=1
 	fi
@@ -53,8 +53,21 @@ ir_gate() {
 	((status == 0 && bad == 0))
 }
 
+# src_contracts <build-info dir>: the name of every contract, library and interface the compiler saw in a src/ source.
+src_contracts() {
+	jq -r '.output.contracts | to_entries[] | select(.key | startswith("src/")) | .value | keys[]' "$1"/*.json
+}
+
 self_test() {
-	local log=$1 n=0
+	local dir=$1 log=$1/stderr n=0 names
+	mkdir -p "$dir/build-info"
+	printf '%s' '{"output":{"contracts":{"src/TokenPortal.sol":{"TokenPortal":{}},"src/a/Router.sol":{"Permit2DepositRouter":{},"Wrapper":{}},"node_modules/x/src/Dep.sol":{"Dep":{}}}}}' \
+		>"$dir/build-info/fixture.json"
+	mapfile -t names < <(src_contracts "$dir/build-info")
+	[[ ${names[*]} == "TokenPortal Permit2DepositRouter Wrapper" ]] || {
+		echo "slither self-test: src_contracts found: ${names[*]}" >&2
+		exit 1
+	}
 	local ir="ERROR:ContractSolcParsing:Impossible to generate IR for"
 	local name="$ir TokenPortal._EIP712Name ($OZ_EIP712#1-2):" version="$ir TokenPortal._EIP712Version ($OZ_EIP712#3-4):"
 	local allowed="$ir TokenPortal.constructor ($OZ_EIP712#68-77):\n 'NoneType' object has no attribute 'parameters'\n$name\n$version"
@@ -62,7 +75,7 @@ self_test() {
 	check() {
 		printf '%b\n' "$3" >"$log"
 		local got=fail
-		if ir_gate "$2" "$log" TokenPortal Permit2DepositRouter Wrapper 2>/dev/null; then got=pass; fi
+		if ir_gate "$2" "$log" "${names[@]}" 2>/dev/null; then got=pass; fi
 		[[ $got == "$1" ]] || {
 			echo "slither self-test: expected $1, got $got for: $3" >&2
 			exit 1
@@ -82,6 +95,7 @@ self_test() {
 	check fail 0 "$allowed\n$ir Wrapper._EIP712Name ($OZ_EIP712#1-2):"
 	check fail 0 "$allowed\n$ir TokenPortal._EIP712Name ($OZ_EIP712#Shadow.sol#3-4):"
 	check fail 0 "$allowed\n$ir TokenPortal.deposit:"
+	check fail 0 "$allowed\n$ir Wrapper.f (src/$ir TokenPortal._EIP712Name ($OZ_EIP712#1-2):"
 	echo "slither self-test: $n cases"
 }
 
@@ -89,7 +103,7 @@ mkdir -p "$HOME/.cache/inference-money/forge"
 dir=$(mktemp -d "$HOME/.cache/inference-money/forge/slither-XXXXXX")
 trap 'rm -rf "$dir"' EXIT
 if [[ ${1:-} == --self-test ]]; then
-	self_test "$dir/stderr"
+	self_test "$dir"
 	exit 0
 fi
 forge build src --out "$dir/out" --cache-path "$dir/cache" --force --build-info >/dev/null
@@ -97,10 +111,9 @@ status=0
 slither . --config-file slither.config.json --foundry-ignore-compile --foundry-out-directory "$dir/out" --fail-pedantic \
 	2>"$dir/stderr" || status=$?
 cat "$dir/stderr" >&2
-mapfile -t contracts < <(grep -rhoE --include='*.sol' \
-	'^[[:space:]]*(abstract[[:space:]]+)?(contract|library|interface)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' src | awk '{print $NF}')
+mapfile -t contracts < <(src_contracts "$dir/out/build-info")
 ((${#contracts[@]})) || {
-	echo "slither: found no contract declared under src/" >&2
+	echo "slither: the build declares no src/ contract" >&2
 	exit 1
 }
 ir_gate "$status" "$dir/stderr" "${contracts[@]}"
