@@ -11,6 +11,14 @@ trunk: dev
 issues: [43, 61, 68, 72, 73, 84, 87, 88, 95]
 ---
 
+## Outcome
+
+- **2026-10-15, completed** (delivered in PR #104, awaiting merge): all nine issues, #43 with its comment's two variants and a payment that sent anything left unconfirmed on a conflict.
+- **Dispositions**: `SentTx.refused` kept, its doc corrected (two integration clock specs assert it); `random.ts` reads `globalThis.process` (the showcase's polyfill made a bare `process` an unresolvable import); `readDemoFile` checks the bridge before the version, so an earlier deployment's v1 file reads as none; #87's rule covers production sources only; `castClaim` has no unit test of its own (no fake wallet; the helper's table and the e2e cover it); the unsalted `verifyDemoCast` branch is gone (no test needed it); `resilience.spec.ts`'s duplicate-nullifier race now expects the unconfirmed verdict; the committed recording keeps its old `pay` label until the next `smoke --record`.
+- **Known limits**: none filed. `finalFate` trusting its node's finality is documented on the function.
+- **Open items**: none.
+- **Seeds**: none were issued (the director drove this run); nothing below is a live instruction.
+
 # demo-fixes: the nine correctness fixes kept for the demo
 
 ## Outcome & Quality Bar
@@ -95,3 +103,5 @@ Single arc, one branch (`worktree-demo-fixes`), one PR to `dev` with the `e2e` l
 Codex (gpt-6.1-sol, high), session `01a14087`: **conditional approve** — close the journalled multi-step `pay` retry, correct the finality and reader-trust claims, add the retry-bound and persistence-wiring tests.
 - Adopted: the `pay` conflict after a send is unconfirmed (demonstrated: two openings could land); the trust claims rewritten (the `finalFate` known limit, `SimulationError`'s sources, `reconcileDeposit`'s current view, #73's and #95's limits); the Facts corrected; the test tables extended (#72 no-rule and second-failure, #61 every verdict, `keep` order and failure, #88 StrictMode with `openOnce`, `egress.allowed`); #87's narrower scope stated.
 - Rejected: a `castClaim` unit test (no fake wallet exists; the helper's table and the e2e cover it); keeping the unsalted `verifyDemoCast` branch (the brief removes it unless a test needs it; none does).
+
+Fix loop (session `01a140a4`): round 1, 0 material (two test gaps fixed); round 2, verified; round 3 (the `resilience.spec.ts` update after the full e2e run), verified.
