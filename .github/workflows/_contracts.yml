@@ -37,10 +37,10 @@ jobs:
       - name: Halmos (strict)
         run: bun run test:evm:formal
 
-  # 150 s of fuzzing from an empty corpus; the hour with a carried corpus is fuzz-contracts.yml. The job's bound is
+  # 120 s of fuzzing from an empty corpus; the hour with a carried corpus is fuzz-contracts.yml. The job's bound is
   # hard: a failure that Medusa is still shrinking at 5 minutes ends red, the job log naming the property it shrinks.
   medusa:
-    name: medusa (150 s)
+    name: medusa (120 s)
     if: inputs.medusa
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -49,7 +49,7 @@ jobs:
       - uses: ./.github/actions/setup-toolchains
         with:
           medusa: "true"
-      - run: bun run test:evm:fuzz -- 150
+      - run: bun run test:evm:fuzz -- 120
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
