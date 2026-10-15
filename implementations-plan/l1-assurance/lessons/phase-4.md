@@ -34,3 +34,5 @@ Round 2 (resumed): round-1 #2 and #4 confirmed closed, #3 closed for its reprodu
 |---|---|---|---|
 | 1 | The declaration grep missed `/* c */ contract X`, two declarations on a line and a name on the next line | real (layouts forge fmt does not produce today, but a grep is the wrong source) | names come from the build's own `build-info` (`output.contracts` keyed by `src/` sources) through `jq`; the self-test checks the discovery against a fixture build-info |
 | 2 | Lines were counted, not markers, so a line holding the marker twice parsed as its last occurrence | real only with a crafted `src/` file name, but a one-word fix | markers counted with `grep -o … \| wc -l`; fixture added |
+
+Round 3 (resumed, final): approve, no new findings; both round-2 fixes verified closed, the doubled-marker fixture shown non-vacuous (passes on the old count, fails on the new).

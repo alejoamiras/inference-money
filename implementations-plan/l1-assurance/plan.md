@@ -12,6 +12,17 @@ base: 8606c81
 issue: 89
 ---
 
+## Outcome
+
+- **Date / status**: 2026-10-15, completed: delivered in PR #100 (closes #89), awaiting the owner's merge.
+- **Shipped**: all seven items. The fizz harness deposits through the real Permit2 runtime, deployed with `CREATE`, and checks it against an independent digest (SP-23). Also in: the seeded refund address, both fee modes admitted, the three probes, the `fizz_data/` notes replaced by a nightly coverage artifact, the Slither IR gate, the 150 s Medusa PR job and the nightly fork suite.
+- **Changed from the plan**: Permit2 is deployed with `CREATE`, not etched, because Medusa 1.5.1 mis-executes etched code. The fork suite rolls back 8 blocks, the director's call after PublicNode's backend lag failed it at the head. The Slither gate also fails on a stale allow-list entry and on an unparsed marker, and takes the `src/` contract names from the build (Codex rounds 1–2).
+- **Rejected**: file names crafted to fool the Slither parser (under `src/` or `node_modules/`). They would need an adversarial file name in reviewed code or a lockfile-pinned package; Codex round 3 found no open instance.
+- **Known limits**: #99 (Slither builds no SSA for `TokenPortal`).
+- **Open items**: none.
+- **Measured on #100**: the Medusa job and the contracts workflow's wall clock, in the PR body.
+- **Seeds**: none were issued; nothing below is a live instruction.
+
 # Close the L1 assurance gaps in the fuzz suite, Slither and CI
 
 Issue #89 lists seven classes of L1 regression that ship with CI green today. This plan makes each one fail a check on the contracts PR path, or at least nightly. `contracts/evm/src/`, halmos and `toolchain.json` do not change. Recon: `recon.md`.
