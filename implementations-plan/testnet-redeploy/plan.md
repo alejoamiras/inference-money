@@ -10,6 +10,26 @@ trunk: dev
 issue: 49
 ---
 
+## Outcome
+
+- **Date**: 2026-10-15. **Status**: delivered in PR #101 to `dev` (`Closes #49`); merging is the director's call.
+- **Shipped**: the bridge on the rc.3 rollup (`deployments/testnet.json`, `sourceCommit` 8b6cbde, both admin roles
+  accepted by the rc.3 admin), the demo cast (`testnet-demo.json` v2, both merchants listed and bound) and the
+  recorded tour (`testnet-tour.json`); the rc.3 admin address in `testnet-deploy.env.example`. Every tx hash and
+  address is in `lessons/`.
+- **Validation**: `verify --tour` 59 `ok` (both creation txs, delay 86 400, both merchants, the tour); smoke passed;
+  `probe:testnet` 19/19; lint, typecheck, test, `lint:actions` 0; `build:testnet` 7/7; `test:testnet` on the branch
+  preview 2/2. Codex: plan audit (8 adopted), read-back fix 2 rounds, needles fix 2 rounds.
+- **Plan-text corrections**: "No code changes" did not hold. Three director-approved changes landed: `readBack` for
+  L1 reads after a receipt, the scan-needles exemption for committed public endpoint text, and the owner's endpoint
+  rotation (both testnet URLs on one dRPC key, origin-filtered and IP-allowlisted; the owner committed it, 1883c2a).
+- **Dispositions**: the #76 amendment (dRPC's keyless node) was reverted before KEYED 1, since dRPC's free plan refuses
+  batches over 3 calls (`lessons/phase-2.md`). Withdrawing the pending KEYED 3 request was attempted, blocked by auto
+  mode, and cancelled; the owner approved it as filed (`lessons/phase-4.md`).
+- **Known limits**: none.
+- **Open items**: #76. After the merge, `test:testnet` against the `dev` preview, quoted on #101.
+- **Seeds retired**: this plan had none.
+
 # Redeploy the testnet bridge on Aztec 6.0.0-rc.3
 
 `dev` runs Aztec 6.0.0-rc.3 (#91), but `deployments/testnet.json` names a bridge on the retired rc.1 rollup. This batch deploys the bridge on the rc.3 rollup with the runbook (`docs/operations.md`, "Testnet, in order"), hands the admin roles to the owner's admin, sets up the demo cast, records the tour, and ships the three files in one PR to `dev` (`Closes #49`). No code changes.
