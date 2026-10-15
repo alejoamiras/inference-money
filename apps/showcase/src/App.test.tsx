@@ -16,27 +16,44 @@ const goTo = (hash: string) =>
 		window.dispatchEvent(new HashChangeEvent("hashchange"))
 	})
 
+/** A page loaded at `hash` whose wallet start is counted and stays pending until `opened`. */
+async function load(hash: string) {
+	const counts = { starts: 0 }
+	let opened = (_: DemoWallet) => {}
+	const opening = new Promise<DemoWallet>((resolve) => {
+		opened = resolve
+	})
+	const openDemo = openOnce(() => {
+		counts.starts++
+		return opening
+	})
+	window.location.hash = hash
+	const view = render(
+		<StrictMode>
+			<App openDemo={openDemo} />
+		</StrictMode>,
+	)
+	await act(async () => {})
+	return { counts, opened, view }
+}
+
 describe("App", () => {
-	it("opens the wallet only for a view that needs it, and once per page across hash changes", async () => {
-		let starts = 0
-		let opened = (_: DemoWallet) => {}
-		const opening = new Promise<DemoWallet>((resolve) => {
-			opened = resolve
-		})
-		const openDemo = openOnce(() => {
-			starts++
-			return opening
-		})
-		window.location.hash = "#recorded"
-		render(
-			<StrictMode>
-				<App openDemo={openDemo} />
-			</StrictMode>,
-		)
-		await act(async () => {})
-		expect(starts, "the recording opens nothing").toBe(0)
+	it("opens the wallet on a page loaded at Try it yourself or #proving, never at the recording", async () => {
+		for (const [hash, starts] of [
+			["", 1],
+			["#proving", 1],
+			["#recorded", 0],
+		] as const) {
+			const page = await load(hash)
+			expect(page.counts.starts, hash || "the bare URL").toBe(starts)
+			page.view.unmount()
+		}
+	})
+
+	it("opens it once per page across hash changes, from the recording on", async () => {
+		const page = await load("#recorded")
 		for (const hash of ["#live", "#recorded", "#proving", "#live"]) await goTo(hash)
-		await act(async () => opened({} as DemoWallet))
-		expect(starts).toBe(1)
+		await act(async () => page.opened({} as DemoWallet))
+		expect(page.counts.starts).toBe(1)
 	})
 })

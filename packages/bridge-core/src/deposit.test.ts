@@ -496,8 +496,11 @@ describe("reconcileDeposit", () => {
 describe("withRebuiltTicket", () => {
 	const MISSING = [new MessageNotConsumableError(), new Error("Tried to consume nonexistent L1-to-L2 message")]
 
-	/** A ticket from the first receipt (leaf 42), then L1 as `reorg` leaves it; `use` fails on the leaves in `fails`. */
-	async function claimAfter(reorg: (s: ReturnType<typeof chain>["s"], d: DepositDraft) => void, fails: bigint[], first: Error) {
+	/**
+	 * A ticket from the first receipt (leaf 42, key 0x4e7), then L1 as `reorg` leaves it; `use` fails on that ticket,
+	 * and on any other only when `again`.
+	 */
+	async function claimAfter(reorg: (s: ReturnType<typeof chain>["s"], d: DepositDraft) => void, first: Error, again = false) {
 		const { s, l1 } = chain()
 		const d = await draft()
 		await submitDeposit(d, l1, M, LIVE)
@@ -506,8 +509,8 @@ describe("withRebuiltTicket", () => {
 		const events: string[] = []
 		const keep = (r: ClaimTicket) => events.push(`keep ${r.leafIndex} ${r.messageHash}`)
 		const use = async (r: ClaimTicket) => {
-			events.push(`use ${r.leafIndex}`)
-			if (fails.includes(r.leafIndex)) throw first
+			events.push(`use ${r.leafIndex} ${r.messageHash}`)
+			if (r === t || again) throw first
 			return "claimed"
 		}
 		const outcome = await withRebuiltTicket(t, l1, M, keep, use).catch((e: unknown) => e)
@@ -515,15 +518,20 @@ describe("withRebuiltTicket", () => {
 	}
 	const remined = (o: { index?: bigint; key?: Hex }) => (s: ReturnType<typeof chain>["s"], d: DepositDraft) =>
 		s.receipts.set(TX, { status: "success", logs: [depositLog(d, o)] })
+	const KEY = pad("0x4e7")
 
 	it("on a missing message, claims once more with the ticket L1 shows now, stored first, when its leaf or key moved", async () => {
+		const moved = pad("0x4e8")
 		for (const first of MISSING) {
-			expect(await claimAfter(remined({ index: 43n }), [42n], first)).toEqual({
-				outcome: "claimed",
-				events: ["use 42", `keep 43 ${pad("0x4e7")}`, "use 43"],
-			})
-			const key = pad("0x4e8")
-			expect((await claimAfter(remined({ key }), [42n], first)).events).toEqual(["use 42", `keep 42 ${key}`, "use 42"])
+			for (const [o, leaf, key] of [
+				[{ index: 43n }, 43n, KEY],
+				[{ key: moved }, 42n, moved],
+			] as const) {
+				expect(await claimAfter(remined(o), first)).toEqual({
+					outcome: "claimed",
+					events: [`use 42 ${KEY}`, `keep ${leaf} ${key}`, `use ${leaf} ${key}`],
+				})
+			}
 		}
 	})
 
@@ -541,9 +549,9 @@ describe("withRebuiltTicket", () => {
 			],
 		] as const
 		for (const [why, reorg] of stays)
-			expect(await claimAfter(reorg, [42n], first as Error), why).toEqual({ outcome: first, events: ["use 42"] })
-		const again = await claimAfter(remined({ index: 43n }), [42n, 43n], first as Error)
-		expect(again.events).toEqual(["use 42", `keep 43 ${pad("0x4e7")}`, "use 43"])
+			expect(await claimAfter(reorg, first as Error), why).toEqual({ outcome: first, events: [`use 42 ${KEY}`] })
+		const again = await claimAfter(remined({ index: 43n }), first as Error, true)
+		expect(again.events).toEqual([`use 42 ${KEY}`, `keep 43 ${KEY}`, `use 43 ${KEY}`])
 		expect(again.outcome).toBe(first)
 	})
 
