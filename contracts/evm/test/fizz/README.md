@@ -25,8 +25,8 @@ Base (is StringUtils, Clamp, Deployer, Math)
 
 ## Related Paths Outside This Directory
 
-- `../../fizz_data/`: extracted ABI inventory, entry-point selection, protocol-understanding notes and the report
-  (committed); corpora, logs and coverage outputs (ignored)
+- `../../fizz_data/`: Medusa's corpora, logs and coverage outputs (ignored). The nightly (`fuzz-contracts.yml`) uploads
+  each run's coverage report as `medusa-coverage-<ref>`; the suite's original generation notes are in git history
 - `../../medusa.json`: Medusa config
 - `../../PROPERTIES.md`: every property, with its guarantee and source
 

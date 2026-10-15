@@ -18,8 +18,8 @@ contracts/evm/out/
 contracts/evm/cache/
 contracts/evm/broadcast/
 
-# Medusa campaign output (corpus, logs, crytic-compile export) and auditor scratch; the fizz suite, its config and
-# its written report are committed.
+# Medusa campaign output (corpus, logs, crytic-compile export, artifact hash) and auditor scratch; the fizz suite and
+# its config are committed.
 contracts/evm/fizz_data/corpus_medusa/
 contracts/evm/fizz_data/logs_medusa/
 contracts/evm/fizz_data/crytic-export/
