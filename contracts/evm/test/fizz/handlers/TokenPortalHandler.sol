@@ -16,7 +16,6 @@ abstract contract TokenPortalHandler is Properties {
         tokenPortal_depositToAztecPrivate(_amount, _toField(_secretHash));
     }
 
-    /// The refund address is any actor, the payer included.
     function tokenPortal_depositToAztecPublic_clamped(
         uint256 _accountSeed,
         uint256 _amount,

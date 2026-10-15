@@ -129,7 +129,8 @@ abstract contract RoundTripHandler is AztecL2Handler, Permit2DepositRouterHandle
         if (!liveMode || !_canonical()) return;
         uint256 amount = dust ? clampBetween(amt, 1, 99) : clampBetween(amt, 1, MAX_REALISTIC_AMOUNT);
         // At the mock supply cap `_ensureFunds` can succeed on `amount` alone; the surcharge needs 1 % on top.
-        if (!_ensureFunds(actor, amount) || usdc.balanceOf(actor) < amount + (amount * usdc.BPS()) / 10_000) return;
+        uint256 surcharge = usdc.mode() == ModalUsdc.Mode.SenderSurcharge ? (amount * usdc.BPS()) / 10_000 : 0;
+        if (!_ensureFunds(actor, amount) || usdc.balanceOf(actor) < amount + surcharge) return;
         if (!_attemptDeposit(actor, amount, viaRouter, which % 2 == 1, toL2Account(amt), bytes32(0))) {
             ghosts.depositLivenessBroken++;
         }

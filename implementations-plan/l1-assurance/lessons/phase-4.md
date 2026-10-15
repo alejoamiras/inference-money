@@ -16,3 +16,14 @@ Lesson: a load-balanced public RPC is a set of nodes with their own heads, so a 
 - `bun run lint:actions` passes on `contracts.yml`, `_contracts.yml`, `fuzz-contracts.yml` and the new `fork-contracts.yml`.
 - `fork-contracts.yml` cannot be dispatched before it is on the default branch (F8); the default branch is `dev`, so its first run is the nightly after this PR merges, or a dispatch then.
 - The PR's `medusa` job measures I3 on its first run (this PR touches `contracts/evm/**`).
+
+## Codex fix loop (`gpt-6.1-sol`, `high`)
+
+Round 1, session `01a13fbc`. Verdict: request changes, with two coverage gaps and one parser escape, and no production regression. Each claim was checked against the code:
+
+| # | Finding | Verdict | Fix |
+|---|---|---|---|
+| 1 | A `src/` contract other than the two named ones that inherits an unliftable OZ body is logged with the dependency's file, so the gate ignored it | real (any new `src/` contract inheriting `EIP712`) | `slither.sh` derives the contract names from the declarations under `src/`; new fixture `Wrapper._EIP712Name` from `EIP712.sol` |
+| 2 | `adv_depositLiveness` required the 1 % surcharge margin in Normal mode too, skipping funded deposits at the supply cap | real (a coverage loss, no false pass) | the margin applies only under `SenderSurcharge` |
+| 3 | A `#` inside a file name cut the source at the first `#`, so `EIP712.sol#Shadow.sol` matched the allow-list | real, but needs a crafted file name under `node_modules` | the line range is parsed as the last `#N[-M]`; an IR failure line that does not parse fails the gate; two fixtures |
+| 4 | A handler comment restated its call; the fork comment claimed more than eight blocks guarantee | fair | comment deleted; the fork comment now says "well past that lag" |

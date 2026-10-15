@@ -15,21 +15,33 @@ ALLOWED_IR_FAILURES=(
 	"TokenPortal._EIP712Version $OZ_EIP712"
 )
 
-# ir_gate <slither status> <stderr file>: names every IR failure in a project contract or a src/ source that is not
-# allow-listed, and fails on any, on an allow-listed one Slither did not report, or on a non-zero Slither exit.
+# ir_gate <slither status> <stderr file> <src contract names...>: names every IR failure in a src/ contract (an
+# inherited body is logged under the inheriting contract and the dependency's file) or a src/ source that is not
+# allow-listed, and fails on any, on an IR failure line it cannot parse, on an allow-listed one Slither did not
+# report, or on a non-zero Slither exit.
 ir_gate() {
-	local status=$1 log=$2 bad=0 fn src entry seen=""
+	local status=$1 log=$2 bad=0 fn src entry seen="" stripped parsed
+	shift 2
+	local project=" $* "
+	stripped=$(sed 's/\x1b\[[0-9;]*m//g' "$log")
+	# The line range is the last `#N[-M]` before the closing parenthesis: a `#` earlier belongs to the file name.
+	parsed=$(sed -nE \
+		-e 's/.*Impossible to generate IR for top level function ([^ ]+) \((.+)#[0-9]+(-[0-9]+)?\).*/\1 \2/p' \
+		-e 's/.*Impossible to generate IR for ([^ ]+) \((.+)#[0-9]+(-[0-9]+)?\).*/\1 \2/p' <<<"$stripped")
+	if (($(grep -c 'Impossible to generate IR for' <<<"$stripped" || true) != $(grep -c . <<<"$parsed" || true))); then
+		echo "slither: an IR failure line did not parse" >&2
+		bad=1
+	fi
 	while read -r fn src; do
-		[[ $fn =~ ^(TokenPortal|Permit2DepositRouter)\. || $src == src/* ]] || continue
+		[[ -n $fn ]] || continue
+		[[ $project == *" ${fn%%.*} "* || $src == src/* ]] || continue
 		if printf '%s\n' "${ALLOWED_IR_FAILURES[@]}" | grep -qxF "$fn $src"; then
 			seen+="$fn $src"$'\n'
 		else
 			echo "slither: could not analyse $fn ($src)" >&2
 			bad=1
 		fi
-	done < <(sed 's/\x1b\[[0-9;]*m//g' "$log" | sed -nE \
-		-e 's/.*Impossible to generate IR for top level function ([^ ]+) \(([^#)]+)(#[^)]*)?\).*/\1 \2/p' \
-		-e 's/.*Impossible to generate IR for ([^ ]+) \(([^#)]+)(#[^)]*)?\).*/\1 \2/p')
+	done <<<"$parsed"
 	# An entry no longer reported is stale, or the log format changed and this filter now matches nothing.
 	for entry in "${ALLOWED_IR_FAILURES[@]}"; do
 		if ! grep -qxF "$entry" <<<"$seen"; then
@@ -50,7 +62,7 @@ self_test() {
 	check() {
 		printf '%b\n' "$3" >"$log"
 		local got=fail
-		if ir_gate "$2" "$log" 2>/dev/null; then got=pass; fi
+		if ir_gate "$2" "$log" TokenPortal Permit2DepositRouter Wrapper 2>/dev/null; then got=pass; fi
 		[[ $got == "$1" ]] || {
 			echo "slither self-test: expected $1, got $got for: $3" >&2
 			exit 1
@@ -67,6 +79,9 @@ self_test() {
 	check fail 0 "$allowed\n\x1b[91m$ir TokenPortal.deposit (src/TokenPortal.sol#1-2):\x1b[0m"
 	check fail 0 "$allowed\n$ir top level function helper (src/Helpers.sol#1-2):"
 	check fail 0 "$allowed\n$ir Wrapper.f (src/Wrapper.sol#3-4):\n x"
+	check fail 0 "$allowed\n$ir Wrapper._EIP712Name ($OZ_EIP712#1-2):"
+	check fail 0 "$allowed\n$ir TokenPortal._EIP712Name ($OZ_EIP712#Shadow.sol#3-4):"
+	check fail 0 "$allowed\n$ir TokenPortal.deposit:"
 	echo "slither self-test: $n cases"
 }
 
@@ -82,4 +97,10 @@ status=0
 slither . --config-file slither.config.json --foundry-ignore-compile --foundry-out-directory "$dir/out" --fail-pedantic \
 	2>"$dir/stderr" || status=$?
 cat "$dir/stderr" >&2
-ir_gate "$status" "$dir/stderr"
+mapfile -t contracts < <(grep -rhoE --include='*.sol' \
+	'^[[:space:]]*(abstract[[:space:]]+)?(contract|library|interface)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' src | awk '{print $NF}')
+((${#contracts[@]})) || {
+	echo "slither: found no contract declared under src/" >&2
+	exit 1
+}
+ir_gate "$status" "$dir/stderr" "${contracts[@]}"
