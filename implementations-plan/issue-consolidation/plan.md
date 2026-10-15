@@ -11,6 +11,14 @@ trunk: dev
 base: 6f7f1a1
 ---
 
+## Outcome
+
+- **Date**: 2026-10-15. **Status**: completed.
+- **Shipped** in #103: the eight documentation issues (#55, #60, #64, #65, #66, #67, #80, #85), the #64 stderr warning and the #67 Presto hint sentence with a test each, and the retired Permit2-approval follow-up (#75 decided).
+- **Dropped, by the director's scope change**: folding the enhancement issues into `follow-ups.md` (they stay open) and any file change for #76 (closed by the director). Not taken, as optional in their issues: the Noir zero-nonce refusal (#55), a stricter `set_merchant_delay` (#64), the `presto-banners` copy (#67). #65's side remark on the commitment unshield was left out: a direct caller never learns that commitment.
+- **Known limits**: none. **Open items**: none. **Lessons promoted**: none (nothing generalizable beyond this run; `lessons.md` is at its budget).
+- This plan's seeds were never issued; nothing here is a live instruction.
+
 # Fix the eight documentation issues
 
 ## Outcome & Quality Bar
