@@ -21,6 +21,7 @@ import {
 	openRequest,
 	payReplacingStale,
 	payRequest,
+	randomSecret,
 	reconcileDeposit,
 	syncMerchantList,
 	TOKEN_REFUSALS,
@@ -329,7 +330,7 @@ async function request(ctx: LiveCtx, d: ValidDraft): Promise<Outcome> {
  * request, so paying a user pays into one made without the merchant list, which the rules refuse.
  */
 async function openFor(ctx: LiveCtx, d: ValidDraft, key: string, opts: ListOptions): Promise<Fr> {
-	if (!isMerchant(d.to)) return Fr.random()
+	if (!isMerchant(d.to)) return randomSecret()
 	const merchant = address(ctx, d.to)
 	const intent = { from: merchant, to: merchant, completer: address(ctx, d.actor) }
 	const { commitment } = await openRequest(ctx.demo.wallet, ctx.demo.node, token(ctx), intent, opts)
