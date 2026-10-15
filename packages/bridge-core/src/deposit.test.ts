@@ -22,9 +22,11 @@ import {
 } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { PERMIT2_DEPOSIT_ROUTER_ABI } from "./abi"
+import { MessageNotConsumableError, withRebuiltTicket } from "./claim"
 import { claimSecretHash } from "./claim-secret"
 import {
 	assertPublicRecipient,
+	type ClaimTicket,
 	confirmDeposit,
 	type DepositDraft,
 	KeyHolderRequiredError,
@@ -57,7 +59,10 @@ beforeAll(async () => {
 	recipient = await AztecAddress.random()
 })
 
-function depositLog(d: DepositDraft, o: { address?: Address; blockNumber?: bigint; depositor?: Address; index?: bigint } = {}): Log {
+function depositLog(
+	d: DepositDraft,
+	o: { address?: Address; blockNumber?: bigint; depositor?: Address; index?: bigint; key?: Hex } = {},
+): Log {
 	const topics = encodeEventTopics({
 		abi: PERMIT2_DEPOSIT_ROUTER_ABI,
 		eventName: "Deposit",
@@ -65,7 +70,7 @@ function depositLog(d: DepositDraft, o: { address?: Address; blockNumber?: bigin
 	})
 	const data = encodeAbiParameters(
 		[{ type: "bytes32" }, { type: "uint256" }, { type: "uint256" }, { type: "bytes32" }, { type: "bool" }],
-		[pad("0x4e7"), o.index ?? 42n, d.intent.amount, d.witness.secretHash, d.witness.isPrivate],
+		[o.key ?? pad("0x4e7"), o.index ?? 42n, d.intent.amount, d.witness.secretHash, d.witness.isPrivate],
 	)
 	return {
 		address: o.address ?? M.l1.router,
@@ -485,6 +490,83 @@ describe("reconcileDeposit", () => {
 	it("a draft never submitted is not-deposited without touching the chain", async () => {
 		const d = await draft()
 		expect(await reconcileDeposit(d, chain().l1, M)).toBe("not-deposited")
+	})
+})
+
+describe("withRebuiltTicket", () => {
+	const MISSING = [new MessageNotConsumableError(), new Error("Tried to consume nonexistent L1-to-L2 message")]
+
+	/** A ticket from the first receipt (leaf 42), then L1 as `reorg` leaves it; `use` fails on the leaves in `fails`. */
+	async function claimAfter(reorg: (s: ReturnType<typeof chain>["s"], d: DepositDraft) => void, fails: bigint[], first: Error) {
+		const { s, l1 } = chain()
+		const d = await draft()
+		await submitDeposit(d, l1, M, LIVE)
+		const t = ticketFromReceiptLogs(d, [depositLog(d)], M)
+		reorg(s, d)
+		const events: string[] = []
+		const keep = (r: ClaimTicket) => events.push(`keep ${r.leafIndex} ${r.messageHash}`)
+		const use = async (r: ClaimTicket) => {
+			events.push(`use ${r.leafIndex}`)
+			if (fails.includes(r.leafIndex)) throw first
+			return "claimed"
+		}
+		const outcome = await withRebuiltTicket(t, l1, M, keep, use).catch((e: unknown) => e)
+		return { outcome, events }
+	}
+	const remined = (o: { index?: bigint; key?: Hex }) => (s: ReturnType<typeof chain>["s"], d: DepositDraft) =>
+		s.receipts.set(TX, { status: "success", logs: [depositLog(d, o)] })
+
+	it("on a missing message, claims once more with the ticket L1 shows now, stored first, when its leaf or key moved", async () => {
+		for (const first of MISSING) {
+			expect(await claimAfter(remined({ index: 43n }), [42n], first)).toEqual({
+				outcome: "claimed",
+				events: ["use 42", `keep 43 ${pad("0x4e7")}`, "use 43"],
+			})
+			const key = pad("0x4e8")
+			expect((await claimAfter(remined({ key }), [42n], first)).events).toEqual(["use 42", `keep 42 ${key}`, "use 42"])
+		}
+	})
+
+	it("throws the first failure when L1 shows the same ticket, none yet, or none at all, and never claims a third time", async () => {
+		const [first] = MISSING
+		const stays = [
+			["the same leaf and key", remined({})],
+			["pending", (s: ReturnType<typeof chain>["s"]) => s.receipts.delete(TX)],
+			[
+				"not-deposited",
+				(s: ReturnType<typeof chain>["s"], d: DepositDraft) => {
+					s.receipts.delete(TX)
+					s.finalized = { number: 140n, timestamp: d.typedData.message.deadline + 1n }
+				},
+			],
+		] as const
+		for (const [why, reorg] of stays)
+			expect(await claimAfter(reorg, [42n], first as Error), why).toEqual({ outcome: first, events: ["use 42"] })
+		const again = await claimAfter(remined({ index: 43n }), [42n, 43n], first as Error)
+		expect(again.events).toEqual(["use 42", `keep 43 ${pad("0x4e7")}`, "use 43"])
+		expect(again.outcome).toBe(first)
+	})
+
+	it("claims nothing more when storing the rebuilt ticket fails, and reads L1 on no other failure", async () => {
+		const { s, l1 } = chain()
+		const d = await draft()
+		await submitDeposit(d, l1, M, LIVE)
+		const t = ticketFromReceiptLogs(d, [depositLog(d)], M)
+		s.receipts.set(TX, { status: "success", logs: [depositLog(d, { index: 43n })] })
+		const uses: bigint[] = []
+		const failing = async (r: ClaimTicket) => {
+			uses.push(r.leafIndex)
+			throw new MessageNotConsumableError()
+		}
+		const full = () => {
+			throw new Error("storage full")
+		}
+		await expect(withRebuiltTicket(t, l1, M, full, failing)).rejects.toThrow("storage full")
+		expect(uses).toEqual([42n])
+		// A reader on another chain throws from any reconcile, so the plain failure surfacing proves none ran.
+		s.readerChainId = 1
+		const other = new Error("Balance too low")
+		await expect(withRebuiltTicket(t, l1, M, full, () => Promise.reject(other))).rejects.toBe(other)
 	})
 })
 
