@@ -47,6 +47,9 @@ contract SepoliaForkTest is Test {
             return;
         }
         vm.createSelectFork(rpc);
+        // A load-balanced public endpoint can serve reads from a backend a block or two behind its head, so the fork
+        // pins a block every backend holds.
+        vm.rollFork(block.number - 8);
         user = vm.addr(userPk);
         require(user.code.length == 0, "signer must be a plain EOA on this fork");
 
